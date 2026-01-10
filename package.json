@@ -9,9 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "autoprefixer": "^10.4.23",
+    "gray-matter": "^4.0.3",
+    "lucide-react": "^0.562.0",
+    "mcp-handler": "^1.0.7",
     "next": "16.1.1",
+    "octokit": "^5.0.5",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

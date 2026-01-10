@@ -1,26 +1,180 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =============================================================================
+   QUOTH DESIGN SYSTEM - Tailwind v4 Theme Configuration
+   Based on Quoth-branding.md
+   ============================================================================= */
+
+@theme {
+  /* Backgrounds (The Void) */
+  --color-obsidian: #050505;
+  --color-charcoal: #121212;
+  --color-graphite: #262626;
+
+  /* Accents (The Magic) - Violet spectrum */
+  --color-violet-spectral: #8B5CF6;
+  --color-violet-glow: #7C3AED;
+  --color-violet-ghost: #DDD6FE;
+
+  /* Semantics (The Truth) */
+  --color-emerald-muted: #10B981;
+  --color-amber-warning: #F59E0B;
+  --color-crimson-void: #991B1B;
+
+  /* Font families */
+  --font-serif: var(--font-cinzel), "Cinzel", serif;
+  --font-sans: var(--font-geist-sans), "Geist Sans", sans-serif;
+  --font-mono: var(--font-geist-mono), "Geist Mono", monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* =============================================================================
+   BASE STYLES
+   ============================================================================= */
+
+body {
+  background-color: #050505;
+  color: #DDD6FE;
+  font-family: var(--font-geist-sans), sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8B5CF6;
+}
+
+/* =============================================================================
+   GLASSMORPHISM UTILITIES
+   ============================================================================= */
+
+.glass-panel {
+  background: rgba(18, 18, 18, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.glass-btn:hover {
+  border-color: #8B5CF6;
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);
+}
+
+/* =============================================================================
+   TEXT EFFECTS
+   ============================================================================= */
+
+.text-glow {
+  text-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+}
+
+/* Code Drift Reveal Effect - "Forensic UV Light" */
+.drift-highlight {
+  background: rgba(139, 92, 246, 0.15);
+  border-bottom: 1px dashed #8B5CF6;
+  color: white;
+  text-shadow: 0 0 8px rgba(139, 92, 246, 0.8);
+  position: relative;
+}
+
+/* =============================================================================
+   ANIMATIONS
+   ============================================================================= */
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
+}
+
+/* Fade In Animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+/* Page-level fade in */
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-page-fade-in {
+  animation: page-fade-in 0.8s ease-out forwards;
+}
+
+.animate-fade-in-delay-1 {
+  animation: fade-in 0.6s ease-out 0.1s forwards;
+  opacity: 0;
+}
+
+.animate-fade-in-delay-2 {
+  animation: fade-in 0.6s ease-out 0.2s forwards;
+  opacity: 0;
+}
+
+.animate-fade-in-delay-3 {
+  animation: fade-in 0.6s ease-out 0.3s forwards;
+  opacity: 0;
+}
+
+/* =============================================================================
+   CARD EFFECTS - Violet Glow & Hover
+   ============================================================================= */
+
+.card-glow {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.1);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-glow:hover {
+  transform: translateY(-8px) scale(1.02);
+  box-shadow:
+    0 0 30px rgba(139, 92, 246, 0.3),
+    0 0 60px rgba(139, 92, 246, 0.15),
+    0 20px 40px rgba(0, 0, 0, 0.3);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+/* Icon glow on card hover */
+.card-glow:hover .icon-container {
+  background: rgba(139, 92, 246, 0.2);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
+.card-glow:hover .icon-container svg {
+  color: #8B5CF6;
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.6));
 }
