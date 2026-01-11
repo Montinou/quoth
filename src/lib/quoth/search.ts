@@ -1,14 +1,12 @@
 /**
  * Quoth Search Module
  * Vector-based semantic search using Supabase + Gemini embeddings
+ * Enforces multi-tenant isolation via projectId parameter
  */
 
-import { supabase, isSupabaseConfigured, getProjectBySlug, type MatchResult } from '../supabase';
+import { supabase, isSupabaseConfigured, type MatchResult } from '../supabase';
 import { generateEmbedding, isAIConfigured } from '../ai';
 import type { DocumentReference, QuothDocument } from './types';
-
-// Default project slug (can be overridden via env)
-const DEFAULT_PROJECT_SLUG = process.env.QUOTH_PROJECT_SLUG || 'quoth-knowledge-base';
 
 // Default search configuration
 const SEARCH_CONFIG = {
@@ -19,10 +17,13 @@ const SEARCH_CONFIG = {
 /**
  * Search documents using vector similarity
  * Converts query to embedding, then uses Supabase RPC for cosine similarity search
+ *
+ * @param query - Natural language search query
+ * @param projectId - UUID of the project to search within (enforces multi-tenant isolation)
  */
 export async function searchDocuments(
   query: string,
-  projectSlug: string = DEFAULT_PROJECT_SLUG
+  projectId: string
 ): Promise<DocumentReference[]> {
   // Validate configuration
   if (!isSupabaseConfigured()) {
@@ -33,21 +34,21 @@ export async function searchDocuments(
     throw new Error('Gemini AI not configured. Set GEMINIAI_API_KEY or GOOGLE_API_KEY');
   }
 
-  // Get project
-  const project = await getProjectBySlug(projectSlug);
-  if (!project) {
-    throw new Error(`Project "${projectSlug}" not found. Run the indexing script first.`);
+  // Validate projectId
+  if (!projectId || typeof projectId !== 'string') {
+    throw new Error('Invalid projectId provided');
   }
 
   // Generate embedding for the search query
   const queryEmbedding = await generateEmbedding(query);
 
   // Call Supabase RPC function for vector similarity search
+  // projectId enforces multi-tenant isolation at the database level
   const { data, error } = await supabase.rpc('match_documents', {
     query_embedding: queryEmbedding,
     match_threshold: SEARCH_CONFIG.matchThreshold,
     match_count: SEARCH_CONFIG.matchCount,
-    filter_project_id: project.id,
+    filter_project_id: projectId,
   });
 
   if (error) {
@@ -69,25 +70,29 @@ export async function searchDocuments(
 
 /**
  * Read a full document by file path or document ID
+ *
+ * @param docId - Document identifier (file_path or title)
+ * @param projectId - UUID of the project (enforces multi-tenant isolation)
  */
 export async function readDocument(
   docId: string,
-  projectSlug: string = DEFAULT_PROJECT_SLUG
+  projectId: string
 ): Promise<QuothDocument | null> {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured');
   }
 
-  const project = await getProjectBySlug(projectSlug);
-  if (!project) {
-    return null;
+  // Validate projectId
+  if (!projectId || typeof projectId !== 'string') {
+    throw new Error('Invalid projectId provided');
   }
 
   // Try to find by file_path or title
+  // projectId ensures we only access documents from the authenticated project
   const { data, error } = await supabase
     .from('documents')
     .select('*')
-    .eq('project_id', project.id)
+    .eq('project_id', projectId)
     .or(`file_path.eq.${docId},title.eq.${docId}`)
     .single();
 
@@ -96,7 +101,7 @@ export async function readDocument(
     const { data: partialMatch } = await supabase
       .from('documents')
       .select('*')
-      .eq('project_id', project.id)
+      .eq('project_id', projectId)
       .ilike('title', `%${docId}%`)
       .limit(1)
       .single();
@@ -113,23 +118,25 @@ export async function readDocument(
 
 /**
  * Get all documents in the project
+ *
+ * @param projectId - UUID of the project (enforces multi-tenant isolation)
  */
 export async function getAllDocuments(
-  projectSlug: string = DEFAULT_PROJECT_SLUG
+  projectId: string
 ): Promise<QuothDocument[]> {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured');
   }
 
-  const project = await getProjectBySlug(projectSlug);
-  if (!project) {
-    return [];
+  // Validate projectId
+  if (!projectId || typeof projectId !== 'string') {
+    throw new Error('Invalid projectId provided');
   }
 
   const { data, error } = await supabase
     .from('documents')
     .select('*')
-    .eq('project_id', project.id)
+    .eq('project_id', projectId)
     .order('file_path');
 
   if (error || !data) {
@@ -142,9 +149,11 @@ export async function getAllDocuments(
 /**
  * Build search index - returns document list for compatibility
  * In the new architecture, index is pre-built in Supabase
+ *
+ * @param projectId - UUID of the project (enforces multi-tenant isolation)
  */
-export async function buildSearchIndex(projectSlug: string = DEFAULT_PROJECT_SLUG) {
-  const docs = await getAllDocuments(projectSlug);
+export async function buildSearchIndex(projectId: string) {
+  const docs = await getAllDocuments(projectId);
 
   return {
     documents: docs.map((doc) => ({

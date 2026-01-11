@@ -94,7 +94,160 @@ Quoth uses Supabase + Gemini for semantic search:
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 GEMINIAI_API_KEY=AIza...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+JWT_SECRET=your-secret-here-32-bytes
 ```
+
+## Authentication & Multi-Tenancy
+
+Quoth implements comprehensive multi-tenant authentication using Supabase Auth + RLS + JWT tokens:
+
+### Architecture Overview
+
+**Authentication Layer:**
+- Email/password authentication via Supabase Auth
+- Cookie-based sessions using `@supabase/ssr`
+- JWT tokens for MCP server authentication
+- Auto-created default project on user signup
+
+**Multi-Tenancy:**
+- Project-based isolation with Row Level Security (RLS)
+- Role-based access control: `admin`, `editor`, `viewer`
+- Each user auto-gets `{username}-knowledge-base` project
+- Existing `quoth-knowledge-base` remains public demo
+
+### Database Schema
+
+**Core Tables:**
+```sql
+profiles              -- User metadata (synced with auth.users)
+  ├─ id (uuid, FK to auth.users)
+  ├─ email, username, full_name
+  └─ default_project_id
+
+project_members       -- User-project-role relationships
+  ├─ project_id (FK to projects)
+  ├─ user_id (FK to profiles)
+  ├─ role (admin|editor|viewer)
+  └─ UNIQUE(project_id, user_id)
+
+project_api_keys      -- JWT tokens for MCP
+  ├─ id (jti from JWT)
+  ├─ project_id
+  ├─ key_hash (SHA256 of token)
+  ├─ key_prefix (first 12 chars)
+  ├─ label, expires_at
+  └─ last_used_at
+
+projects             -- Extended with multi-tenancy
+  ├─ is_public (boolean)
+  └─ owner_id (FK to profiles)
+```
+
+**RLS Policies:**
+- All tables have RLS enabled
+- Users see public projects + their own projects
+- Helper functions: `has_project_access()`, `is_project_admin()`, `can_edit_project()`
+- Auto-create profile + project on signup via trigger
+
+### MCP Authentication Flow
+
+1. **Generate Token:**
+   - User visits [/dashboard/api-keys](https://quoth.ai-innovation.site/dashboard/api-keys)
+   - Clicks "Generate New Key"
+   - System creates JWT token with HS256 algorithm
+   - Token payload: `{ project_id, user_id, role, label }`
+   - Token stored as SHA256 hash in `project_api_keys`
+
+2. **Use Token:**
+   - Add to Claude Desktop config:
+   ```json
+   {
+     "mcpServers": {
+       "quoth": {
+         "url": "https://quoth.ai-innovation.site/api/mcp",
+         "headers": {
+           "Authorization": "Bearer YOUR_TOKEN"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Verify Token:**
+   - `createAuthenticatedMcpHandler` wraps MCP endpoint
+   - Extracts `Authorization: Bearer <token>` header
+   - Verifies JWT using `jose` library
+   - Extracts `authContext` from payload
+   - Passes context to MCP tools
+
+4. **Enforce Isolation:**
+   - All MCP tools receive `authContext.project_id`
+   - `searchDocuments(query, projectId)` filters by project
+   - `readDocument(docId, projectId)` filters by project
+   - `quoth_propose_update` checks role (`viewer` cannot propose)
+
+### Role-Based Access Control
+
+**Viewer:**
+- Can search and read documents
+- Cannot propose updates
+- Read-only access
+
+**Editor:**
+- All viewer permissions
+- Can propose documentation updates via MCP
+- Proposals require admin approval
+
+**Admin:**
+- All editor permissions
+- Can approve/reject proposals
+- Can generate API keys
+- Full project management
+
+### API Routes Protection
+
+**Dashboard Routes:**
+- `/dashboard` - Protected by middleware, shows user's projects
+- `/dashboard/api-keys` - Generate and manage MCP tokens
+- Middleware redirects unauthenticated users to `/auth/login`
+
+**Auth Routes:**
+- `/auth/login` - Email/password login with redirect support
+- `/auth/signup` - Create account + auto-create project
+- `/auth/verify-email` - Email verification instructions
+
+**Proposals API:**
+- `GET /api/proposals` - List proposals (filtered by user's projects)
+- `GET /api/proposals/:id` - Get proposal (verify project access)
+- `POST /api/proposals/:id/approve` - Approve (admin only)
+- `POST /api/proposals/:id/reject` - Reject (admin only)
+
+**MCP Token API:**
+- `POST /api/mcp-token/generate` - Generate JWT (editor/admin only)
+- `GET /api/mcp-token/list` - List user's API keys
+
+### Security Features
+
+**Token Security:**
+- 90-day expiration
+- SHA256 hashed storage
+- Only prefix visible in UI
+- Rate limiting on generation
+- Revocation via database deletion
+
+**Session Security:**
+- HTTP-only cookies
+- Secure flag in production
+- SameSite=Lax protection
+- Automatic refresh
+- Cleanup on logout
+
+**RLS Enforcement:**
+- Database-level isolation
+- Cannot bypass via direct queries
+- Supabase Service Role for MCP server
+- User sessions for web UI
 
 ## Key Dependencies
 

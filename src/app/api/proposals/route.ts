@@ -1,22 +1,72 @@
 /**
  * Proposals API - List Endpoint
  * GET /api/proposals - List all proposals with optional filters
+ * Requires authentication - returns only proposals from user's projects
  */
 
 import { NextRequest } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createServerSupabaseClient();
+
+    // 1. Authenticate user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 2. Get user's projects
+    const { data: projects, error: projectsError } = await supabase
+      .from('project_members')
+      .select('project_id')
+      .eq('user_id', user.id);
+
+    if (projectsError) {
+      console.error('Error fetching user projects:', projectsError);
+      return Response.json(
+        { error: 'Failed to fetch user projects' },
+        { status: 500 }
+      );
+    }
+
+    const projectIds = projects?.map((p) => p.project_id) || [];
+
+    if (projectIds.length === 0) {
+      // User has no projects, return empty list
+      return Response.json({ proposals: [] });
+    }
+
+    // 3. Get query parameters
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
-    const limit = parseInt(searchParams.get('limit') || '50');
 
-    // Use RPC function for efficient querying with JOINs
-    const { data, error } = await supabase.rpc('get_proposals_with_details', {
-      filter_status: status,
-      limit_count: limit
-    });
+    // 4. Fetch proposals filtered by user's projects
+    // RLS policies will automatically filter to user's accessible projects
+    let query = supabase
+      .from('document_proposals')
+      .select(`
+        *,
+        documents (
+          id,
+          title,
+          file_path,
+          project_id
+        )
+      `)
+      .in('project_id', projectIds)
+      .order('created_at', { ascending: false });
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error fetching proposals:', error);

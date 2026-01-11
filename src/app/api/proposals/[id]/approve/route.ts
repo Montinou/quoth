@@ -1,15 +1,16 @@
 /**
  * Proposals API - Approve Endpoint
  * POST /api/proposals/:id/approve - Approve proposal and commit to GitHub
+ * Requires authentication and admin role
  */
 
 import { z } from 'zod';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabase } from '@/lib/supabase';
 import { commitProposalToGitHub } from '@/lib/github';
 import { sendApprovalNotification } from '@/lib/email';
 
 const ApproveSchema = z.object({
-  reviewerEmail: z.string().email('Invalid email address'),
   notes: z.string().optional()
 });
 
@@ -18,7 +19,30 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    // 1. Validate request body
+    const authSupabase = await createServerSupabaseClient();
+
+    // 1. Authenticate user
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError || !user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 2. Get user profile for reviewer email
+    const { data: profile, error: profileError } = await authSupabase
+      .from('profiles')
+      .select('email')
+      .eq('id', user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return Response.json({ error: 'User profile not found' }, { status: 404 });
+    }
+
+    // 3. Validate request body
     const body = await request.json();
     const validation = ApproveSchema.safeParse(body);
 
@@ -29,9 +53,7 @@ export async function POST(
       );
     }
 
-    const { reviewerEmail } = validation.data;
-
-    // 2. Fetch proposal
+    // 4. Fetch proposal
     const { data: proposal, error: fetchError } = await supabase
       .from('document_proposals')
       .select('*')
@@ -42,7 +64,29 @@ export async function POST(
       return Response.json({ error: 'Proposal not found' }, { status: 404 });
     }
 
-    // 3. Validate status
+    // 5. Verify user is admin of the proposal's project
+    const { data: membership, error: membershipError } = await authSupabase
+      .from('project_members')
+      .select('role')
+      .eq('project_id', proposal.project_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (membershipError || !membership) {
+      return Response.json(
+        { error: 'Access denied. You are not a member of this project.' },
+        { status: 403 }
+      );
+    }
+
+    if (membership.role !== 'admin') {
+      return Response.json(
+        { error: 'Only admins can approve proposals.' },
+        { status: 403 }
+      );
+    }
+
+    // 6. Validate status
     if (proposal.status !== 'pending') {
       return Response.json(
         { error: `Cannot approve proposal with status: ${proposal.status}` },
@@ -50,13 +94,13 @@ export async function POST(
       );
     }
 
-    // 4. Update status to 'approved'
+    // 7. Update status to 'approved'
     const { error: updateError } = await supabase
       .from('document_proposals')
       .update({
         status: 'approved',
         reviewed_at: new Date().toISOString(),
-        reviewed_by: reviewerEmail
+        reviewed_by: profile.email
       })
       .eq('id', params.id);
 
@@ -64,11 +108,11 @@ export async function POST(
       throw new Error(`Failed to update proposal: ${updateError.message}`);
     }
 
-    // 5. Commit to GitHub
+    // 8. Commit to GitHub
     console.log(`Committing proposal ${params.id} to GitHub...`);
     const commitResult = await commitProposalToGitHub(proposal);
 
-    // 6. Update with commit info or error
+    // 9. Update with commit info or error
     if (commitResult.success) {
       await supabase
         .from('document_proposals')
@@ -80,9 +124,9 @@ export async function POST(
         })
         .eq('id', params.id);
 
-      // 7. Send email notification (fire and forget)
+      // 10. Send email notification (fire and forget)
       sendApprovalNotification(
-        { ...proposal, reviewed_by: reviewerEmail },
+        { ...proposal, reviewed_by: profile.email },
         commitResult
       ).catch((err) => console.error('Email notification failed:', err));
 

@@ -1,14 +1,15 @@
 /**
  * Proposals API - Reject Endpoint
  * POST /api/proposals/:id/reject - Reject proposal with reason
+ * Requires authentication and admin role
  */
 
 import { z } from 'zod';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabase } from '@/lib/supabase';
 import { sendRejectionNotification } from '@/lib/email';
 
 const RejectSchema = z.object({
-  reviewerEmail: z.string().email('Invalid email address'),
   reason: z.string().min(10, 'Rejection reason must be at least 10 characters')
 });
 
@@ -17,7 +18,30 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    // 1. Validate request body
+    const authSupabase = await createServerSupabaseClient();
+
+    // 1. Authenticate user
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError || !user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 2. Get user profile for reviewer email
+    const { data: profile, error: profileError } = await authSupabase
+      .from('profiles')
+      .select('email')
+      .eq('id', user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return Response.json({ error: 'User profile not found' }, { status: 404 });
+    }
+
+    // 3. Validate request body
     const body = await request.json();
     const validation = RejectSchema.safeParse(body);
 
@@ -28,9 +52,9 @@ export async function POST(
       );
     }
 
-    const { reviewerEmail, reason } = validation.data;
+    const { reason } = validation.data;
 
-    // 2. Fetch proposal
+    // 4. Fetch proposal
     const { data: proposal, error: fetchError } = await supabase
       .from('document_proposals')
       .select('*')
@@ -41,7 +65,29 @@ export async function POST(
       return Response.json({ error: 'Proposal not found' }, { status: 404 });
     }
 
-    // 3. Validate status
+    // 5. Verify user is admin of the proposal's project
+    const { data: membership, error: membershipError } = await authSupabase
+      .from('project_members')
+      .select('role')
+      .eq('project_id', proposal.project_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (membershipError || !membership) {
+      return Response.json(
+        { error: 'Access denied. You are not a member of this project.' },
+        { status: 403 }
+      );
+    }
+
+    if (membership.role !== 'admin') {
+      return Response.json(
+        { error: 'Only admins can reject proposals.' },
+        { status: 403 }
+      );
+    }
+
+    // 6. Validate status
     if (proposal.status !== 'pending') {
       return Response.json(
         { error: `Cannot reject proposal with status: ${proposal.status}` },
@@ -49,14 +95,14 @@ export async function POST(
       );
     }
 
-    // 4. Update status to 'rejected'
+    // 7. Update status to 'rejected'
     const { error: updateError } = await supabase
       .from('document_proposals')
       .update({
         status: 'rejected',
         rejection_reason: reason,
         reviewed_at: new Date().toISOString(),
-        reviewed_by: reviewerEmail
+        reviewed_by: profile.email
       })
       .eq('id', params.id);
 
@@ -64,9 +110,9 @@ export async function POST(
       throw new Error(`Failed to update proposal: ${updateError.message}`);
     }
 
-    // 5. Send email notification (fire and forget)
+    // 8. Send email notification (fire and forget)
     sendRejectionNotification(
-      { ...proposal, reviewed_by: reviewerEmail },
+      { ...proposal, reviewed_by: profile.email },
       reason
     ).catch((err) => console.error('Email notification failed:', err));
 

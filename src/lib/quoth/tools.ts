@@ -2,27 +2,29 @@
  * Quoth MCP Tools
  * Tool implementations for the Quoth MCP Server
  * Uses Supabase + Gemini for semantic vector search
+ * Enforces multi-tenant isolation via authContext
  */
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AuthContext } from '../auth/mcp-auth';
 import {
   searchDocuments,
   readDocument,
   buildSearchIndex,
 } from './search';
-import { supabase, getProjectBySlug } from '../supabase';
-
-// Default project slug (can be overridden via env)
-const DEFAULT_PROJECT_SLUG = process.env.QUOTH_PROJECT_SLUG || 'quoth-knowledge-base';
+import { supabase } from '../supabase';
 
 /**
- * Register all Quoth tools on an MCP server
- * Note: knowledgeBasePath is kept for API compatibility but no longer used
+ * Register all Quoth tools on an MCP server with authentication context
+ * Tools are filtered by authContext.project_id for multi-tenant isolation
+ *
+ * @param server - MCP server instance
+ * @param authContext - Authentication context containing project_id, user_id, and role
  */
 export function registerQuothTools(
   server: McpServer,
-  _knowledgeBasePath?: string // Deprecated - using Supabase now
+  authContext: AuthContext
 ) {
   // Tool 1: quoth_search_index (Semantic Vector Search)
   server.registerTool(
@@ -37,7 +39,8 @@ export function registerQuothTools(
     },
     async ({ query }) => {
       try {
-        const results = await searchDocuments(query);
+        // Use authContext.project_id for multi-tenant isolation
+        const results = await searchDocuments(query, authContext.project_id);
 
         if (results.length === 0) {
           return {
@@ -97,11 +100,12 @@ export function registerQuothTools(
     },
     async ({ doc_id }) => {
       try {
-        const doc = await readDocument(doc_id);
+        // Use authContext.project_id for multi-tenant isolation
+        const doc = await readDocument(doc_id, authContext.project_id);
 
         if (!doc) {
-          // Try to find similar documents
-          const index = await buildSearchIndex();
+          // Try to find similar documents within the user's project
+          const index = await buildSearchIndex(authContext.project_id);
           const suggestions = index.documents
             .filter(d =>
               d.id.toLowerCase().includes(doc_id.toLowerCase()) ||
@@ -167,24 +171,30 @@ export function registerQuothTools(
     },
     async ({ doc_id, new_content, evidence_snippet, reasoning }) => {
       try {
-        // 1. Verify document exists
-        const existingDoc = await readDocument(doc_id);
+        // 1. Check role-based access control
+        if (authContext.role === 'viewer') {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `❌ Permission Denied: Viewers cannot propose documentation updates.\n\nOnly users with 'editor' or 'admin' roles can submit proposals. Contact your project admin to upgrade your role.`,
+              },
+            ],
+          };
+        }
+
+        // 2. Verify document exists in user's project
+        const existingDoc = await readDocument(doc_id, authContext.project_id);
 
         if (!existingDoc) {
           return {
             content: [
               {
                 type: 'text' as const,
-                text: `Cannot propose update: Document "${doc_id}" not found. Use \`quoth_search_index\` to verify the document exists.`,
+                text: `Cannot propose update: Document "${doc_id}" not found in your project. Use \`quoth_search_index\` to verify the document exists.`,
               },
             ],
           };
-        }
-
-        // 2. Get project
-        const project = await getProjectBySlug(DEFAULT_PROJECT_SLUG);
-        if (!project) {
-          throw new Error(`Project "${DEFAULT_PROJECT_SLUG}" not found. Ensure the knowledge base is indexed.`);
         }
 
         // 3. Insert proposal into Supabase
@@ -192,7 +202,7 @@ export function registerQuothTools(
           .from('document_proposals')
           .insert({
             document_id: existingDoc.id,
-            project_id: project.id,
+            project_id: authContext.project_id, // Use authenticated project ID
             file_path: existingDoc.path,
             original_content: existingDoc.content,
             proposed_content: new_content,
