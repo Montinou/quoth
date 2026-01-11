@@ -75,14 +75,31 @@ npx tsx scripts/index-knowledge-base.ts
 
 ## Architecture
 
+Quoth uses the **Genesis Strategy** pattern:
+
+1. **Persona Injection**: The `quoth_genesis` tool delivers a system prompt
+2. **Local Analysis**: The AI client reads local files using its native capabilities
+3. **Direct Save**: Changes are saved directly to Supabase (or via proposal if configured)
+4. **Incremental Indexing**: Only changed chunks are re-embedded (token optimization)
+5. **Automatic Versioning**: Database triggers preserve history automatically
+
+### Key Differences from Previous Architecture
+
+- ❌ No GitHub integration - Supabase is the single source of truth
+- ❌ No GitHub webhooks - Direct writes to database
+- ✅ Configurable approval flow per project (`require_approval` flag)
+- ✅ Incremental re-indexing with chunk hashes (~90% token savings)
+- ✅ Automatic version history via database triggers
+
 ### MCP Server (src/lib/quoth/)
 
-The core MCP implementation exposes 3 tools and 2 prompts:
+The core MCP implementation exposes 4 tools and 2 prompts:
 
 **Tools:**
 - `quoth_search_index` - Semantic vector search using Gemini embeddings (768 dimensions)
 - `quoth_read_doc` - Retrieves full document content from Supabase
 - `quoth_propose_update` - Submits documentation update proposals with evidence
+- `quoth_genesis` - Injects Genesis Architect persona for codebase analysis
 
 **Prompts (Personas):**
 - `quoth_architect` - For code generation, enforces "Single Source of Truth" rules
