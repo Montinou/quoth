@@ -1,33 +1,43 @@
 /**
  * RFC 9728 Protected Resource Metadata Endpoint
  * 
- * Advertises OAuth 2.0 requirements for the MCP resource server.
- * MCP clients use this to discover the authorization server.
+ * Points MCP clients to OUR OAuth server (not Supabase directly).
  * 
  * @see https://datatracker.ietf.org/doc/html/rfc9728
- * @see https://modelcontextprotocol.io/specification/draft/basic/authorization
  */
 
-import { protectedResourceHandler, metadataCorsOptionsRequestHandler } from 'mcp-handler';
+import { NextResponse } from 'next/server';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
 
-// Authorization server URL (Supabase Auth)
-const AUTH_SERVER_URL = `${SUPABASE_URL}/auth/v1`;
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'max-age=3600',
+};
 
-// Create handler using mcp-handler's built-in function
-const handler = protectedResourceHandler({
-  authServerUrls: [AUTH_SERVER_URL],
-  resourceUrl: `${APP_URL}/api/mcp`,
-});
+export async function GET() {
+  const metadata = {
+    // The protected resource (MCP endpoint)
+    resource: `${APP_URL}/api/mcp`,
+    
+    // Point to OUR OAuth server (which proxies to Supabase)
+    authorization_servers: [APP_URL],
+    
+    // Scopes required for this resource
+    scopes_supported: ['mcp:read', 'mcp:write', 'mcp:admin'],
+  };
 
-const optionsHandler = metadataCorsOptionsRequestHandler();
-
-export async function GET(req: Request) {
-  return handler(req);
+  return NextResponse.json(metadata, {
+    headers: corsHeaders,
+  });
 }
 
 export async function OPTIONS() {
-  return optionsHandler();
+  return new Response(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
 }
