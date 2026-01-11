@@ -183,7 +183,18 @@ project_members       -- User-project-role relationships
   ├─ project_id (FK to projects)
   ├─ user_id (FK to profiles)
   ├─ role (admin|editor|viewer)
+  ├─ invited_by (FK to profiles)
   └─ UNIQUE(project_id, user_id)
+
+project_invitations   -- Pending team invitations
+  ├─ id (uuid)
+  ├─ project_id (FK to projects)
+  ├─ email (invited email address)
+  ├─ role (admin|editor|viewer)
+  ├─ token (unique secure token)
+  ├─ expires_at (7-day expiration)
+  ├─ invited_by (FK to profiles)
+  └─ UNIQUE(project_id, email)
 
 project_api_keys      -- JWT tokens for MCP
   ├─ id (jti from JWT)
@@ -267,6 +278,9 @@ quoth login
 - All editor permissions
 - Can approve/reject proposals
 - Can generate API keys
+- Can invite and manage team members
+- Can change member roles
+- Can remove team members
 - Full project management
 
 ### API Routes Protection
@@ -274,6 +288,8 @@ quoth login
 **Dashboard Routes:**
 - `/dashboard` - Protected by middleware, shows user's projects
 - `/dashboard/api-keys` - Generate and manage MCP tokens
+- `/dashboard/[projectSlug]/team` - Team management page (view/manage members)
+- `/invitations/accept` - Accept team invitation via token
 - Middleware redirects unauthenticated users to `/auth/login`
 
 **Auth Routes:**
@@ -287,6 +303,17 @@ quoth login
 - `GET /api/proposals/:id` - Get proposal (verify project access)
 - `POST /api/proposals/:id/approve` - Approve (admin only)
 - `POST /api/proposals/:id/reject` - Reject (admin only)
+
+**Team Management API:**
+- `GET /api/projects/by-slug/:slug` - Get project by slug
+- `GET /api/projects/:projectId/team` - List team members
+- `PATCH /api/projects/:projectId/team/:memberId` - Update member role (admin only)
+- `DELETE /api/projects/:projectId/team/:memberId` - Remove member (admin or self)
+- `GET /api/projects/:projectId/invitations` - List pending invitations (admin only)
+- `POST /api/projects/:projectId/invitations` - Invite user by email (admin only)
+- `DELETE /api/projects/:projectId/invitations/:invitationId` - Cancel invitation (admin only)
+- `POST /api/invitations/accept` - Accept invitation with token
+- `GET /api/invitations/pending` - List user's pending invitations
 
 **MCP Token API:**
 - `POST /api/mcp-token/generate` - Generate JWT (editor/admin only)
@@ -314,12 +341,64 @@ quoth login
 - Supabase Service Role for MCP server
 - User sessions for web UI
 
+**Team Invitation Security:**
+- Invitations expire after 7 days
+- Unique crypto-generated tokens (32 bytes)
+- Email verification on acceptance
+- Cannot invite existing members
+- Admin-only invitation capability
+- Automatic cleanup of expired invitations
+
+## Team Collaboration
+
+Quoth supports multi-user collaboration on projects through a comprehensive invitation system:
+
+### Inviting Team Members
+
+**Admin Capabilities:**
+1. Visit `/dashboard/[projectSlug]/team`
+2. Click "Invite Member" button
+3. Enter email address and select role (admin/editor/viewer)
+4. System sends invitation email with secure token
+5. Invitation valid for 7 days
+
+**Invitation Email:**
+- Branded "Intellectual Neo-Noir" design via Resend
+- Includes project name, inviter name, and role description
+- One-click acceptance link with embedded token
+- Lists role-specific permissions
+
+**Accepting Invitations:**
+1. User clicks link in email
+2. If not signed in, prompted to sign in or create account
+3. Email verification ensures invitation sent to correct user
+4. Upon acceptance, automatically added to project with specified role
+5. Invitation deleted after successful acceptance
+
+### Managing Team Members
+
+**For Admins:**
+- View all team members with roles
+- Change member roles (viewer → editor → admin)
+- Remove members from project
+- View and cancel pending invitations
+- Protected actions: cannot remove last admin
+
+**For All Users:**
+- View team member list
+- See own role and permissions
+- Leave project (if not the last admin)
+
 ## Key Dependencies
 
 - `@modelcontextprotocol/sdk` - MCP protocol implementation
 - `mcp-handler` - MCP server handler for Next.js
 - `@supabase/supabase-js` - Supabase client for vector storage
+- `@supabase/ssr` - Server-side Supabase client with cookie management
 - `@google/generative-ai` - Gemini embeddings
 - `gray-matter` - YAML frontmatter parsing
 - `zod` - Schema validation
+- `jose` - JWT token verification
+- `resend` - Email delivery service for team invitations
+- `@react-email/components` - Email template components
 - `lucide-react` - Icons (1.5px stroke weight per branding)

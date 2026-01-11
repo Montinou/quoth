@@ -21,6 +21,14 @@ Quoth is a Model Context Protocol (MCP) server designed to prevent AI hallucinat
 | `quoth_architect` | Code generation persona - enforces "Single Source of Truth" rules |
 | `quoth_auditor` | Documentation review persona - distinguishes between new features and technical debt |
 
+### 👥 Team Collaboration
+
+- **Multi-user projects** - Share knowledge bases with team members
+- **Role-based access** - Admin, Editor, and Viewer roles with granular permissions
+- **Email invitations** - Invite collaborators via email with secure 7-day tokens
+- **Team management** - Add, remove, and manage member roles through dashboard
+- **Secure isolation** - Row-level security ensures projects remain private
+
 ## Getting Started
 
 ### Prerequisites
@@ -153,8 +161,15 @@ The MCP endpoint will be available at `https://your-app.vercel.app/api/mcp`
 
 | Variable | Description | Required |
 |----------|-------------|----------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
+| `GEMINIAI_API_KEY` | Google Gemini API key for embeddings | Yes |
+| `JWT_SECRET` | Secret for MCP token generation | Yes |
+| `RESEND_API_KEY` | Resend API key for email delivery | Yes (for invitations) |
+| `RESEND_FROM_EMAIL` | Sender email address | Yes (for invitations) |
+| `NEXT_PUBLIC_APP_URL` | Production app URL | Yes |
 | `GITHUB_TOKEN` | For external repo integration | No |
-| `REDIS_URL` | For SSE transport | No |
 
 ## License
 
