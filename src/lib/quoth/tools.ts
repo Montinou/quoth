@@ -11,6 +11,10 @@ import {
   readDocument,
   buildSearchIndex,
 } from './search';
+import { supabase, getProjectBySlug } from '../supabase';
+
+// Default project slug (can be overridden via env)
+const DEFAULT_PROJECT_SLUG = process.env.QUOTH_PROJECT_SLUG || 'quoth-knowledge-base';
 
 /**
  * Register all Quoth tools on an MCP server
@@ -163,7 +167,7 @@ export function registerQuothTools(
     },
     async ({ doc_id, new_content, evidence_snippet, reasoning }) => {
       try {
-        // Verify document exists
+        // 1. Verify document exists
         const existingDoc = await readDocument(doc_id);
 
         if (!existingDoc) {
@@ -177,25 +181,34 @@ export function registerQuothTools(
           };
         }
 
-        // Create proposal entry
-        const proposalId = `PROP-${Date.now()}`;
-        const proposalDate = new Date().toISOString().split('T')[0];
+        // 2. Get project
+        const project = await getProjectBySlug(DEFAULT_PROJECT_SLUG);
+        if (!project) {
+          throw new Error(`Project "${DEFAULT_PROJECT_SLUG}" not found. Ensure the knowledge base is indexed.`);
+        }
 
-        // Note: In a full implementation, this would write to Supabase
-        // For now, we just acknowledge the proposal
-        const proposal = {
-          id: proposalId,
-          date: proposalDate,
-          document: doc_id,
-          documentPath: existingDoc.path,
-          evidence: evidence_snippet,
-          reasoning,
-          newContent: new_content,
-          status: 'pending',
-        };
+        // 3. Insert proposal into Supabase
+        const { data: proposal, error } = await supabase
+          .from('document_proposals')
+          .insert({
+            document_id: existingDoc.id,
+            project_id: project.id,
+            file_path: existingDoc.path,
+            original_content: existingDoc.content,
+            proposed_content: new_content,
+            reasoning,
+            evidence_snippet,
+            status: 'pending'
+          })
+          .select()
+          .single();
 
-        // Log the proposal (in production, this would go to Supabase)
-        console.log('Documentation Update Proposal:', JSON.stringify(proposal, null, 2));
+        if (error) {
+          throw new Error(`Failed to create proposal: ${error.message}`);
+        }
+
+        // 4. Return success with dashboard link
+        const dashboardUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
         return {
           content: [
@@ -203,10 +216,12 @@ export function registerQuothTools(
               type: 'text' as const,
               text: `## Update Proposal Created
 
-**Proposal ID**: ${proposalId}
+**Proposal ID**: ${proposal.id}
 **Target Document**: ${existingDoc.title}
 **Path**: \`${existingDoc.path}\`
 **Status**: Pending Review
+
+🔗 **Review in Dashboard**: ${dashboardUrl}/proposals/${proposal.id}
 
 ### Evidence Provided
 \`\`\`
@@ -218,14 +233,15 @@ ${reasoning}
 
 ---
 
-The proposal has been logged for human review.
+The proposal has been logged for human review. A maintainer will review and approve/reject this change.
 
 **What happens next:**
-1. A maintainer will review the proposal
-2. If approved, the document will be updated
-3. The knowledge base will be re-indexed automatically
+1. Human reviewer examines the proposal in the dashboard
+2. If approved, changes are committed to GitHub
+3. The knowledge base is re-indexed automatically
+4. Email notification sent to tech leads
 
-*Note: AI agents cannot directly modify documentation. All changes require human approval.*`,
+*All documentation changes require human approval before being applied.*`,
             },
           ],
         };
