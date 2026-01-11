@@ -3,18 +3,14 @@
  * 
  * Handles the OAuth authorization flow:
  * 1. Validates client and PKCE parameters
- * 2. Redirects to Supabase login page
- * 3. After login, redirects back with authorization code
- * 
- * @see https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13
+ * 2. Encodes state as JWT and passes via URL
+ * 3. Redirects to login page
  */
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { saveState } from '@/lib/auth/oauth-state';
+import { encodeState } from '@/lib/auth/oauth-state';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -45,11 +41,8 @@ export async function GET(req: Request) {
     return errorResponse('invalid_request', 'Only S256 code_challenge_method is supported');
   }
 
-  // Generate our own state to track this OAuth flow
-  const oauthState = crypto.randomUUID();
-  
-  // Store the OAuth state for later verification
-  saveState(oauthState, {
+  // Encode OAuth state as JWT (works on serverless!)
+  const oauthStateToken = await encodeState({
     code_challenge: codeChallenge,
     code_challenge_method: codeChallengeMethod,
     client_id: clientId,
@@ -58,10 +51,9 @@ export async function GET(req: Request) {
     created_at: Date.now(),
   });
 
-  // Build the login page URL with OAuth state
-  // We'll use our own login page that handles Supabase auth
+  // Build the login page URL with encoded state
   const loginUrl = new URL(`${APP_URL}/auth/oauth-login`);
-  loginUrl.searchParams.set('oauth_state', oauthState);
+  loginUrl.searchParams.set('oauth_state', oauthStateToken);
   loginUrl.searchParams.set('client_state', state || '');
   
   return NextResponse.redirect(loginUrl.toString());
