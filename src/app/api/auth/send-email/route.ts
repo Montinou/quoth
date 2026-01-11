@@ -42,8 +42,13 @@ interface AuthEmailPayload {
   };
 }
 
-// Verify webhook signature from Supabase
-function verifyWebhookSignature(payload: string, signature: string | null): boolean {
+// Verify webhook signature from Supabase Auth Hook
+// Supabase uses Svix-style webhooks with format: v1,whsec_<base64_secret>
+function verifyWebhookSignature(
+  payload: string,
+  signatureHeader: string | null,
+  timestampHeader: string | null
+): boolean {
   const secret = process.env.SUPABASE_WEBHOOK_SECRET;
 
   // Skip verification if no secret configured (development)
@@ -52,15 +57,55 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
     return true;
   }
 
-  if (!signature) {
+  if (!signatureHeader) {
+    console.error('Missing webhook signature header');
     return false;
   }
 
-  const expectedSignature = createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
+  try {
+    // Extract the actual secret (remove v1,whsec_ prefix if present)
+    const secretKey = secret.startsWith('v1,whsec_')
+      ? secret.slice('v1,whsec_'.length)
+      : secret;
 
-  return signature === expectedSignature;
+    // Decode base64 secret
+    const secretBytes = Buffer.from(secretKey, 'base64');
+
+    // Parse signature header (format: v1,<signature>)
+    const signatures = signatureHeader.split(' ');
+    const timestamp = timestampHeader || Math.floor(Date.now() / 1000).toString();
+
+    // Build signed payload (timestamp.payload)
+    const signedPayload = `${timestamp}.${payload}`;
+
+    // Calculate expected signature
+    const expectedSignature = createHmac('sha256', secretBytes)
+      .update(signedPayload)
+      .digest('base64');
+
+    // Check if any provided signature matches
+    for (const sig of signatures) {
+      const [version, signature] = sig.split(',');
+      if (version === 'v1' && signature === expectedSignature) {
+        return true;
+      }
+    }
+
+    // Fallback: direct comparison for simpler setups
+    const directSignature = createHmac('sha256', secretBytes)
+      .update(payload)
+      .digest('base64');
+
+    if (signatureHeader === directSignature) {
+      return true;
+    }
+
+    console.error('Webhook signature mismatch');
+    return false;
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    return false;
+  }
 }
 
 // Build action URL with token
@@ -82,10 +127,16 @@ export async function POST(request: Request) {
   try {
     // Get raw body for signature verification
     const rawBody = await request.text();
-    const signature = request.headers.get('x-webhook-signature');
+
+    // Supabase sends signature in svix-signature or webhook-signature header
+    const signature = request.headers.get('svix-signature') ||
+                      request.headers.get('webhook-signature') ||
+                      request.headers.get('x-webhook-signature');
+    const timestamp = request.headers.get('svix-timestamp') ||
+                      request.headers.get('webhook-timestamp');
 
     // Verify signature
-    if (!verifyWebhookSignature(rawBody, signature)) {
+    if (!verifyWebhookSignature(rawBody, signature, timestamp)) {
       console.error('Invalid webhook signature');
       return NextResponse.json(
         { error: 'Invalid signature' },
