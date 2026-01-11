@@ -8,28 +8,35 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { getState, deleteState, saveAuthCode } from '@/lib/auth/oauth-state';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+import { decodeState, encodeAuthCode } from '@/lib/auth/oauth-state';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const oauthState = url.searchParams.get('oauth_state');
+  const oauthStateToken = url.searchParams.get('oauth_state');
   const clientState = url.searchParams.get('client_state');
   const error = url.searchParams.get('error');
   
   if (error) {
-    return errorRedirect(clientState, 'access_denied', 'User denied access');
+    return NextResponse.json(
+      { error: 'access_denied', error_description: 'User denied access' },
+      { status: 400 }
+    );
   }
 
-  if (!oauthState) {
-    return errorRedirect(clientState, 'invalid_request', 'Missing oauth_state');
+  if (!oauthStateToken) {
+    return NextResponse.json(
+      { error: 'invalid_request', error_description: 'Missing oauth_state' },
+      { status: 400 }
+    );
   }
 
-  // Get stored OAuth state
-  const state = getState(oauthState);
+  // Decode and validate OAuth state from JWT
+  const state = await decodeState(oauthStateToken);
   if (!state) {
-    return errorRedirect(clientState, 'invalid_request', 'Invalid or expired oauth_state');
+    return NextResponse.json(
+      { error: 'invalid_request', error_description: 'Invalid or expired oauth_state' },
+      { status: 400 }
+    );
   }
 
   // Get the authenticated user from Supabase session
@@ -54,7 +61,10 @@ export async function GET(req: Request) {
   const { data: { user }, error: userError } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    return errorRedirect(clientState, 'access_denied', 'Authentication failed');
+    return NextResponse.json(
+      { error: 'access_denied', error_description: 'Authentication failed' },
+      { status: 401 }
+    );
   }
 
   // Get user's default project and role
@@ -76,11 +86,8 @@ export async function GET(req: Request) {
 
   const role = membership?.role || 'viewer';
 
-  // Generate authorization code
-  const authorizationCode = crypto.randomUUID();
-  
-  // Store the auth code with user info
-  saveAuthCode(authorizationCode, {
+  // Generate authorization code as JWT (encodes all necessary info)
+  const authorizationCode = await encodeAuthCode({
     client_id: state.client_id,
     redirect_uri: state.redirect_uri,
     code_challenge: state.code_challenge,
@@ -91,9 +98,6 @@ export async function GET(req: Request) {
     created_at: Date.now(),
   });
 
-  // Clean up the OAuth state
-  deleteState(oauthState);
-
   // Redirect back to client with authorization code
   const redirectUrl = new URL(state.redirect_uri);
   redirectUrl.searchParams.set('code', authorizationCode);
@@ -102,12 +106,4 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.redirect(redirectUrl.toString());
-}
-
-function errorRedirect(state: string | null, error: string, description: string) {
-  // If we don't have a redirect URI, just show an error
-  return NextResponse.json(
-    { error, error_description: description },
-    { status: 400 }
-  );
 }

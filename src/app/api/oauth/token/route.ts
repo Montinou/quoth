@@ -3,13 +3,11 @@
  * 
  * Exchanges authorization code for access token.
  * Verifies PKCE code_verifier before issuing token.
- * 
- * @see https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13
  */
 
 import { NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
-import { getAuthCode, deleteAuthCode } from '@/lib/auth/oauth-state';
+import { decodeAuthCode } from '@/lib/auth/oauth-state';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -44,8 +42,8 @@ export async function POST(req: Request) {
       return errorResponse('invalid_request', 'code_verifier is required (PKCE)');
     }
 
-    // Get the stored auth code
-    const authCode = getAuthCode(code);
+    // Decode the authorization code (it's a JWT)
+    const authCode = await decodeAuthCode(code);
     if (!authCode) {
       return errorResponse('invalid_grant', 'Invalid or expired authorization code');
     }
@@ -65,9 +63,6 @@ export async function POST(req: Request) {
     if (expectedChallenge !== authCode.code_challenge) {
       return errorResponse('invalid_grant', 'Invalid code_verifier');
     }
-
-    // Delete the used auth code (one-time use)
-    deleteAuthCode(code);
 
     // Generate access token
     const secret = new TextEncoder().encode(JWT_SECRET);
