@@ -18,12 +18,27 @@ function OAuthLoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const { signIn, user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const oauthState = searchParams.get('oauth_state');
   const clientState = searchParams.get('client_state');
+
+  // If user is already logged in, redirect directly to callback
+  useEffect(() => {
+    if (user && oauthState) {
+      const callbackUrl = new URL('/api/oauth/callback', window.location.origin);
+      callbackUrl.searchParams.set('oauth_state', oauthState);
+      if (clientState) {
+        callbackUrl.searchParams.set('client_state', clientState);
+      }
+      router.push(callbackUrl.toString());
+    } else {
+      setCheckingAuth(false);
+    }
+  }, [user, oauthState, clientState, router]);
 
   useEffect(() => {
     if (!oauthState) {
