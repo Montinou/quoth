@@ -71,7 +71,7 @@ export default function ProposalDetailPage({ params }: { params: { id: string } 
       const data = await res.json();
 
       if (res.ok) {
-        alert('Proposal approved and committed to GitHub!');
+        alert('Proposal approved and applied to knowledge base!');
         router.push('/proposals');
       } else {
         setError(data.error || 'Failed to approve proposal');
@@ -263,15 +263,10 @@ export default function ProposalDetailPage({ params }: { params: { id: string } 
             </div>
           )}
 
-          {proposal.status === 'applied' && proposal.commit_url && (
-            <a
-              href={proposal.commit_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block bg-violet-spectral hover:bg-violet-glow text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-            >
-              View Commit on GitHub →
-            </a>
+          {proposal.status === 'applied' && (
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+              <p className="text-green-400">Changes applied to knowledge base. Previous version preserved in history.</p>
+            </div>
           )}
 
           {proposal.status === 'rejected' && proposal.rejection_reason && (
@@ -295,7 +290,7 @@ export default function ProposalDetailPage({ params }: { params: { id: string } 
             <div className="glass-panel p-8 max-w-md w-full">
               <h2 className="text-2xl font-bold text-white mb-4">Approve Proposal</h2>
               <p className="text-graphite mb-4">
-                This will commit the changes to GitHub. Enter your email to confirm:
+                This will apply the changes to the knowledge base. Enter your email to confirm:
               </p>
               <input
                 type="email"

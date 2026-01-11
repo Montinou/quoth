@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 export interface Project {
   id: string;
   slug: string;
-  github_repo: string;
+  github_repo?: string; // Deprecated
   created_at: string;
 }
 
@@ -52,8 +52,7 @@ export function isSupabaseConfigured(): boolean {
 
 // Get or create a project by slug
 export async function getOrCreateProject(
-  slug: string,
-  githubRepo: string
+  slug: string
 ): Promise<Project> {
   // Try to find existing project
   const { data: existing } = await supabase
@@ -71,7 +70,6 @@ export async function getOrCreateProject(
     .from("projects")
     .insert({
       slug,
-      github_repo: githubRepo,
     })
     .select()
     .single();

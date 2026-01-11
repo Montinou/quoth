@@ -95,13 +95,9 @@ export interface PromptMessage {
 export interface QuothConfig {
   knowledgeBasePath: string;
   cacheRevalidateSeconds: number;
-  enableGitHub: boolean;
-  githubRepo?: string;
-  githubToken?: string;
 }
 
 export const DEFAULT_CONFIG: QuothConfig = {
   knowledgeBasePath: './quoth-knowledge-base',
   cacheRevalidateSeconds: 3600,
-  enableGitHub: false,
 };

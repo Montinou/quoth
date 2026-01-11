@@ -18,11 +18,10 @@ export interface CommitResult {
 }
 
 /**
- * Sends email notification when a proposal is approved and committed
+ * Sends email notification when a proposal is approved and applied
  * @param proposal - The approved proposal
- * @param commit - GitHub commit information
  */
-export async function sendApprovalNotification(proposal: any, commit: CommitResult) {
+export async function sendApprovalNotification(proposal: any) {
   if (!isResendConfigured()) {
     console.warn('Resend not configured. Skipping email notification.');
     return;
@@ -33,7 +32,7 @@ export async function sendApprovalNotification(proposal: any, commit: CommitResu
       from: FROM_EMAIL,
       to: RECIPIENTS,
       subject: `[Quoth] Auto-Updated: ${proposal.file_path}`,
-      html: generateApprovalEmail(proposal, commit)
+      html: generateApprovalEmail(proposal)
     });
     console.log(`Approval email sent for proposal ${proposal.id}`);
   } catch (error) {
@@ -69,7 +68,7 @@ export async function sendRejectionNotification(proposal: any, reason: string) {
 /**
  * Generates HTML email template for approved proposals
  */
-function generateApprovalEmail(proposal: any, commit: CommitResult): string {
+function generateApprovalEmail(proposal: any): string {
   return `
 <!DOCTYPE html>
 <html>
@@ -125,19 +124,6 @@ function generateApprovalEmail(proposal: any, commit: CommitResult): string {
       white-space: pre-wrap;
       word-wrap: break-word;
     }
-    .button {
-      display: inline-block;
-      background: #8B5CF6;
-      color: white;
-      padding: 12px 24px;
-      text-decoration: none;
-      border-radius: 5px;
-      margin: 10px 5px 0 0;
-      font-weight: 600;
-    }
-    .button:hover {
-      background: #7C3AED;
-    }
     .footer {
       margin-top: 30px;
       font-size: 12px;
@@ -171,10 +157,9 @@ function generateApprovalEmail(proposal: any, commit: CommitResult): string {
     ` : ''}
 
     <div class="section">
-      <div class="label">Commit</div>
+      <div class="label">Status</div>
       <div class="value">
-        SHA: <code>${commit.sha?.substring(0, 7) || 'N/A'}</code><br/>
-        <a href="${commit.url || '#'}" class="button">View Diff on GitHub</a>
+        <p>Changes applied to knowledge base. Previous version preserved in history.</p>
       </div>
     </div>
 
@@ -182,7 +167,7 @@ function generateApprovalEmail(proposal: any, commit: CommitResult): string {
       <strong>Proposal ID:</strong> ${proposal.id}<br/>
       <strong>Approved at:</strong> ${new Date().toISOString()}<br/>
       <strong>Reviewed by:</strong> ${proposal.reviewed_by || 'System'}<br/><br/>
-      This action was performed automatically. If incorrect, revert the commit in GitHub.
+      This action was performed automatically. Contact admin if changes need reverting.
     </div>
   </div>
 </body>

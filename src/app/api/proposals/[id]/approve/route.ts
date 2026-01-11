@@ -1,13 +1,13 @@
 /**
  * Proposals API - Approve Endpoint
- * POST /api/proposals/:id/approve - Approve proposal and commit to GitHub
+ * POST /api/proposals/:id/approve - Approve proposal and apply to knowledge base
  * Requires authentication and admin role
  */
 
 import { z } from 'zod';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabase } from '@/lib/supabase';
-import { commitProposalToGitHub } from '@/lib/github';
+import { syncDocument } from '@/lib/sync';
 import { sendApprovalNotification } from '@/lib/email';
 
 const ApproveSchema = z.object({
@@ -109,51 +109,51 @@ export async function POST(
       throw new Error(`Failed to update proposal: ${updateError.message}`);
     }
 
-    // 8. Commit to GitHub
-    console.log(`Committing proposal ${id} to GitHub...`);
-    const commitResult = await commitProposalToGitHub(proposal);
+    // 8. Apply changes directly to Supabase and re-index
+    try {
+      const title = proposal.file_path.replace('.md', '').split('/').pop() || proposal.file_path;
+      
+      const { document, chunksIndexed, chunksReused } = await syncDocument(
+        proposal.project_id,
+        proposal.file_path,
+        title,
+        proposal.proposed_content
+      );
 
-    // 9. Update with commit info or error
-    if (commitResult.success) {
       await supabase
         .from('document_proposals')
         .update({
           status: 'applied',
-          commit_sha: commitResult.sha,
-          commit_url: commitResult.url,
           applied_at: new Date().toISOString()
         })
         .eq('id', id);
 
-      // 10. Send email notification (fire and forget)
-      sendApprovalNotification(
-        { ...proposal, reviewed_by: profile.email },
-        commitResult
-      ).catch((err) => console.error('Email notification failed:', err));
+      // Send email notification (fire and forget)
+      sendApprovalNotification({ ...proposal, reviewed_by: profile.email })
+        .catch((err) => console.error('Email notification failed:', err));
 
       return Response.json({
         success: true,
-        message: 'Proposal approved and committed to GitHub',
-        commit: {
-          sha: commitResult.sha,
-          url: commitResult.url
+        message: 'Proposal approved and applied to knowledge base',
+        document: { 
+          id: document.id, 
+          version: document.version, 
+          chunksIndexed,
+          chunksReused 
         }
       });
-    } else {
-      // Commit failed - mark as error
+    } catch (error) {
+      // Apply failed - mark as error
       await supabase
         .from('document_proposals')
         .update({
           status: 'error',
-          rejection_reason: `GitHub commit failed: ${commitResult.error}`
+          rejection_reason: `Apply failed: ${error instanceof Error ? error.message : 'Unknown'}`
         })
         .eq('id', id);
 
       return Response.json(
-        {
-          error: 'GitHub commit failed',
-          details: commitResult.error
-        },
+        { error: 'Failed to apply changes' },
         { status: 500 }
       );
     }
