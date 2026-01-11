@@ -162,12 +162,20 @@ export default async function DashboardPage() {
                           )}
                         </div>
                       </div>
-                      <Link
-                        href="/proposals"
-                        className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
-                      >
-                        View Proposals →
-                      </Link>
+                      <div className="flex flex-col gap-2">
+                        <Link
+                          href={`/dashboard/${project.slug}/team`}
+                          className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
+                        >
+                          Manage Team →
+                        </Link>
+                        <Link
+                          href="/proposals"
+                          className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
+                        >
+                          View Proposals →
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 ))

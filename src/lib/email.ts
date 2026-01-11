@@ -1,9 +1,11 @@
 /**
  * Email Integration Module
- * Handles email notifications via Resend for proposal approvals/rejections
+ * Handles email notifications via Resend for proposal approvals/rejections and team invitations
  */
 
 import { Resend } from 'resend';
+import { render } from '@react-email/render';
+import { TeamInvitationEmail } from '@/emails/TeamInvitationEmail';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -316,3 +318,51 @@ export const AUTH_EMAIL_SUBJECTS: Record<AuthEmailType, string> = {
   magiclink: 'Your Quoth Login Link',
   email_change: 'Confirm Your New Email Address',
 };
+
+/**
+ * Team invitation email params
+ */
+export interface TeamInvitationParams {
+  email: string;
+  projectName: string;
+  inviterName: string;
+  role: string;
+  token: string;
+}
+
+/**
+ * Sends team invitation email
+ * @param params - Invitation details
+ */
+export async function sendTeamInvitationEmail(params: TeamInvitationParams): Promise<void> {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('Resend not configured. Skipping invitation email.');
+    return;
+  }
+
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+  const acceptUrl = `${APP_URL}/invitations/accept?token=${params.token}`;
+
+  try {
+    const html = await render(
+      TeamInvitationEmail({
+        projectName: params.projectName,
+        inviterName: params.inviterName,
+        role: params.role,
+        acceptUrl,
+      })
+    );
+
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: params.email,
+      subject: `You've been invited to join ${params.projectName} on Quoth`,
+      html,
+    });
+
+    console.log(`Invitation email sent to ${params.email}`);
+  } catch (error) {
+    console.error('Failed to send invitation email:', error);
+    // Don't throw - email failures shouldn't block the invitation workflow
+  }
+}
