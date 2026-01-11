@@ -15,9 +15,10 @@ const RejectSchema = z.object({
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const authSupabase = await createServerSupabaseClient();
 
     // 1. Authenticate user
@@ -58,7 +59,7 @@ export async function POST(
     const { data: proposal, error: fetchError } = await supabase
       .from('document_proposals')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !proposal) {
@@ -104,7 +105,7 @@ export async function POST(
         reviewed_at: new Date().toISOString(),
         reviewed_by: profile.email
       })
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (updateError) {
       throw new Error(`Failed to update proposal: ${updateError.message}`);

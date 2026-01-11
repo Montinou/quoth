@@ -1,0 +1,27 @@
+{
+  "name": "@quoth/mcp",
+  "version": "0.1.0",
+  "description": "Quoth MCP - The Living Source of Truth for AI-driven documentation auditing",
+  "keywords": ["mcp", "claude", "ai", "documentation", "auditor", "quoth"],
+  "author": "Quoth Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quoth-labs/quoth-mcp"
+  },
+  "homepage": "https://quoth.ai-innovation.site",
+  "bin": {
+    "quoth": "./bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "mcp.json",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "echo 'No tests yet'"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

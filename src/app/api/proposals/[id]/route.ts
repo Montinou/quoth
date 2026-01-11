@@ -8,9 +8,10 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const supabase = await createServerSupabaseClient();
 
     // 1. Authenticate user
@@ -34,7 +35,7 @@ export async function GET(
           file_path
         )
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !data) {

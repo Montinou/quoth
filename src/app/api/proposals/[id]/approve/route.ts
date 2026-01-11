@@ -16,9 +16,10 @@ const ApproveSchema = z.object({
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const authSupabase = await createServerSupabaseClient();
 
     // 1. Authenticate user
@@ -57,7 +58,7 @@ export async function POST(
     const { data: proposal, error: fetchError } = await supabase
       .from('document_proposals')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !proposal) {
@@ -102,14 +103,14 @@ export async function POST(
         reviewed_at: new Date().toISOString(),
         reviewed_by: profile.email
       })
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (updateError) {
       throw new Error(`Failed to update proposal: ${updateError.message}`);
     }
 
     // 8. Commit to GitHub
-    console.log(`Committing proposal ${params.id} to GitHub...`);
+    console.log(`Committing proposal ${id} to GitHub...`);
     const commitResult = await commitProposalToGitHub(proposal);
 
     // 9. Update with commit info or error
@@ -122,7 +123,7 @@ export async function POST(
           commit_url: commitResult.url,
           applied_at: new Date().toISOString()
         })
-        .eq('id', params.id);
+        .eq('id', id);
 
       // 10. Send email notification (fire and forget)
       sendApprovalNotification(
@@ -146,7 +147,7 @@ export async function POST(
           status: 'error',
           rejection_reason: `GitHub commit failed: ${commitResult.error}`
         })
-        .eq('id', params.id);
+        .eq('id', id);
 
       return Response.json(
         {

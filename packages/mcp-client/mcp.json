@@ -1,0 +1,37 @@
+{
+  "name": "quoth",
+  "description": "The Living Source of Truth - AI-driven documentation auditor that enforces consistency between code and docs",
+  "vendor": "Quoth Labs",
+  "version": "0.1.0",
+  "homepage": "https://quoth.ai-innovation.site",
+  "server": {
+    "type": "http",
+    "url": "https://quoth.ai-innovation.site/api/mcp/public"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "quoth_search_index",
+        "description": "Semantic search across documentation using AI embeddings"
+      },
+      {
+        "name": "quoth_read_doc",
+        "description": "Read full document content from the knowledge base"
+      }
+    ],
+    "prompts": [
+      {
+        "name": "quoth_architect",
+        "description": "Persona for writing code with Single Source of Truth enforcement"
+      },
+      {
+        "name": "quoth_auditor",
+        "description": "Persona for code review and documentation updates"
+      }
+    ]
+  },
+  "authentication": {
+    "required": false,
+    "note": "Public demo works without auth. Run 'quoth login' for private projects."
+  }
+}

@@ -8,6 +8,59 @@ Quoth is an MCP (Model Context Protocol) server that acts as a "Single Source of
 
 **Production URL**: https://quoth.ai-innovation.site
 
+## Installation (for Claude Code Users)
+
+### Quick Start (Public Demo)
+
+```bash
+# Install the CLI
+npm install -g @quoth/mcp
+
+# Add to Claude Code (public demo - no auth required)
+claude mcp add quoth
+```
+
+This gives immediate access to:
+- `quoth_search_index` - Semantic search across documentation
+- `quoth_read_doc` - Read full document content
+- `quoth_architect` / `quoth_auditor` prompts
+
+### Authenticate for Private Projects
+
+```bash
+# Run login command
+quoth login
+
+# This opens your browser for authentication
+# Copy the token and paste it in the terminal
+```
+
+After authentication, you get:
+- Access to your private knowledge bases
+- `quoth_propose_update` tool for documentation updates
+- Team collaboration features
+
+### Manual Configuration
+
+If you prefer manual setup:
+
+```bash
+# Generate token from dashboard
+# Then configure Claude Code directly:
+claude mcp add quoth --type http \
+  --url "https://quoth.ai-innovation.site/api/mcp" \
+  --header "Authorization: Bearer YOUR_TOKEN"
+```
+
+### CLI Commands
+
+```bash
+quoth login    # Authenticate and configure Claude Code
+quoth logout   # Remove authentication (keeps public access)
+quoth status   # Show current configuration
+quoth help     # Show help message
+```
+
 ## Development Commands
 
 ```bash
@@ -35,9 +88,10 @@ The core MCP implementation exposes 3 tools and 2 prompts:
 - `quoth_architect` - For code generation, enforces "Single Source of Truth" rules
 - `quoth_auditor` - For code review, distinguishes between "New Features" and "Bad Code"
 
-### API Route
+### API Routes
 
-`src/app/api/[transport]/route.ts` - MCP endpoint using `mcp-handler` package. Supports Streamable HTTP transport at `/api/mcp`.
+- `src/app/api/[transport]/route.ts` - Authenticated MCP endpoint at `/api/mcp` (requires JWT token)
+- `src/app/api/mcp/public/route.ts` - Public demo MCP endpoint at `/api/mcp/public` (no auth, read-only)
 
 ### Knowledge Base (quoth-knowledge-base/)
 
@@ -152,6 +206,16 @@ projects             -- Extended with multi-tenancy
 
 ### MCP Authentication Flow
 
+**Option A: CLI (Recommended)**
+
+```bash
+quoth login
+# Opens browser → Sign in → Generate token → Paste in terminal
+# Automatically configures Claude Code
+```
+
+**Option B: Manual Dashboard**
+
 1. **Generate Token:**
    - User visits [/dashboard/api-keys](https://quoth.ai-innovation.site/dashboard/api-keys)
    - Clicks "Generate New Key"
@@ -216,6 +280,7 @@ projects             -- Extended with multi-tenancy
 - `/auth/login` - Email/password login with redirect support
 - `/auth/signup` - Create account + auto-create project
 - `/auth/verify-email` - Email verification instructions
+- `/auth/cli` - CLI authentication page (token generation for `quoth login`)
 
 **Proposals API:**
 - `GET /api/proposals` - List proposals (filtered by user's projects)
