@@ -301,3 +301,18 @@ function escapeHtml(text: string): string {
 export function isResendConfigured(): boolean {
   return !!(process.env.RESEND_API_KEY && RECIPIENTS.length > 0);
 }
+
+/**
+ * Auth email types supported by the webhook handler
+ */
+export type AuthEmailType = 'signup' | 'recovery' | 'magiclink' | 'email_change';
+
+/**
+ * Auth email subjects map
+ */
+export const AUTH_EMAIL_SUBJECTS: Record<AuthEmailType, string> = {
+  signup: 'Welcome to Quoth - Verify Your Email',
+  recovery: 'Reset Your Quoth Password',
+  magiclink: 'Your Quoth Login Link',
+  email_change: 'Confirm Your New Email Address',
+};
