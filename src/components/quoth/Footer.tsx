@@ -18,6 +18,7 @@ interface FooterProps {
 const defaultLinks: FooterLink[] = [
   { href: "/manifesto", label: "Manifesto" },
   { href: "/protocol", label: "Protocol" },
+  { href: "/guide", label: "Guide" },
   { href: "/pricing", label: "Pricing" },
 ];
 

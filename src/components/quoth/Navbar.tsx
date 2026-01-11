@@ -21,6 +21,7 @@ interface NavbarProps {
 const defaultLinks: NavLink[] = [
   { href: "/manifesto", label: "Manifesto" },
   { href: "/protocol", label: "Protocol" },
+  { href: "/guide", label: "Guide" },
   { href: "/pricing", label: "Pricing" },
 ];
 

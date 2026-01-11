@@ -99,8 +99,8 @@ const Hero = () => (
           className="bg-violet-spectral/10 border-violet-spectral/50 hover:bg-violet-spectral/20 w-full sm:w-auto group"
           asChild
         >
-          <Link href="/auth/signup">
-            Get Started Free
+          <Link href="/guide">
+            Deploy Quoth Server
             <span className="group-hover:translate-x-1 transition-transform ml-2">→</span>
           </Link>
         </Button>
