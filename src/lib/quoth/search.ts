@@ -1,6 +1,6 @@
 /**
  * Quoth Search Module
- * Vector-based semantic search using Supabase + Gemini embeddings
+ * Advanced RAG pipeline: Jina Embeddings (512d) -> Supabase Vector Search -> Cohere Rerank
  * Enforces multi-tenant isolation via projectId parameter
  */
 

@@ -1,52 +1,31 @@
-
-import Parser from 'web-tree-sitter';
+// @ts-ignore
 import path from 'path';
 import fs from 'fs/promises';
+import { createRequire } from 'module';
 
-/**
- * Supported languages for AST analysis
- */
-export type SupportedLanguage = 'typescript' | 'javascript' | 'python' | 'go' | 'rust';
+const require = createRequire(import.meta.url);
+const Parser = require('web-tree-sitter');
 
-/**
- * Interface for a semantic chunk of code
- */
-export interface CodeChunk {
-  content: string;
-  type: string;
-  startLine: number;
-  endLine: number;
-  metadata: {
-    language: SupportedLanguage;
-    filePath: string;
-    parentContext?: string; // e.g., Class Name for a method
-  };
-}
+// ... existing types ...
 
 /**
  * AST Chunker Service
- * Uses tree-sitter to parse code and extract semantic blocks
  */
 export class ASTChunker {
   private parser: Parser | null = null;
   private grammars: Map<SupportedLanguage, Parser.Language> = new Map();
   private initialized = false;
 
-  /**
-   * Initialize the parser and load WASM modules
-   * Must be called before usage
-   */
   async init(): Promise<void> {
     if (this.initialized) return;
 
     try {
-      await Parser.init();
+      await Parser.init({
+        locateFile(scriptName: string, scriptDirectory: string) {
+          return path.join(process.cwd(), 'node_modules', 'web-tree-sitter', scriptName);
+        },
+      });
       this.parser = new Parser();
-      
-      // Load languages - assuming WASM files are available or we load from potential locations
-      // In a Node/Next env, we might need to handle WASM loading carefully
-      // For now, we'll try standard resolution logic suited for server-side execution
-      
       this.initialized = true;
     } catch (error) {
       console.error('Failed to initialize AST parser:', error);

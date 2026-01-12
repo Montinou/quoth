@@ -382,14 +382,12 @@ GitHub push event
 ### API
 
 - Zod validation (fail fast)
-- Fire-and-forget emails (don't block approval)
-- Efficient GitHub API usage (fetch SHA first)
-
-### Embeddings
-
-- Rate limiting: 4.2s between chunks (15 RPM)
-- Batched deletion before regeneration
-- Chunks split by H2 headers (natural boundaries)
+- **Storage**: Supabase (PostgreSQL) with `pgvector`
+- **Indexing**: HNSW index on 512-dimensional vectors (Matryoshka)
+- **Embedding**: Jina Embeddings v3 (Optimized for Code)
+- **Ingestion**: AST-based Chunking (Preserves function/class integrity)
+- **Refinement**: Cohere Rerank (Two-stage retrieval)
+- **Search**: Hybrid pipeline (Vector Search -> Reranking -> LLM Generation)
 
 ## Scalability
 
