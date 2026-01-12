@@ -49,47 +49,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Initialize auth state
     const initAuth = async () => {
       try {
-        console.log('[AuthContext] Initializing auth...', new Date().toISOString());
-        console.log('[AuthContext] Debug info:', {
-          envUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-          hasCookie: typeof document !== 'undefined' ? document.cookie.length > 0 : 'N/A',
-          sbCookiePresent: typeof document !== 'undefined' ? document.cookie.includes('sb-') : 'N/A'
-        });
-        
         // Use getUser() which validates JWT with Supabase Auth server
         const { data: { user }, error } = await supabase.auth.getUser();
-
-        console.log('[AuthContext] getUser result:', { 
-          hasUser: !!user, 
-          userId: user?.id, 
-          error: error?.message 
-        });
 
         if (!mounted) return;
 
         if (error) {
-          console.warn('[AuthContext] getUser failed:', error);
-          
-          // Debug: Check if session exists locally even if getUser failed
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          console.log('[AuthContext] Fallback getSession check:', {
-             hasSession: !!session,
-             error: sessionError?.message
-          });
-
+          // No valid session (expected on pages without auth)
           setLoading(false);
           return;
         }
 
         if (user) {
           setUser(user);
-          // Also get session for convenience
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          console.log('[AuthContext] getSession result:', { 
-            hasSession: !!session,
-            sessionError: sessionError?.message 
-          });
-          
+          // Get session for convenience (already validated by getUser above)
+          const { data: { session } } = await supabase.auth.getSession();
+
           if (mounted) {
             setSession(session);
             await fetchProfile(user.id);
@@ -112,8 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('[AuthContext] Auth state change:', event, !!session, new Date().toISOString());
+      async (_event, session) => {
         if (!mounted) return;
 
         setSession(session);
@@ -162,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signUp(email: string, password: string, username: string) {
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {

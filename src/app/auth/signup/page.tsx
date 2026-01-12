@@ -68,7 +68,7 @@ export default function SignupPage() {
               onChange={(e) => setUsername(e.target.value.toLowerCase())}
               className="w-full px-4 py-2 bg-charcoal border border-graphite rounded-lg focus:outline-none focus:border-violet-spectral transition-colors"
               placeholder="john-doe"
-              pattern="[a-z0-9-]+"
+              pattern="[a-z0-9\-]+"
               required
               disabled={loading}
             />
