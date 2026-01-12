@@ -45,37 +45,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let ignore = false;
+    const abortController = new AbortController();
 
     // Initialize auth state
     const initAuth = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
 
-        if (error) {
-          console.error('[AuthContext] Session error:', error);
-          if (!ignore) {
-            setLoading(false);
-          }
+        // Check if we should ignore this result (component unmounted)
+        if (ignore || abortController.signal.aborted) {
           return;
         }
 
-        if (!ignore) {
-          setSession(session);
-          setUser(session?.user ?? null);
-
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[AuthContext] Session initialized:', {
-              hasSession: !!session,
-              hasUser: !!session?.user
-            });
-          }
-
-          if (session?.user) {
-            await fetchProfile(session.user.id);
-          }
+        if (error) {
+          console.error('[AuthContext] Session error:', error);
           setLoading(false);
+          return;
         }
-      } catch (err) {
+
+        setSession(session);
+        setUser(session?.user ?? null);
+
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[AuthContext] Session initialized:', {
+            hasSession: !!session,
+            hasUser: !!session?.user
+          });
+        }
+
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        }
+        setLoading(false);
+      } catch (err: unknown) {
+        // Gracefully handle AbortError (happens during React Strict Mode cleanup)
+        if (err instanceof Error && err.name === 'AbortError') {
+          // This is expected during cleanup, no need to log an error
+          return;
+        }
         console.error('[AuthContext] Init error:', err);
         if (!ignore) {
           setLoading(false);
@@ -88,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes (with cleanup)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (ignore) return;
+        if (ignore || abortController.signal.aborted) return;
 
         if (process.env.NODE_ENV === 'development') {
           console.log('[AuthContext] Auth state changed:', {
@@ -112,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // CRITICAL: Cleanup
     return () => {
       ignore = true;
+      abortController.abort();
       subscription.unsubscribe();
     };
   }, [supabase]);
