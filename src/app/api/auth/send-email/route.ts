@@ -237,6 +237,7 @@ export async function GET() {
   return NextResponse.json({
     status: 'ok',
     service: 'quoth-auth-email-hook',
+    version: '2026-01-12-v2',
     configured: {
       resend: !!process.env.RESEND_API_KEY,
       webhook_secret: !!process.env.SUPABASE_WEBHOOK_SECRET,

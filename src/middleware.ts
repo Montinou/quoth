@@ -89,6 +89,6 @@ export const config = {
      * - api/mcp (MCP endpoints have their own auth)
      * - .well-known (OAuth discovery)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/mcp|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/mcp|api/auth/send-email|api/oauth|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }
