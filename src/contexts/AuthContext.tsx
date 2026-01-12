@@ -139,14 +139,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setProfileError(null);
 
-      // Use API route to fetch profile (bypasses RLS recursion via admin client)
-      const response = await fetch('/api/auth/profile');
-      
-      if (!response.ok) {
-        throw new Error(`Profile fetch failed: ${response.status}`);
-      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-      const data = await response.json();
+      if (error) {
+        console.error('[AuthContext] Profile fetch error:', error);
+        setProfileError(error.message);
+        return;
+      }
 
       if (data) {
         setProfile(data as Profile);
