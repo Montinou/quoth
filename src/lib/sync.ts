@@ -2,6 +2,8 @@ import { createHash } from "crypto";
 import { supabase, type Document } from "./supabase";
 import { generateEmbedding } from "./ai";
 
+import { astChunker, type CodeChunk } from "./quoth/chunking";
+
 /**
  * Calculate MD5 checksum for content
  */
@@ -10,16 +12,10 @@ export function calculateChecksum(content: string): string {
 }
 
 /**
- * Chunk markdown content by H2 headers
- * Each chunk includes the H2 title for context
+ * Chunk content using AST for code or headers for markdown
  */
-export function chunkByHeaders(content: string, minChunkLength: number = 50): string[] {
-  // Split by H2 headers (## )
-  const chunks = content.split(/^## /gm);
-
-  return chunks
-    .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length >= minChunkLength);
+export async function chunkContent(filePath: string, content: string): Promise<CodeChunk[]> {
+  return astChunker.chunkFile(filePath, content);
 }
 
 /**
@@ -71,14 +67,14 @@ export async function syncDocument(
   if (docError) throw new Error(`Failed to upsert: ${docError.message}`);
 
   // 3. Chunk content
-  let chunks = chunkByHeaders(content);
-  if (chunks.length === 0) chunks = [content];
-
+  const chunks = await chunkContent(filePath, content);
+  
   // 4. Calculate hashes
   const chunkData = chunks.map((chunk, index) => ({
-    content: chunk,
-    hash: calculateChecksum(chunk),
+    content: chunk.content,
+    hash: calculateChecksum(chunk.content),
     index,
+    metadata: chunk.metadata
   }));
 
   // 5. Get existing embeddings
@@ -113,7 +109,11 @@ export async function syncDocument(
         content_chunk: chunk.content,
         chunk_hash: chunk.hash,
         embedding,
-        metadata: { chunk_index: chunk.index, source: "incremental-sync" },
+        metadata: { 
+          chunk_index: chunk.index, 
+          source: "incremental-sync",
+          ...chunk.metadata
+        },
       });
       indexedCount++;
       if (indexedCount < chunksToEmbed.length) {

@@ -55,24 +55,38 @@ export function registerQuothTools(
           };
         }
 
-        const formattedResults = results.map((doc, index) => {
+          const formattedResults = results.map((doc, index) => {
           const similarity = Math.round((doc.relevance || 0) * 100);
-          let result = `${index + 1}. **${doc.title}** (${similarity}% match)\n`;
-          result += `   Path: \`${doc.path}\` | Type: ${doc.type}`;
+          
+          // Trust levels for Gemini 2.0 context weighting
+          let trustLevel = 'LOW';
+          if (doc.relevance! > 0.8) trustLevel = 'HIGH';
+          else if (doc.relevance! > 0.6) trustLevel = 'MEDIUM';
 
-          // Include snippet if available
-          if (doc.snippet) {
-            result += `\n   > ${doc.snippet}`;
-          }
-
-          return result;
-        }).join('\n\n');
+          return `
+<document index="${index + 1}" trust="${trustLevel}" relevance="${similarity}%">
+  <title>${doc.title}</title>
+  <path>${doc.path}</path>
+  <type>${doc.type}</type>
+  <content>
+    ${doc.snippet || '(No content snippet)'}
+  </content>
+</document>`;
+        }).join('\n');
 
         return {
           content: [
             {
               type: 'text' as const,
-              text: `## Semantic Search Results for "${query}"\n\nFound ${results.length} relevant document(s):\n\n${formattedResults}\n\n---\n*Use \`quoth_read_doc\` with a document title to view full content.*`,
+              text: `<search_results query="${query}" count="${results.length}">
+${formattedResults}
+</search_results>
+
+Instructions:
+- Use HIGH trust documents as primary sources.
+- Use MEDIUM trust documents for context.
+- Verify LOW trust documents against other sources.
+- To read full content, use \`quoth_read_doc\` with the document path.`,
             },
           ],
         };

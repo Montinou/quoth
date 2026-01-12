@@ -8,18 +8,23 @@ import { supabase, isSupabaseConfigured, type MatchResult } from '../supabase';
 import { generateEmbedding, isAIConfigured } from '../ai';
 import type { DocumentReference, QuothDocument } from './types';
 
+import { CohereClient } from "cohere-ai";
+
+// Initialize Cohere client if key is present
+const cohere = process.env.COHERE_API_KEY 
+  ? new CohereClient({ token: process.env.COHERE_API_KEY }) 
+  : null;
+
 // Default search configuration
 const SEARCH_CONFIG = {
-  matchThreshold: 0.65, // Minimum similarity score (0-1)
-  matchCount: 10, // Max results to return
+  initialFetchCount: 50, // Fetch more for reranking
+  finalMatchCount: 15,   // Return top 15 after rerank
+  minRerankScore: 0.5,   // Threshold for relevant results
+  matchThreshold: 0.5,   // Fallback vector threshold
 };
 
 /**
- * Search documents using vector similarity
- * Converts query to embedding, then uses Supabase RPC for cosine similarity search
- *
- * @param query - Natural language search query
- * @param projectId - UUID of the project to search within (enforces multi-tenant isolation)
+ * Search documents using vector similarity + Cohere Rerank
  */
 export async function searchDocuments(
   query: string,
@@ -27,45 +32,77 @@ export async function searchDocuments(
 ): Promise<DocumentReference[]> {
   // Validate configuration
   if (!isSupabaseConfigured()) {
-    throw new Error('Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+    throw new Error('Supabase not configured.');
   }
 
-  if (!isAIConfigured()) {
-    throw new Error('Gemini AI not configured. Set GEMINIAI_API_KEY or GOOGLE_API_KEY');
-  }
+  // Generate embedding (now uses Jina or Gemini based on ai.ts config)
+  // Logic in ai.ts handles generating the right dimension (512 for Jina)
+  // Note: search_query task_type is handled inside generateQueryEmbedding if using Jina
+  const queryEmbedding = await import('../ai').then(m => m.generateQueryEmbedding ? m.generateQueryEmbedding(query) : m.generateEmbedding(query));
 
-  // Validate projectId
-  if (!projectId || typeof projectId !== 'string') {
-    throw new Error('Invalid projectId provided');
-  }
-
-  // Generate embedding for the search query
-  const queryEmbedding = await generateEmbedding(query);
-
-  // Call Supabase RPC function for vector similarity search
-  // projectId enforces multi-tenant isolation at the database level
-  const { data, error } = await supabase.rpc('match_documents', {
-    query_embedding: queryEmbedding,
-    match_threshold: SEARCH_CONFIG.matchThreshold,
-    match_count: SEARCH_CONFIG.matchCount,
+  // 1. Initial Retrieval (Vector Search)
+  const { data: candidates, error } = await supabase.rpc('match_documents', {
+    query_embedding: queryEmbedding, 
+    match_threshold: 0.1, // Low threshold to get maximum recall for reranker
+    match_count: SEARCH_CONFIG.initialFetchCount,
     filter_project_id: projectId,
   });
 
-  if (error) {
-    throw new Error(`Search failed: ${error.message}`);
+  if (error) throw new Error(`Search failed: ${error.message}`);
+  if (!candidates || candidates.length === 0) return [];
+
+  // If Cohere is not configured, return vector results directly (fallback)
+  if (!cohere) {
+    console.warn("Cohere API key not found. Skipping rerank step.");
+    return (candidates as MatchResult[])
+      .slice(0, 10)
+      .map(match => transformMatchToDocRef(match));
   }
 
-  // Transform results to DocumentReference format
-  const results: DocumentReference[] = (data as MatchResult[]).map((match) => ({
-    id: match.title, // Use title as the document ID for display
+  // 2. Reranking using Cohere
+  const docsForRerank = (candidates as MatchResult[]).map(doc => ({
+    id: doc.id.toString(), // assuming id is unique per chunk or record
+    text: doc.content_chunk || "",
+    // Pass metadata to preserve context if needed
+  }));
+
+  try {
+    const rerankResponse = await cohere.rerank({
+      model: "rerank-english-v3.0",
+      query: query,
+      documents: docsForRerank,
+      topN: SEARCH_CONFIG.finalMatchCount,
+    });
+
+    // 3. Transform and Filter
+    const rerankedResults: DocumentReference[] = [];
+    
+    for (const result of rerankResponse.results) {
+      if (result.relevanceScore < SEARCH_CONFIG.minRerankScore) continue;
+      
+      const originalDoc = candidates[result.index];
+      rerankedResults.push(transformMatchToDocRef(originalDoc, result.relevanceScore));
+    }
+
+    return rerankedResults;
+
+  } catch (err) {
+    console.error("Reranking failed, falling back to vector results:", err);
+    return (candidates as MatchResult[])
+      .slice(0, 10)
+      .map(match => transformMatchToDocRef(match));
+  }
+}
+
+function transformMatchToDocRef(match: MatchResult, score?: number): DocumentReference {
+  return {
+    id: match.title, 
     title: match.title,
     type: inferDocumentType(match.file_path),
     path: match.file_path,
-    relevance: match.similarity,
-    snippet: truncateSnippet(match.content_chunk, 200),
-  }));
-
-  return results;
+    relevance: score ?? match.similarity,
+    snippet: truncateSnippet(match.content_chunk, 300), // Slightly longer snippet
+  };
 }
 
 /**
