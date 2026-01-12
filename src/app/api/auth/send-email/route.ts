@@ -105,8 +105,13 @@ export async function POST(request: Request) {
     const emailType = email_data.email_action_type;
     const token = email_data.token_hash;
 
+    console.log('[Webhook] APP_URL:', APP_URL);
+    console.log('[Webhook] email_data.redirect_to:', email_data.redirect_to);
+    console.log('[Webhook] token_hash:', token);
+
     // Build action URL
     const actionUrl = buildActionUrl(emailType, token, email_data.redirect_to);
+    console.log('[Webhook] Built action URL:', actionUrl);
 
     // Render appropriate email template
     let subject: string;

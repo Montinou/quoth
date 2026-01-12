@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,13 @@ export function Navbar({
 }: NavbarProps) {
   const { user, profile, loading, signOut } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    setDropdownOpen(false);
+    await signOut();
+    router.push('/');
+  };
 
   return (
     <nav
@@ -128,10 +136,7 @@ export function Navbar({
                       </Link>
                       <hr className="border-graphite/50 my-1" />
                       <button
-                        onClick={() => {
-                          setDropdownOpen(false);
-                          signOut();
-                        }}
+                        onClick={handleSignOut}
                         className="w-full text-left px-4 py-2 hover:bg-white/5 transition-colors rounded-b-lg text-red-400"
                       >
                         Sign Out
