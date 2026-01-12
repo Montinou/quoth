@@ -10,50 +10,43 @@ Quoth is an MCP (Model Context Protocol) server that acts as a "Single Source of
 
 ## Installation (for Claude Code Users)
 
-### Quick Start (Public Demo)
+### Quick Start (OAuth - Recommended)
 
 ```bash
-# Install the CLI
-npm install -g @quoth/mcp
-
-# Add to Claude Code (public demo - no auth required)
-claude mcp add quoth
+# Add to Claude Code with OAuth authentication
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 ```
 
-This gives immediate access to:
+When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for Quoth login, and once authenticated, Claude Code is automatically connected.
+
+This gives access to:
 - `quoth_search_index` - Semantic search across documentation
 - `quoth_read_doc` - Read full document content
+- `quoth_propose_update` - Submit documentation updates
 - `quoth_architect` / `quoth_auditor` prompts
 
-### Authenticate for Private Projects
+### Public Demo (No Auth)
+
+For read-only access without authentication:
 
 ```bash
-# Run login command
-quoth login
-
-# This opens your browser for authentication
-# Copy the token and paste it in the terminal
+claude mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
 ```
-
-After authentication, you get:
-- Access to your private knowledge bases
-- `quoth_propose_update` tool for documentation updates
-- Team collaboration features
 
 ### Manual Configuration
 
-If you prefer manual setup:
+If you prefer manual token-based setup:
 
 ```bash
-# Option 1: Streamable HTTP (header auth)
-claude mcp add quoth --type http \
-  --url "https://quoth.ai-innovation.site/api/mcp" \
+# Option 1: HTTP Transport with header auth
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp \
   --header "Authorization: Bearer YOUR_TOKEN"
 
-# Option 2: SSE Transport (query param auth - for EventSource clients)
-claude mcp add quoth --type sse \
-  --url "https://quoth.ai-innovation.site/api/mcp/sse?token=YOUR_TOKEN"
+# Option 2: SSE Transport with query param (for EventSource clients)
+claude mcp add --transport sse quoth "https://quoth.ai-innovation.site/api/mcp/sse?token=YOUR_TOKEN"
 ```
+
+Get tokens from: https://quoth.ai-innovation.site/dashboard/api-keys
 
 ### CLI Commands
 
@@ -110,9 +103,16 @@ The core MCP implementation exposes 4 tools and 2 prompts:
 
 ### API Routes
 
-- `src/app/api/[transport]/route.ts` - Authenticated MCP endpoint at `/api/mcp` (requires JWT token in header)
-- `src/app/api/mcp/sse/route.ts` - SSE transport at `/api/mcp/sse` (supports query param token for EventSource)
-- `src/app/api/mcp/public/route.ts` - Public demo MCP endpoint at `/api/mcp/public` (no auth, read-only)
+**MCP Endpoints:**
+- `src/app/api/[transport]/route.ts` - Authenticated MCP at `/api/mcp` (OAuth or API key)
+- `src/app/api/mcp/sse/route.ts` - SSE transport at `/api/mcp/sse` (query param token)
+- `src/app/api/mcp/public/route.ts` - Public demo at `/api/mcp/public` (no auth)
+
+**OAuth Endpoints:**
+- `src/app/.well-known/oauth-authorization-server/route.ts` - OAuth metadata (RFC 8414)
+- `src/app/api/oauth/authorize/route.ts` - Authorization endpoint
+- `src/app/api/oauth/token/route.ts` - Token exchange
+- `src/app/api/oauth/register/route.ts` - Dynamic client registration
 
 ### Knowledge Base (quoth-knowledge-base/)
 

@@ -82,36 +82,36 @@ export default function GuidePage() {
                 Quick Start
               </h2>
               <Badge variant="outline" className="border-green-500/50 text-green-400">
-                Public Demo
+                OAuth Auto-Login
               </Badge>
             </div>
 
             <p className="text-gray-400 mb-6">
-              Get started immediately with the public demo. No authentication required.
+              Add Quoth to Claude Code. When you authenticate, your browser opens for login and connects automatically.
             </p>
 
             <CodeBlock filename="terminal">
               <CodeLine>
-                <span className="text-gray-500"># Install the CLI</span>
+                <span className="text-gray-500"># Add to Claude Code with OAuth</span>
               </CodeLine>
               <CodeLine>
-                <CodeKeyword>npm</CodeKeyword> install -g @quoth/mcp
+                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
               </CodeLine>
               <br />
               <CodeLine>
-                <span className="text-gray-500"># Add to Claude Code</span>
+                <span className="text-gray-500"># Then run /mcp → select quoth → Authenticate</span>
               </CodeLine>
               <CodeLine>
-                <CodeKeyword>claude</CodeKeyword> mcp add quoth
+                <span className="text-gray-500"># Browser opens → Login → Done!</span>
               </CodeLine>
             </CodeBlock>
 
             <p className="text-gray-500 text-sm mt-4">
-              This gives immediate access to search and read tools using the public knowledge base.
+              This gives full access to all tools and your private knowledge bases.
             </p>
           </div>
 
-          {/* Step 2: Authentication */}
+          {/* Step 2: Public Demo */}
           <div>
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded bg-violet-spectral/20 flex items-center justify-center">
@@ -121,35 +121,27 @@ export default function GuidePage() {
                 className="font-serif text-2xl text-white"
                 style={{ fontFamily: "var(--font-cinzel), serif" }}
               >
-                Authenticate for Private Projects
+                Public Demo (No Auth)
               </h2>
             </div>
 
             <p className="text-gray-400 mb-6">
-              Unlock full features including private knowledge bases and documentation proposals.
+              Try Quoth without authentication using the public read-only endpoint.
             </p>
 
             <CodeBlock filename="terminal">
               <CodeLine>
-                <span className="text-gray-500"># Run login command</span>
+                <span className="text-gray-500"># Add public demo endpoint</span>
               </CodeLine>
               <CodeLine>
-                <CodeKeyword>quoth</CodeKeyword> login
-              </CodeLine>
-              <br />
-              <CodeLine>
-                <span className="text-gray-500"># Opens browser for authentication</span>
-              </CodeLine>
-              <CodeLine>
-                <span className="text-gray-500"># Copy the token and paste in terminal</span>
+                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
               </CodeLine>
             </CodeBlock>
 
             <div className="mt-6 glass-panel p-4 rounded-lg border border-violet-spectral/20">
               <p className="text-violet-ghost text-sm">
-                After authentication, you get access to your private knowledge bases,
-                the <code className="bg-violet-spectral/20 px-1.5 py-0.5 rounded">quoth_propose_update</code> tool,
-                and team collaboration features.
+                No login required. Provides read-only access to the public knowledge base
+                for testing and exploration.
               </p>
             </div>
           </div>
