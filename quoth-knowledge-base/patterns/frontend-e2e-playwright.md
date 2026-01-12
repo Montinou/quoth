@@ -1,25 +1,27 @@
 ---
 id: pattern-frontend-e2e
 type: testing-pattern
-related_stack: [playwright, typescript]
-last_verified_commit: "initial"
-last_updated_date: "2026-01-10"
 status: active
+last_updated_date: "2026-01-12"
+keywords: [playwright, e2e, end-to-end, testing, page-object-model, getByRole, locator]
+related_stack: [playwright, typescript]
 ---
+# Frontend E2E Testing: Playwright Locator Pattern
 
-# Pattern: Frontend E2E Flows (Playwright)
+## What This Covers
+Playwright end-to-end testing for frontend applications using accessible locators and Page Object Model.
+This pattern applies when testing user flows across pages, forms, and interactions.
+Key terms: getByRole, getByLabel, test.step, Page Object Model.
 
-## Context
-Used for end-to-end testing of frontend applications. Playwright provides reliable cross-browser testing.
+## The Pattern
+Locate elements by user-visible roles (`getByRole`, `getByLabel`) instead of CSS selectors.
+Use `await expect(...)` assertions for auto-retrying behavior.
+Organize reusable locators in Page Object classes under `tests/e2e/pages/`.
+Structure complex tests with `test.step()` for clear reporting.
 
-## The Golden Rule
-1. Locate by **user-visible roles** (`getByRole`, `getByLabel`) whenever possible.
-2. Use `await expect(...)` assertions to leverage auto-retrying.
-3. Place Page Object Models in `tests/e2e/pages/`.
-4. Use `test.step()` for clear test reporting.
-
-## Code Example (Canonical)
-```ts
+## Canonical Example
+Testing a login flow with accessible locators:
+```typescript
 import { test, expect } from '@playwright/test';
 
 test('user can login', async ({ page }) => {
@@ -28,48 +30,26 @@ test('user can login', async ({ page }) => {
   });
 
   await test.step('Fill credentials', async () => {
+    // Use accessible locators - getByLabel, getByRole
     await page.getByLabel('Email').fill('user@example.com');
     await page.getByLabel('Password').fill('securePassword123');
   });
 
-  await test.step('Submit form', async () => {
+  await test.step('Submit and verify', async () => {
     await page.getByRole('button', { name: 'Sign in' }).click();
-  });
-
-  await test.step('Verify successful login', async () => {
     await expect(page.getByText('Welcome back')).toBeVisible();
   });
 });
 ```
 
-## Page Object Model Pattern
-```ts
-// tests/e2e/pages/LoginPage.ts
-import { Page, Locator } from '@playwright/test';
+## Common Questions
+- How do I locate elements in Playwright?
+- What is the Page Object Model pattern for Playwright?
+- When should I use getByRole vs getByLabel?
+- How do I structure complex E2E test flows?
 
-export class LoginPage {
-  readonly page: Page;
-  readonly emailInput: Locator;
-  readonly passwordInput: Locator;
-  readonly submitButton: Locator;
-
-  constructor(page: Page) {
-    this.page = page;
-    this.emailInput = page.getByLabel('Email');
-    this.passwordInput = page.getByLabel('Password');
-    this.submitButton = page.getByRole('button', { name: 'Sign in' });
-  }
-
-  async login(email: string, password: string) {
-    await this.emailInput.fill(email);
-    await this.passwordInput.fill(password);
-    await this.submitButton.click();
-  }
-}
-```
-
-## Anti-Patterns (Do NOT do this)
-- Using `page.waitForTimeout()` for waiting (use proper assertions instead).
-- Using CSS selectors when accessible locators are available.
-- Hard-coding test data in test files (use fixtures).
-- Not using `test.step()` for complex test flows.
+## Anti-Patterns (Never Do This)
+- Using page.waitForTimeout(): Use proper expect() assertions with auto-retry
+- Using CSS selectors: Prefer getByRole, getByLabel, getByText for resilience
+- Hard-coding test data in tests: Use fixtures and test data files
+- Skipping test.step(): Complex flows become unreadable without structure

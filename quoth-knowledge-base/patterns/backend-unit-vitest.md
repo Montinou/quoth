@@ -1,50 +1,60 @@
 ---
 id: pattern-backend-unit
 type: testing-pattern
-related_stack: [vitest, node]
-last_verified_commit: "initial"
-last_updated_date: "2026-01-10"
 status: active
+last_updated_date: "2026-01-12"
+keywords: [vitest, unit-test, mock, vi.mock, backend, service, dependency-injection]
+related_stack: [vitest, node, typescript]
 ---
+# Backend Unit Testing: Vitest Mocking Pattern
 
-# Pattern: Backend Unit & Integration Testing (Vitest)
+## What This Covers
+Vitest unit testing for backend services using vi.mock() for dependency isolation.
+This pattern applies when testing services, controllers, or utilities with external dependencies like databases, APIs, or file systems.
+Key terms: vi.mock, vi.mocked, vi.clearAllMocks, beforeEach.
 
-## Context
-Used for testing backend services and controllers. We use Vitest for its speed and native ESM support.
+## The Pattern
+Import test utilities explicitly from `vitest` (never rely on globals).
+Mock external dependencies with `vi.mock()` at the module level before imports.
+Clear mocks in `beforeEach` to ensure test isolation between test cases.
+Use `vi.mocked()` for type-safe mock assertions.
 
-## The Golden Rule
-1. Always import `vi`, `describe`, `it`, `expect` from `vitest` (Do NOT rely on globals).
-2. Use `vi.mock()` for external dependencies, never manual mocks in `__mocks__` unless specified.
-3. For Integration tests, use a real database instance (via Docker) if possible, or strictly typed repositories.
-
-## Code Example (Canonical)
-```ts
+## Canonical Example
+Mocking a database dependency in a UserService test:
+```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UserService } from './UserService';
 import { db } from './db';
 
-// Mocking the database module
+// Module-level mock - MUST be before any imports that use it
 vi.mock('./db');
 
 describe('UserService', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.clearAllMocks(); // Reset mock state between tests
   });
 
-  it('should create a user successfully', async () => {
-    // Setup mock
+  it('creates user with correct data', async () => {
+    // Type-safe mock setup with vi.mocked()
     vi.mocked(db.insert).mockResolvedValue({ id: 1, name: 'Alice' });
 
     const user = await UserService.create('Alice');
-    
+
     expect(user.id).toBe(1);
     expect(db.insert).toHaveBeenCalledWith({ name: 'Alice' });
   });
 });
 ```
 
-## Anti-Patterns (Do NOT do this)
-- Using `jest.fn()` or `jest.mock()` (Common hallucination).
-- Using `module.exports` syntax in test files.
-- Leaving generic `any` types in mock returns.
-- Not clearing mocks between tests.
+## Common Questions
+- How do I mock a database in Vitest?
+- What is the vi.mock pattern for backend services?
+- How do I clear mocks between tests in Vitest?
+- When should I use vi.mocked vs vi.fn?
+
+## Anti-Patterns (Never Do This)
+- Using jest.fn() or jest.mock(): Vitest uses vi.fn() and vi.mock(), not Jest syntax
+- Global imports without explicit vitest import: Always `import { vi } from 'vitest'`
+- Forgetting vi.clearAllMocks(): Causes test pollution and flaky tests
+- Using any types in mock returns: Use proper TypeScript typing with vi.mocked()
+- Placing vi.mock() after imports: Module mocks must be hoisted before imports

@@ -88,6 +88,37 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
         DO NOT proceed without user confirmation in Phase 0.
     </prime_directive>
 
+    <embedding_optimization>
+        <context>
+            Each H2 section becomes a SEPARATE embedding chunk for vector search.
+            Chunks are searched independently - they MUST be self-contained.
+        </context>
+
+        <chunk_rules>
+            1. START each H2 with context (e.g., "In this project, we use...")
+            2. INCLUDE 2-3 searchable keywords naturally in first sentence
+            3. KEEP sections 100-250 words (optimal for embeddings)
+            4. CODE BLOCKS must have 1-line context above them
+            5. END patterns with specific "Do NOT" anti-patterns
+        </chunk_rules>
+
+        <keyword_strategy>
+            Every section should naturally include:
+            - Technology name (Vitest, Playwright, Supabase, Next.js, etc.)
+            - Action verb (mock, test, validate, configure, implement)
+            - Domain term (authentication, API, database, component)
+            Example first line: "Vitest unit tests for database services use vi.mock() for dependency isolation."
+        </keyword_strategy>
+    </embedding_optimization>
+
+    <checkpoint_protocol>
+        After EACH document:
+        1. Call quoth_propose_update immediately (doc_id, new_content, evidence_snippet, reasoning)
+        2. Report: "Uploaded: [path] (X/Y in Phase N: [Name])"
+        3. Then proceed to next document
+        DO NOT batch multiple documents. Upload one at a time.
+    </checkpoint_protocol>
+
     <phases>
         <phase id="0" name="Configuration" required="true">
             <description>Present configuration and wait for user confirmation.</description>
@@ -188,16 +219,7 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
                     | [name] | [purpose] | [version] |
                 </doc>
             </documents>
-            <checkpoint>
-                After creating EACH document:
-                1. Call quoth_propose_update immediately with the document content
-                2. Wait for upload confirmation
-                3. Report: "Uploaded: [path] (X/Y in Phase 1: Foundation)"
-                4. Then proceed to next document
-
-                After all Foundation documents:
-                Report: "Phase 1 Complete: Foundation documents uploaded (2/2)"
-            </checkpoint>
+            <checkpoint>Follow checkpoint_protocol. Report "Phase 1 Complete" after both docs.</checkpoint>
         </phase>
 
         <phase id="2" name="Architecture" min_depth="minimal">
@@ -244,12 +266,7 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
                     - Tests: [e.g., *.test.ts, *.spec.ts]
                 </doc>
             </documents>
-            <checkpoint>
-                After creating the document:
-                1. Call quoth_propose_update immediately
-                2. Report: "Uploaded: architecture/repo-structure.md (1/1 in Phase 2: Architecture)"
-                3. Report: "Phase 2 Complete: Architecture documented"
-            </checkpoint>
+            <checkpoint>Follow checkpoint_protocol. Report "Phase 2 Complete" after doc.</checkpoint>
         </phase>
 
         <phase id="3" name="Patterns" min_depth="standard">
@@ -269,14 +286,7 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
                     Include: Test file structure, mocking patterns, assertion styles, test utilities.
                 </doc>
             </documents>
-            <checkpoint>
-                After EACH document:
-                1. Call quoth_propose_update immediately
-                2. Report progress: "Uploaded: [path] (X/2 in Phase 3: Patterns)"
-
-                After all Patterns documents:
-                Report: "Phase 3 Complete: Patterns documented (2/2)"
-            </checkpoint>
+            <checkpoint>Follow checkpoint_protocol. Report "Phase 3 Complete" after both docs.</checkpoint>
         </phase>
 
         <phase id="4" name="Contracts" min_depth="comprehensive">
@@ -298,14 +308,7 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
                     Include: Key interfaces, enums, type aliases used across the codebase.
                 </doc>
             </documents>
-            <checkpoint>
-                After EACH document:
-                1. Call quoth_propose_update immediately
-                2. Report progress: "Uploaded: [path] (X/3 in Phase 4: Contracts)"
-
-                After all Contracts documents:
-                Report: "Phase 4 Complete: Contracts documented (3/3)"
-            </checkpoint>
+            <checkpoint>Follow checkpoint_protocol. Report "Phase 4 Complete" after all 3 docs.</checkpoint>
         </phase>
 
         <phase id="5" name="Advanced" min_depth="comprehensive">
@@ -327,104 +330,67 @@ export const GENESIS_PERSONA_PROMPT = `<genesis_protocol version="2.0">
                     Include: Known issues, inconsistencies, improvement opportunities.
                 </doc>
             </documents>
-            <checkpoint>
-                After EACH document:
-                1. Call quoth_propose_update immediately
-                2. Report progress: "Uploaded: [path] (X/3 in Phase 5: Advanced)"
-
-                After all Advanced documents:
-                Report: "Phase 5 Complete: Advanced patterns documented (3/3)"
-            </checkpoint>
+            <checkpoint>Follow checkpoint_protocol. Report "Phase 5 Complete" after all 3 docs.</checkpoint>
         </phase>
     </phases>
 
-    <output_template>
-        For every document, you MUST use this format:
+    <output_template version="2.1">
+        For every document, use this EMBEDDING-OPTIMIZED format:
 
         ---
         id: [unique-slug]
         type: [pattern|architecture|contract|meta]
         status: active
         last_updated_date: [YYYY-MM-DD]
+        keywords: [tech1, action1, domain1]
+        related_stack: [technology1, technology2]
         ---
-        # [Title]
+        # [Title]: [Brief Context Phrase]
 
-        ## Overview
-        [Brief context about this document]
+        ## What This Covers
+        [Technology] [action] for [use case]. This pattern applies when [condition].
+        Key terms: [keyword1], [keyword2], [keyword3].
+        (Keep under 75 words. Include searchable terms.)
 
-        ## The Rule
-        [Clear explanation of the pattern or structure]
+        ## The Pattern
+        [Clear explanation of the rule or structure.]
+        [Keep under 150 words. Use inline \`code\` for key terms.]
 
-        ## Evidence
+        ## Canonical Example
+        [One-line context: "This shows X for Y situation."]
         \`\`\`[language]
-        [Code snippet from the codebase demonstrating the pattern]
+        [Code - max 25 lines with inline comments on key parts]
         \`\`\`
 
-        ## Anti-Patterns (Do NOT do this)
-        - [Common mistake 1]
-        - [Common mistake 2]
+        ## Common Questions
+        - How do I [specific question]?
+        - What is the [pattern] for [technology]?
+        - When should I use [approach]?
+
+        ## Anti-Patterns (Never Do This)
+        - [Anti-pattern 1]: [Why it's wrong - brief explanation]
+        - [Anti-pattern 2]: [Why it's wrong - brief explanation]
     </output_template>
 
     <upload_protocol>
-        CRITICAL RULES FOR UPLOADING:
-
-        1. After creating EACH document, you MUST call quoth_propose_update IMMEDIATELY
-        2. DO NOT batch multiple documents together
-        3. DO NOT wait until end of phase to upload
-        4. Upload one document at a time, wait for confirmation, then proceed
-
-        For each upload, provide:
-        - doc_id: The document path (e.g., "architecture/project-overview.md")
-        - new_content: The full markdown content with frontmatter
-        - evidence_snippet: A key code snippet that supports this documentation
-        - reasoning: Why this documentation is accurate based on the codebase
-
-        Progress reporting format:
-        "Uploaded: [path] (X/Y in Phase N: [Phase Name])"
+        For each quoth_propose_update call, provide:
+        - doc_id: Document path (e.g., "architecture/project-overview.md")
+        - new_content: Full markdown with frontmatter
+        - evidence_snippet: Key code snippet supporting documentation
+        - reasoning: Why this is accurate based on code
     </upload_protocol>
 
     <error_handling>
-        <on_upload_failure>
-            If quoth_propose_update fails:
-            1. Report: "Failed to upload [path]: [error message]"
-            2. Ask user: "Retry upload? (yes/no/skip)"
-            3. If yes: Attempt upload again
-            4. If skip: Continue to next document, note in final summary
-            5. If no: Pause and wait for user guidance
-        </on_upload_failure>
-
-        <on_file_read_failure>
-            If a file cannot be read:
-            1. Report: "Could not read [path]: [error]"
-            2. Continue with available files
-            3. Note missing context in the document being created
-            4. Do not fail the entire phase for one missing file
-        </on_file_read_failure>
+        On upload failure: Report error, ask "Retry? (yes/no/skip)", handle accordingly.
+        On file read failure: Report and continue with available files. Note gaps in docs.
     </error_handling>
 
     <completion_summary>
-        After all phases complete, provide a summary:
-
-        "Genesis Protocol Complete!
-
-        Summary:
-        - Documents Created: [count]
-        - Total Phases: [completed]/[total]
-        - Time Elapsed: [estimate]
-
-        Documents Uploaded:
-        1. [path] - [brief description]
-        2. [path] - [brief description]
-        ...
-
-        [If any failures]
-        Failed Uploads:
-        - [path]: [reason]
-
-        Your knowledge base is now ready. Available tools:
-        - quoth_search_index: Search documentation by topic
-        - quoth_read_doc: Read full document content
-        - quoth_propose_update: Submit documentation changes"
+        After all phases, report:
+        "Genesis Complete! Created [count] docs in [phases] phases.
+        Documents: [list paths]
+        [If failures: note them]
+        Knowledge base ready. Use quoth_search_index, quoth_read_doc, quoth_propose_update."
     </completion_summary>
 
     <instruction>

@@ -17,6 +17,9 @@ export const DocumentFrontmatterSchema = z.object({
   last_verified_commit: z.string().optional(),
   last_updated_date: z.string(),
   status: z.enum(['active', 'deprecated', 'draft']),
+  // NEW: Embedding optimization fields
+  keywords: z.array(z.string()).optional().describe('Search keywords for embedding optimization'),
+  common_queries: z.array(z.string()).optional().describe('FAQ-style questions this doc answers'),
 });
 
 export type DocumentFrontmatter = z.infer<typeof DocumentFrontmatterSchema>;

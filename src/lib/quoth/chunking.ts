@@ -314,12 +314,51 @@ export class ASTChunker {
   }
 
   /**
+   * Extract context from frontmatter for chunk injection
+   */
+  private extractFrontmatterContext(content: string): string {
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!frontmatterMatch) return '';
+
+    const fm = frontmatterMatch[1];
+    const parts: string[] = [];
+
+    // Extract title from first H1
+    const titleMatch = content.match(/^# (.+)$/m);
+    if (titleMatch) parts.push(titleMatch[1]);
+
+    // Extract related_stack
+    const stackMatch = fm.match(/related_stack:\s*\[([^\]]*)\]/);
+    if (stackMatch && stackMatch[1].trim()) {
+      parts.push(`Stack: ${stackMatch[1].trim()}`);
+    }
+
+    // Extract keywords
+    const keywordsMatch = fm.match(/keywords:\s*\[([^\]]*)\]/);
+    if (keywordsMatch && keywordsMatch[1].trim()) {
+      parts.push(keywordsMatch[1].trim());
+    }
+
+    return parts.length > 0 ? `[${parts.join(' | ')}] ` : '';
+  }
+
+  /**
+   * Estimate token count for chunk size validation
+   */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.split(/\s+/).length * 1.3);
+  }
+
+  /**
    * Fallback chunking for markdown and unsupported files
    */
   private fallbackChunking(content: string, filePath: string): CodeChunk[] {
     const lang = getLanguageFromPath(filePath);
 
     if (lang === "markdown") {
+      // Extract context from frontmatter for injection into chunks
+      const contextPrefix = this.extractFrontmatterContext(content);
+
       const sections = content.split(/^## /gm);
       const chunks: CodeChunk[] = [];
       let currentLine = 1;
@@ -331,8 +370,21 @@ export class ASTChunker {
         const sectionContent = i === 0 ? section : `## ${section}`;
         const lineCount = sectionContent.split("\n").length;
 
+        // Inject context prefix into non-frontmatter chunks for better retrieval
+        const chunkContent = (i > 0 && contextPrefix)
+          ? `${contextPrefix}\n${sectionContent}`
+          : sectionContent;
+
+        // Log chunk size warnings (non-blocking)
+        const tokens = this.estimateTokens(chunkContent);
+        if (tokens < 75) {
+          console.warn(`ASTChunker: Chunk too short (${tokens} tokens): ${filePath} section ${i}`);
+        } else if (tokens > 300) {
+          console.warn(`ASTChunker: Chunk too long (${tokens} tokens): ${filePath} section ${i}`);
+        }
+
         chunks.push({
-          content: sectionContent,
+          content: chunkContent,
           type: "markdown_section",
           startLine: currentLine,
           endLine: currentLine + lineCount - 1,
