@@ -161,31 +161,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signUp(email: string, password: string, username: string) {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username,
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username,
+          },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+      });
 
-    return { error: error as Error | null };
+      if (error) {
+        console.error('[AuthContext] SignUp error:', error);
+        return { error };
+      }
+      
+      return { error: null };
+    } catch (err) {
+       console.error('[AuthContext] Unexpected SignUp error:', err);
+       return { error: err as Error };
+    }
   }
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    return { error: error as Error | null };
+      if (error) {
+         console.error('[AuthContext] Main signIn error:', error);
+      }
+      return { error: error as Error | null };
+    } catch (err) {
+      return { error: err as Error };
+    }
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setProfile(null);
+      setSession(null);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
   }
 
   async function refreshProfile() {
