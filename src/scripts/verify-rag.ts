@@ -1,5 +1,10 @@
 import { astChunker } from "../lib/quoth/chunking";
 import { generateJinaEmbedding, isAIConfigured } from "../lib/ai";
+import dotenv from 'dotenv';
+
+// Load env vars
+dotenv.config({ path: '.env.local' });
+dotenv.config(); // fallback
 
 async function verify() {
   console.log("Starting Next-Gen RAG Layout Verification...");
