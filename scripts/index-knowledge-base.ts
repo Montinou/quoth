@@ -13,16 +13,19 @@
  * - GEMINIAI_API_KEY (or GOOGLE_API_KEY)
  */
 
+// Load env from .env.local FIRST
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { createClient } from "@supabase/supabase-js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as fs from "fs";
 import * as path from "path";
 import matter from "gray-matter";
 import { createHash } from "crypto";
+import { astChunker } from "../src/lib/quoth/chunking";
 
-// Load env from .env.local
-import { config } from "dotenv";
-config({ path: ".env.local" });
+// Dynamic import to ensure env vars are loaded first
+let generateJinaEmbedding: (text: string, task?: 'passage' | 'query') => Promise<number[]>;
 
 // Configuration
 const KNOWLEDGE_BASE_PATH = "./quoth-knowledge-base";
@@ -32,7 +35,6 @@ const GITHUB_REPO = "quoth/quoth-mcp";
 // Validate environment
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const geminiKey = process.env.GEMINIAI_API_KEY || process.env.GOOGLE_API_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("❌ Missing Supabase credentials");
@@ -40,31 +42,12 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
-if (!geminiKey) {
-  console.error("❌ Missing Gemini API key");
-  console.error("Required: GEMINIAI_API_KEY or GOOGLE_API_KEY");
-  process.exit(1);
-}
-
-// Initialize clients
+// Initialize Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);
-const genAI = new GoogleGenerativeAI(geminiKey);
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
 
 // Helper functions
 function calculateChecksum(content: string): string {
   return createHash("md5").update(content).digest("hex");
-}
-
-function chunkByHeaders(content: string, minChunkLength: number = 50): string[] {
-  const chunks = content.split(/^## /gm);
-  return chunks.map((c) => c.trim()).filter((c) => c.length >= minChunkLength);
-}
-
-async function generateEmbedding(text: string): Promise<number[]> {
-  const cleanText = text.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
-  const result = await embeddingModel.embedContent(cleanText);
-  return result.embedding.values;
 }
 
 function getMarkdownFiles(dir: string): string[] {
@@ -88,6 +71,10 @@ function getMarkdownFiles(dir: string): string[] {
 
 async function main() {
   console.log("🦅 Quoth Knowledge Base Indexer\n");
+
+  // Dynamic import of ai module after env vars are loaded
+  const aiModule = await import("../src/lib/ai");
+  generateJinaEmbedding = aiModule.generateEmbedding;
 
   // 1. Get or create project
   console.log(`📁 Project: ${PROJECT_SLUG}`);
@@ -180,10 +167,12 @@ async function main() {
       .delete()
       .eq("document_id", doc.id);
 
-    // Chunk content
-    let chunks = chunkByHeaders(markdownContent);
+    // Chunk content using AST chunker with context injection
+    const codeChunks = await astChunker.chunkFile(relativePath, content);
+    const chunks = codeChunks.map(c => c.content).filter(c => c.length >= 50);
+
     if (chunks.length === 0) {
-      chunks = [markdownContent];
+      chunks.push(markdownContent);
     }
 
     console.log(`   📊 ${chunks.length} chunks to embed`);
@@ -193,7 +182,7 @@ async function main() {
       const chunk = chunks[j];
 
       try {
-        const embedding = await generateEmbedding(chunk);
+        const embedding = await generateJinaEmbedding(chunk, 'passage');
 
         await supabase.from("document_embeddings").insert({
           document_id: doc.id,
