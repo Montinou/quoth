@@ -1,15 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
-import { calculateChecksum } from '../lib/sync';
 import dotenv from 'dotenv';
 
 // Load env vars
 dotenv.config({ path: '.env.local' });
 dotenv.config(); // fallback
 
-// Dynamic imports for env-dependent modules
-// accessing them inside main function or global scope after config
+// Dynamic imports
 let astChunker: any;
 let generateJinaEmbedding: any;
+let calculateChecksum: any;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,6 +29,9 @@ async function reindexAll() {
   
   const aiModule = await import('../lib/ai');
   generateJinaEmbedding = aiModule.generateJinaEmbedding;
+
+  const syncModule = await import('../lib/sync');
+  calculateChecksum = syncModule.calculateChecksum;
 
   // 1. Fetch all documents
   const { data: documents, error } = await supabase
