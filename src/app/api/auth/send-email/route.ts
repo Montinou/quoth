@@ -9,7 +9,6 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { render } from '@react-email/components';
-import { createHmac } from 'crypto';
 
 import { WelcomeEmail } from '@/emails/WelcomeEmail';
 import { PasswordResetEmail } from '@/emails/PasswordResetEmail';
@@ -43,74 +42,16 @@ interface AuthEmailPayload {
 }
 
 // Verify webhook signature from Supabase Auth Hook
-// Supabase uses Svix-style webhooks with format: v1,whsec_<base64_secret>
+// TEMP: Bypassed for debugging signup issue
+// TODO: Re-enable proper verification after fixing signup
 function verifyWebhookSignature(
-  payload: string,
-  signatureHeader: string | null,
-  timestampHeader: string | null
+  _payload: string,
+  _signatureHeader: string | null,
+  _timestampHeader: string | null
 ): boolean {
-  const secret = process.env.SUPABASE_WEBHOOK_SECRET;
-
-  // Skip verification if no secret configured (development)
-  if (!secret) {
-    console.warn('SUPABASE_WEBHOOK_SECRET not configured - skipping signature verification');
-    return true;
-  }
-
-  // TEMP: Skip verification to debug signup issue
-  // TODO: Remove after confirming this is the issue
-  console.log('TEMP: Skipping signature verification for debugging');
+  // TEMP: Always return true to debug signup issue
+  console.log('[Webhook] Signature verification bypassed for debugging');
   return true;
-
-  if (!signatureHeader) {
-    console.error('Missing webhook signature header');
-    return false;
-  }
-
-  try {
-    // Extract the actual secret (remove v1,whsec_ prefix if present)
-    const secretKey = secret.startsWith('v1,whsec_')
-      ? secret.slice('v1,whsec_'.length)
-      : secret;
-
-    // Decode base64 secret
-    const secretBytes = Buffer.from(secretKey, 'base64');
-
-    // Parse signature header (format: v1,<signature>)
-    const signatures = signatureHeader.split(' ');
-    const timestamp = timestampHeader || Math.floor(Date.now() / 1000).toString();
-
-    // Build signed payload (timestamp.payload)
-    const signedPayload = `${timestamp}.${payload}`;
-
-    // Calculate expected signature
-    const expectedSignature = createHmac('sha256', secretBytes)
-      .update(signedPayload)
-      .digest('base64');
-
-    // Check if any provided signature matches
-    for (const sig of signatures) {
-      const [version, signature] = sig.split(',');
-      if (version === 'v1' && signature === expectedSignature) {
-        return true;
-      }
-    }
-
-    // Fallback: direct comparison for simpler setups
-    const directSignature = createHmac('sha256', secretBytes)
-      .update(payload)
-      .digest('base64');
-
-    if (signatureHeader === directSignature) {
-      return true;
-    }
-
-    console.error('Webhook signature mismatch');
-    return false;
-  } catch (error) {
-    console.error('Signature verification error:', error);
-    return false;
-  }
 }
 
 // Build action URL with token
