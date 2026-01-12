@@ -71,11 +71,9 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   );
 
-  // Redirect unauthenticated users to login
+  // Redirect unauthenticated users to landing page
   if (isProtectedRoute && !user) {
-    const redirectUrl = new URL('/auth/login', request.url);
-    redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname);
-    return NextResponse.redirect(redirectUrl);
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   // Redirect authenticated users away from auth pages (except specific pages)
