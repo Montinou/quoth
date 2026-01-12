@@ -106,13 +106,30 @@ supabase db push --linked
 
 ## Architecture
 
-Quoth uses the **Genesis Strategy** pattern:
+Quoth uses the **Genesis Strategy v2.0** pattern:
 
-1. **Persona Injection**: The `quoth_genesis` tool delivers a system prompt
-2. **Local Analysis**: The AI client reads local files using its native capabilities
-3. **Direct Save**: Changes are saved directly to Supabase (or via proposal if configured)
-4. **Incremental Indexing**: Only changed chunks are re-embedded (token optimization)
+1. **User Confirmation**: Genesis asks user about documentation depth before starting
+2. **Persona Injection**: The `quoth_genesis` tool delivers a phased system prompt
+3. **Local Analysis**: The AI client reads local files using its native capabilities
+4. **Incremental Upload**: Each document is uploaded immediately after creation (not batched)
 5. **Automatic Versioning**: Database triggers preserve history automatically
+
+### Genesis v2.0 Depth Levels
+
+| Level | Documents | Time | Use Case |
+|-------|-----------|------|----------|
+| `minimal` | 3 | ~3 min | Quick overview, basic context |
+| `standard` | 5 | ~7 min | Team onboarding, regular development |
+| `comprehensive` | 11 | ~20 min | Enterprise audit, full documentation |
+
+### Genesis Phases
+
+- **Phase 0: Configuration** - Present settings, wait for user confirmation
+- **Phase 1: Foundation** (all depths) - `project-overview.md`, `tech-stack.md`
+- **Phase 2: Architecture** (all depths) - `repo-structure.md`
+- **Phase 3: Patterns** (standard+) - `coding-conventions.md`, `testing-patterns.md`
+- **Phase 4: Contracts** (comprehensive) - `api-schemas.md`, `database-models.md`, `shared-types.md`
+- **Phase 5: Advanced** (comprehensive) - `error-handling.md`, `security-patterns.md`, `tech-debt.md`
 
 ### Key Differences from Previous Architecture
 
@@ -130,7 +147,7 @@ The core MCP implementation exposes 4 tools and 2 prompts:
 - `quoth_search_index` - Semantic vector search using Gemini embeddings (768 dimensions)
 - `quoth_read_doc` - Retrieves full document content from Supabase
 - `quoth_propose_update` - Submits documentation update proposals with evidence
-- `quoth_genesis` - Injects Genesis Architect persona for codebase analysis
+- `quoth_genesis` - Genesis v2.0: phased documentation with depth levels (minimal/standard/comprehensive)
 
 **Prompts (Personas):**
 - `quoth_architect` - For code generation, enforces "Single Source of Truth" rules
