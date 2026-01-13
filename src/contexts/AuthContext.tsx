@@ -72,7 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (error || !user) {
           // Session was invalid/expired and couldn't refresh
-          // Clear local state and continue as anonymous
+          // Clear stale auth data to prevent stuck state
+          console.log('[AuthContext] Clearing stale session data');
+          await supabase.auth.signOut();
           setLoading(false);
           return;
         }
