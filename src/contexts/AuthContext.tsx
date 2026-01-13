@@ -8,7 +8,7 @@
 
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -26,6 +26,7 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
+  profileLoading: boolean;
   profileError: string | null;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, username: string) => Promise<{ error: Error | null }>;
@@ -40,8 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [supabase] = useState(() => createClient());
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -77,7 +80,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Valid session - set user and fetch profile
         setUser(user);
         setSession(localSession);
-        await fetchProfile(user.id);
+
+        // Create abort controller for initial fetch
+        abortControllerRef.current = new AbortController();
+        await fetchProfile(user.id, abortControllerRef.current.signal);
 
         if (mounted) {
           setLoading(false);
@@ -98,13 +104,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async (_event, session) => {
         if (!mounted) return;
 
+        // Abort any in-flight profile fetch
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          await fetchProfile(session.user.id);
+          // Create new abort controller for this fetch
+          abortControllerRef.current = new AbortController();
+          await fetchProfile(session.user.id, abortControllerRef.current.signal);
         } else {
           setProfile(null);
+          setProfileLoading(false);
         }
       }
     );
@@ -112,20 +126,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      // Abort any in-flight profile fetch on cleanup
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [supabase]);
 
   // Note: Focus refresh removed - middleware handles session refresh
 
-  async function fetchProfile(userId: string) {
+  async function fetchProfile(userId: string, abortSignal?: AbortSignal) {
     try {
+      setProfileLoading(true);
       setProfileError(null);
+
+      // Check if aborted before fetching
+      if (abortSignal?.aborted) return;
+
+      // Verify session is still valid before fetching
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession || currentSession.user?.id !== userId) {
+        console.log('[AuthContext] Session changed, aborting profile fetch');
+        return;
+      }
+
+      if (abortSignal?.aborted) return;
 
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
+
+      // Check if aborted after fetching
+      if (abortSignal?.aborted) return;
 
       if (error) {
         console.error('[AuthContext] Profile fetch error:', error);
@@ -137,8 +171,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(data as Profile);
       }
     } catch (err) {
+      if (abortSignal?.aborted) return;
       console.error('[AuthContext] Failed to load profile:', err);
       setProfileError('Failed to load profile');
+    } finally {
+      if (!abortSignal?.aborted) {
+        setProfileLoading(false);
+      }
     }
   }
 
@@ -186,10 +225,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     try {
+      // Abort any in-flight profile fetch
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       await supabase.auth.signOut();
       setUser(null);
       setProfile(null);
       setSession(null);
+      setProfileLoading(false);
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -206,6 +250,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     profile,
     session,
     loading,
+    profileLoading,
     profileError,
     signIn,
     signUp,

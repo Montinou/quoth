@@ -7,6 +7,7 @@ import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface NavLink {
   href: string;
@@ -31,9 +32,13 @@ export function Navbar({
   links = defaultLinks,
   showAuth = true,
 }: NavbarProps) {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading, profileLoading, signOut } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const router = useRouter();
+  const hydrated = useHydrated();
+
+  // Show loading state during SSR, hydration, and initial auth check
+  const isLoading = !hydrated || loading;
 
   const handleSignOut = async () => {
     setDropdownOpen(false);
@@ -67,8 +72,8 @@ export function Navbar({
 
         {showAuth && (
           <div className="flex items-center gap-4">
-            {loading ? (
-              // Loading state - show skeleton
+            {isLoading ? (
+              // Loading state - show skeleton during SSR, hydration, and initial auth
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-violet-spectral/10 animate-pulse" />
                 <div className="hidden md:block w-20 h-4 bg-violet-spectral/10 rounded animate-pulse" />
@@ -81,12 +86,20 @@ export function Navbar({
                   className="flex items-center gap-2 text-sm hover:text-violet-ghost transition-colors"
                 >
                   <div className="w-8 h-8 rounded-full bg-violet-spectral/20 flex items-center justify-center border border-violet-spectral/30">
-                    <span className="text-violet-spectral font-medium">
-                      {profile?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
-                    </span>
+                    {profileLoading ? (
+                      <div className="w-4 h-4 bg-violet-spectral/30 rounded animate-pulse" />
+                    ) : (
+                      <span className="text-violet-spectral font-medium">
+                        {profile?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
+                      </span>
+                    )}
                   </div>
                   <span className="hidden md:block">
-                    {profile?.username || user.email?.split('@')[0] || 'User'}
+                    {profileLoading ? (
+                      <span className="inline-block w-16 h-4 bg-violet-spectral/10 rounded animate-pulse" />
+                    ) : (
+                      profile?.username || user.email?.split('@')[0] || 'User'
+                    )}
                   </span>
                   <svg
                     className={cn(
