@@ -170,6 +170,67 @@ export interface RAGAnswer {
 }
 
 /**
+ * Build XML prompt for Gemini 2.0 Flash RAG responses
+ */
+function buildRAGPrompt(query: string, contexts: RAGContext[]): string {
+  const contextDocs = contexts
+    .slice(0, 5)
+    .map((ctx, i) => `
+    <document index="${i + 1}" relevance="${Math.round(ctx.relevance * 100)}%">
+      <title>${ctx.title}</title>
+      <path>${ctx.path}</path>
+      <content>
+${ctx.content}
+      </content>
+    </document>`)
+    .join('\n');
+
+  return `<system>
+  <role>Quoth Documentation Assistant</role>
+  <description>
+    You are an AI assistant for Quoth, a technical documentation knowledge base.
+    Your job is to answer user questions based ONLY on the retrieved documentation context.
+  </description>
+</system>
+
+<pipeline_context>
+  <description>
+    The user's query has been processed through a RAG (Retrieval-Augmented Generation) pipeline:
+    1. Jina Embeddings (512d) converted the query to a vector
+    2. Supabase vector search found 50 candidate documents
+    3. Cohere Rerank (rerank-english-v3.0) ranked them by relevance
+    4. Top 5 most relevant documents are provided below
+  </description>
+  <note>Relevance scores are from Cohere reranking (0-100%). Higher = more relevant.</note>
+</pipeline_context>
+
+<retrieved_documents>
+${contextDocs}
+</retrieved_documents>
+
+<user_query>${query}</user_query>
+
+<instructions>
+  <rule priority="critical">ONLY use information from the retrieved documents above. Never invent or assume.</rule>
+  <rule priority="critical">If the documents don't contain enough information, explicitly say so.</rule>
+  <rule>Use markdown formatting: code blocks with language tags, bullet lists, bold for emphasis.</rule>
+  <rule>Be concise and actionable. Developers want quick, accurate answers.</rule>
+  <rule>Reference which document(s) you're citing when relevant.</rule>
+  <rule>Suggest 2-3 follow-up questions the user might want to explore.</rule>
+</instructions>
+
+<response_format>
+  <answer>Your main response here (markdown formatted)</answer>
+
+  <related_questions>
+  - First follow-up question?
+  - Second follow-up question?
+  - Third follow-up question?
+  </related_questions>
+</response_format>`;
+}
+
+/**
  * Generate an AI answer using Gemini 2.0 Flash based on retrieved context
  */
 export async function generateRAGAnswer(
@@ -182,35 +243,16 @@ export async function generateRAGAnswer(
 
   if (contexts.length === 0) {
     return {
-      answer: "No relevant documentation found for your query.",
+      answer: "No relevant documentation found for your query. Try rephrasing your question or using different keywords.",
       sources: [],
-      relatedQuestions: [],
+      relatedQuestions: [
+        "What documentation is available?",
+        "How do I search the knowledge base?",
+      ],
     };
   }
 
-  // Build context string from retrieved documents
-  const contextStr = contexts
-    .slice(0, 5) // Use top 5 most relevant
-    .map((ctx, i) => `[Source ${i + 1}: ${ctx.title}]\n${ctx.content}`)
-    .join("\n\n---\n\n");
-
-  const prompt = `You are a helpful documentation assistant. Answer the user's question based ONLY on the provided documentation context. Be concise, accurate, and cite your sources.
-
-## Rules:
-1. Only use information from the provided context
-2. If the context doesn't contain enough information, say so
-3. Use markdown formatting for code snippets and lists
-4. Keep the answer focused and actionable
-5. Suggest 2-3 related questions the user might want to ask
-
-## Documentation Context:
-${contextStr}
-
-## User Question:
-${query}
-
-## Response Format:
-Provide your answer, then list related questions the user might want to explore.`;
+  const prompt = buildRAGPrompt(query, contexts);
 
   try {
     const result = await flashModel.generateContent(prompt);
