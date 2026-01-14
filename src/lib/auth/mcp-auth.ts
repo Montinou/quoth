@@ -22,7 +22,10 @@ export interface AuthContext {
 
 /**
  * Verify a Supabase OAuth token
- * Claims are in app_metadata (injected by Custom Access Token Hook)
+ * Claims are in the JWT payload's app_metadata (injected by Custom Access Token Hook)
+ *
+ * IMPORTANT: The hook injects claims into the JWT itself, NOT into the user record.
+ * So we must decode the JWT to read project_id and mcp_role, not rely on getUser().
  */
 async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -43,7 +46,7 @@ async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
       },
     });
 
-    // Verify token with Supabase
+    // Verify token with Supabase (this validates the token is legitimate)
     console.log('[MCP Auth] Calling supabase.auth.getUser...');
     const {
       data: { user },
@@ -57,18 +60,28 @@ async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
       return null;
     }
 
-    // Log full app_metadata for debugging
-    console.log('[MCP Auth] User app_metadata:', JSON.stringify(user.app_metadata, null, 2));
+    // CRITICAL: Decode the JWT to read claims injected by Custom Access Token Hook
+    // The hook adds project_id and mcp_role to the JWT's app_metadata claims,
+    // NOT to the user record's app_metadata (which is what getUser returns)
+    const decoded = decodeJwt(token);
+    const jwtAppMetadata = decoded.app_metadata as Record<string, unknown> | undefined;
 
-    // Extract claims injected by Custom Access Token Hook
-    const projectId = user.app_metadata?.project_id;
-    const role = user.app_metadata?.mcp_role;
+    console.log('[MCP Auth] JWT app_metadata (from hook):', JSON.stringify(jwtAppMetadata, null, 2));
+    console.log('[MCP Auth] User record app_metadata (from DB):', JSON.stringify(user.app_metadata, null, 2));
 
-    console.log('[MCP Auth] Extracted claims:', { projectId, role });
+    // Extract claims from JWT (injected by Custom Access Token Hook)
+    const projectId = jwtAppMetadata?.project_id as string | undefined;
+    const role = jwtAppMetadata?.mcp_role as string | undefined;
+
+    console.log('[MCP Auth] Extracted JWT claims:', { projectId, role });
 
     if (!projectId) {
-      console.warn('[MCP Auth] Supabase token missing project_id in app_metadata');
-      console.warn('[MCP Auth] Full user object:', JSON.stringify(user, null, 2));
+      console.warn('[MCP Auth] JWT missing project_id in app_metadata');
+      console.warn('[MCP Auth] This usually means:');
+      console.warn('[MCP Auth]   1. Custom Access Token Hook is not enabled in Supabase Dashboard');
+      console.warn('[MCP Auth]   2. User has no default_project_id in their profile');
+      console.warn('[MCP Auth]   3. The hook function failed silently');
+      console.warn('[MCP Auth] Full JWT payload:', JSON.stringify(decoded, null, 2));
       return null;
     }
 
