@@ -125,14 +125,16 @@ function ConsentForm() {
         return;
       }
 
-      // Supabase should handle the redirect automatically after approval
-      // If we're still here after a moment, show success
-      setTimeout(() => {
-        if (authDetails?.redirect_uri) {
-          // Redirect manually if Supabase didn't
-          console.log('[Consent] Manual redirect to:', authDetails.redirect_uri);
-        }
-      }, 2000);
+      // Redirect to the callback URL with authorization code
+      if (data.redirect_uri) {
+        console.log('[Consent] Redirecting to:', data.redirect_uri);
+        window.location.href = data.redirect_uri;
+      } else {
+        // Fallback: use the redirect_uri from auth details
+        console.log('[Consent] No redirect_uri in response, using fallback');
+        setError('Authorization approved but no redirect URL received');
+        setProcessing(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve authorization');
       setProcessing(false);
@@ -163,7 +165,15 @@ function ConsentForm() {
         return;
       }
 
-      // Supabase should handle the redirect automatically after denial
+      // Redirect to the callback URL with error
+      if (data.redirect_uri) {
+        console.log('[Consent] Redirecting (denied) to:', data.redirect_uri);
+        window.location.href = data.redirect_uri;
+      } else {
+        // Fallback: go to dashboard
+        console.log('[Consent] No redirect_uri in response, going to dashboard');
+        router.push('/dashboard');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to deny authorization');
       setProcessing(false);

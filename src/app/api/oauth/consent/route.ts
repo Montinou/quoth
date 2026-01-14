@@ -111,22 +111,36 @@ export async function POST(request: NextRequest) {
     console.log(`[OAuth Consent API] User ${user.id} ${action}ing authorization:`, authorization_id);
 
     if (action === 'approve') {
-      const { error } = await supabase.auth.oauth.approveAuthorization(authorization_id);
+      const { data, error } = await supabase.auth.oauth.approveAuthorization(authorization_id);
+      console.log('[OAuth Consent API] Approve response:', { data, error });
       if (error) {
         console.error('[OAuth Consent API] Approve error:', error);
         return NextResponse.json({ error: error.message }, { status: 400, headers: corsHeaders });
       }
       console.log('[OAuth Consent API] Authorization approved');
+
+      // Return the redirect URL so client can redirect
+      const redirectUrl = (data as { redirect_uri?: string })?.redirect_uri;
+      return NextResponse.json({
+        success: true,
+        redirect_uri: redirectUrl
+      }, { headers: corsHeaders });
     } else {
-      const { error } = await supabase.auth.oauth.denyAuthorization(authorization_id);
+      const { data, error } = await supabase.auth.oauth.denyAuthorization(authorization_id);
+      console.log('[OAuth Consent API] Deny response:', { data, error });
       if (error) {
         console.error('[OAuth Consent API] Deny error:', error);
         return NextResponse.json({ error: error.message }, { status: 400, headers: corsHeaders });
       }
       console.log('[OAuth Consent API] Authorization denied');
-    }
 
-    return NextResponse.json({ success: true }, { headers: corsHeaders });
+      // Return the redirect URL so client can redirect
+      const redirectUrl = (data as { redirect_uri?: string })?.redirect_uri;
+      return NextResponse.json({
+        success: true,
+        redirect_uri: redirectUrl
+      }, { headers: corsHeaders });
+    }
 
   } catch (err) {
     console.error('[OAuth Consent API] POST error:', err);
