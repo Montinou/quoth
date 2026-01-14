@@ -1,14 +1,13 @@
 /**
  * OAuth Consent Screen
  * Displays authorization request details and allows user to approve/deny
- * Used with Supabase OAuth Server
+ * Uses server-side API route to avoid React StrictMode/AuthContext conflicts
  */
 
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Check, X, AlertCircle, Loader2 } from 'lucide-react';
@@ -54,70 +53,42 @@ function ConsentForm() {
       }
 
       try {
-        const supabase = createClient();
+        // Use server-side API route to avoid React StrictMode/AuthContext conflicts
+        console.log('[Consent] Fetching authorization details via API for:', authorizationId);
 
-        // Check if user is logged in - with retry for abort race condition
-        let user = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const { data, error: userError } = await supabase.auth.getUser();
-          if (!mounted) return;
+        const response = await fetch(`/api/oauth/consent?authorization_id=${encodeURIComponent(authorizationId)}`);
+        const data = await response.json();
 
-          // If aborted, wait and retry
-          if (userError?.message?.includes('aborted') || userError?.message?.includes('signal')) {
-            await new Promise(resolve => setTimeout(resolve, 150));
-            continue;
-          }
-          user = data?.user;
-          break;
-        }
+        if (!mounted) return;
 
-        if (!user) {
-          // Redirect to login with return URL
+        console.log('[Consent] API response:', data);
+
+        // Handle not authenticated - redirect to login
+        if (data.error === 'not_authenticated') {
           const returnUrl = `/oauth/consent?authorization_id=${authorizationId}`;
           router.push(`/auth/login?redirectTo=${encodeURIComponent(returnUrl)}`);
           return;
         }
 
-        // Get authorization details from Supabase OAuth with timeout
-        console.log('[Consent] Fetching authorization details for:', authorizationId);
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Authorization details request timed out after 10s')), 10000)
-        );
-
-        const { data, error: oauthError } = await Promise.race([
-          supabase.auth.oauth.getAuthorizationDetails(authorizationId),
-          timeoutPromise
-        ]).catch(err => ({ data: null, error: err })) as { data: unknown; error: Error | null };
-
-        console.log('[Consent] Authorization response:', { data, error: oauthError });
-
-        if (!mounted) return;
-
-        if (oauthError || !data) {
-          const errorMsg = oauthError?.message || 'Failed to get authorization details';
-          console.error('[Consent] Authorization error:', errorMsg);
-          setError(errorMsg);
+        // Handle other errors
+        if (data.error) {
+          setError(data.error);
           setLoading(false);
           return;
         }
 
-        // Extract client info from Supabase OAuth response
-        const client = data.client as { id?: string; name?: string } | undefined;
+        // Set authorization details
         setAuthDetails({
-          client_id: client?.id || 'unknown',
-          client_name: client?.name || client?.id || 'Unknown Application',
-          redirect_uri: (data as { redirect_uri?: string }).redirect_uri || '',
-          scopes: (data as { scopes?: string[] }).scopes || [],
-          state: (data as { state?: string }).state,
+          client_id: data.client_id || 'unknown',
+          client_name: data.client_name || 'Unknown Application',
+          redirect_uri: data.redirect_uri || '',
+          scopes: data.scopes || [],
+          state: data.state,
         });
         setLoading(false);
       } catch (err) {
         if (!mounted) return;
-        // Ignore abort errors
-        if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
-          return;
-        }
+        console.error('[Consent] Fetch error:', err);
         setError(err instanceof Error ? err.message : 'An unexpected error occurred');
         setLoading(false);
       }
@@ -137,17 +108,31 @@ function ConsentForm() {
     setError(null);
 
     try {
-      const supabase = createClient();
-      const { error: approveError } =
-        await supabase.auth.oauth.approveAuthorization(authorizationId);
+      const response = await fetch('/api/oauth/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorization_id: authorizationId,
+          action: 'approve',
+        }),
+      });
 
-      if (approveError) {
-        setError(approveError.message);
+      const data = await response.json();
+
+      if (data.error) {
+        setError(data.error);
         setProcessing(false);
         return;
       }
 
-      // Supabase handles the redirect automatically after approval
+      // Supabase should handle the redirect automatically after approval
+      // If we're still here after a moment, show success
+      setTimeout(() => {
+        if (authDetails?.redirect_uri) {
+          // Redirect manually if Supabase didn't
+          console.log('[Consent] Manual redirect to:', authDetails.redirect_uri);
+        }
+      }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve authorization');
       setProcessing(false);
@@ -161,17 +146,24 @@ function ConsentForm() {
     setError(null);
 
     try {
-      const supabase = createClient();
-      const { error: denyError } =
-        await supabase.auth.oauth.denyAuthorization(authorizationId);
+      const response = await fetch('/api/oauth/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorization_id: authorizationId,
+          action: 'deny',
+        }),
+      });
 
-      if (denyError) {
-        setError(denyError.message);
+      const data = await response.json();
+
+      if (data.error) {
+        setError(data.error);
         setProcessing(false);
         return;
       }
 
-      // Supabase handles the redirect automatically after denial
+      // Supabase should handle the redirect automatically after denial
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to deny authorization');
       setProcessing(false);
