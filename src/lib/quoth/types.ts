@@ -107,3 +107,59 @@ export const DEFAULT_CONFIG: QuothConfig = {
   knowledgeBasePath: './quoth-knowledge-base',
   cacheRevalidateSeconds: 3600,
 };
+
+// ============ Chunk-Level Access Types ============
+
+/**
+ * Metadata associated with a chunk
+ */
+export interface ChunkMetadata {
+  chunk_index?: number;
+  language?: string;
+  filePath?: string;
+  parentContext?: string;
+  startLine?: number;
+  endLine?: number;
+  source?: string;
+}
+
+/**
+ * Lightweight chunk reference returned in search results
+ * Contains truncated preview for AI to decide which chunks to fetch
+ */
+export interface ChunkReference {
+  chunk_id: string;           // UUID of the chunk
+  document_id: string;        // UUID of the parent document
+  document_title: string;     // Human-readable document title
+  document_path: string;      // File path (e.g., "patterns/vitest.md")
+  document_type: DocumentFrontmatter['type'];
+  chunk_index: number;        // Position within document (0-based)
+  preview: string;            // Truncated preview (200 chars)
+  relevance: number;          // Rerank score (0-1)
+  metadata: ChunkMetadata;    // Additional context
+}
+
+/**
+ * Full chunk data returned by quoth_read_chunks
+ * Contains complete chunk content
+ */
+export interface ChunkData {
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  document_path: string;
+  document_type: DocumentFrontmatter['type'];
+  chunk_index: number;
+  content: string;            // FULL chunk content
+  total_chunks: number;       // Total chunks in parent document
+  metadata: ChunkMetadata;
+}
+
+/**
+ * Input schema for quoth_read_chunks tool
+ */
+export const ReadChunksInputSchema = z.object({
+  chunk_ids: z.array(z.string())
+    .min(1).max(20)
+    .describe('Array of chunk IDs from search results (1-20 chunks)'),
+});

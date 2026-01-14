@@ -33,6 +33,21 @@ export interface MatchResult {
   similarity: number;
   file_path: string;
   title: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Result from get_chunks_by_ids RPC
+ */
+export interface ChunkByIdResult {
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  document_path: string;
+  content_chunk: string;
+  chunk_index: number;
+  metadata: Record<string, unknown>;
+  total_chunks: number;
 }
 
 // Server-side Supabase client using Service Role key

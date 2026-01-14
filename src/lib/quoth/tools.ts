@@ -12,6 +12,7 @@ import {
   searchDocuments,
   readDocument,
   buildSearchIndex,
+  readChunks,
 } from './search';
 import { supabase } from '../supabase';
 import { registerGenesisTools } from './genesis';
@@ -70,14 +71,18 @@ export function registerQuothTools(
           else if (doc.relevance! > 0.6) trustLevel = 'MEDIUM';
 
           return `
-<document index="${index + 1}" trust="${trustLevel}" relevance="${similarity}%">
-  <title>${doc.title}</title>
-  <path>${doc.path}</path>
-  <type>${doc.type}</type>
+<chunk index="${index + 1}" trust="${trustLevel}" relevance="${similarity}%">
+  <chunk_id>${doc.chunk_id}</chunk_id>
+  <document>
+    <title>${doc.title}</title>
+    <path>${doc.path}</path>
+    <type>${doc.type}</type>
+  </document>
+  <position>${(doc.chunk_index ?? 0) + 1} of document</position>
   <content>
     ${doc.snippet || '(No content snippet)'}
   </content>
-</document>`;
+</chunk>`;
         }).join('\n');
 
         return {
@@ -89,10 +94,13 @@ ${formattedResults}
 </search_results>
 
 Instructions:
-- Use HIGH trust documents as primary sources.
-- Use MEDIUM trust documents for context.
-- Verify LOW trust documents against other sources.
-- To read full content, use \`quoth_read_doc\` with the document path.`,
+- HIGH trust chunks are primary sources
+- MEDIUM trust chunks provide context
+- LOW trust chunks should be cross-referenced
+
+**Access Options:**
+- \`quoth_read_chunks\` with chunk_id(s) → fetch specific chunks (token-efficient)
+- \`quoth_read_doc\` with document path → fetch full document`,
             },
           ],
         };
@@ -607,6 +615,84 @@ ${content}
           content: [{
             type: 'text' as const,
             text: `Error getting template: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 6: quoth_read_chunks (Fetch Chunks by ID)
+  server.registerTool(
+    'quoth_read_chunks',
+    {
+      title: 'Read Chunks by ID',
+      description:
+        'Fetches full content of specific chunks by their IDs. Use chunk IDs from quoth_search_chunks results. Supports batch retrieval (1-20 chunks per call).',
+      inputSchema: {
+        chunk_ids: z.array(z.string())
+          .min(1).max(20)
+          .describe('Array of chunk IDs from search results (1-20 chunks)'),
+      },
+    },
+    async ({ chunk_ids }) => {
+      try {
+        const chunks = await readChunks(chunk_ids, authContext.project_id);
+
+        if (chunks.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No chunks found with the provided IDs.\n\nVerify the IDs are from your project's search results.`,
+            }],
+          };
+        }
+
+        // Group chunks by document for readability
+        const byDocument = new Map<string, typeof chunks>();
+        for (const chunk of chunks) {
+          const key = chunk.document_path;
+          if (!byDocument.has(key)) {
+            byDocument.set(key, []);
+          }
+          byDocument.get(key)!.push(chunk);
+        }
+
+        let output = `<chunks count="${chunks.length}" documents="${byDocument.size}">\n`;
+
+        for (const [docPath, docChunks] of byDocument) {
+          const firstChunk = docChunks[0];
+          output += `
+<document path="${docPath}" title="${firstChunk.document_title}" total_chunks="${firstChunk.total_chunks}">`;
+
+          for (const chunk of docChunks.sort((a, b) => a.chunk_index - b.chunk_index)) {
+            output += `
+  <chunk id="${chunk.chunk_id}" position="${chunk.chunk_index + 1} of ${chunk.total_chunks}">
+    ${chunk.metadata.language ? `<language>${chunk.metadata.language}</language>` : ''}
+    ${chunk.metadata.parentContext ? `<context>${chunk.metadata.parentContext}</context>` : ''}
+    <content>
+${chunk.content}
+    </content>
+  </chunk>`;
+          }
+
+          output += `
+</document>`;
+        }
+
+        output += `
+</chunks>`;
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: output,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error reading chunks: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
         };
       }
