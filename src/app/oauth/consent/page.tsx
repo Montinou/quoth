@@ -130,9 +130,13 @@ function ConsentForm() {
         console.log('[Consent] Redirecting to:', data.redirect_uri);
         window.location.href = data.redirect_uri;
       } else {
-        // Fallback: use the redirect_uri from auth details
-        console.log('[Consent] No redirect_uri in response, using fallback');
-        setError('Authorization approved but no redirect URL received');
+        // Log debug data to help diagnose
+        console.log('[Consent] No redirect_uri in response. Debug data:', data._debug_data);
+        console.log('[Consent] Full response:', data);
+
+        // Check if maybe we need to construct the redirect URL ourselves
+        // based on the original redirect_uri + authorization code
+        setError(`Authorization approved but no redirect URL received. Check console for debug data.`);
         setProcessing(false);
       }
     } catch (err) {

@@ -112,33 +112,52 @@ export async function POST(request: NextRequest) {
 
     if (action === 'approve') {
       const { data, error } = await supabase.auth.oauth.approveAuthorization(authorization_id);
-      console.log('[OAuth Consent API] Approve response:', { data, error });
+      console.log('[OAuth Consent API] Approve response - full data:', JSON.stringify(data, null, 2));
+      console.log('[OAuth Consent API] Approve response - error:', error);
       if (error) {
         console.error('[OAuth Consent API] Approve error:', error);
         return NextResponse.json({ error: error.message }, { status: 400, headers: corsHeaders });
       }
       console.log('[OAuth Consent API] Authorization approved');
 
-      // Return the redirect URL so client can redirect
-      const redirectUrl = (data as { redirect_uri?: string })?.redirect_uri;
+      // Try to find redirect URL in various possible locations
+      const dataObj = data as Record<string, unknown>;
+      const redirectUrl = dataObj?.redirect_uri ||
+                          dataObj?.redirect_to ||
+                          dataObj?.url ||
+                          dataObj?.callback_url ||
+                          (dataObj as { redirect?: string })?.redirect;
+
+      console.log('[OAuth Consent API] Extracted redirect URL:', redirectUrl);
+      console.log('[OAuth Consent API] All data keys:', data ? Object.keys(data) : 'no data');
+
       return NextResponse.json({
         success: true,
-        redirect_uri: redirectUrl
+        redirect_uri: redirectUrl,
+        // Include full data for debugging
+        _debug_data: data
       }, { headers: corsHeaders });
     } else {
       const { data, error } = await supabase.auth.oauth.denyAuthorization(authorization_id);
-      console.log('[OAuth Consent API] Deny response:', { data, error });
+      console.log('[OAuth Consent API] Deny response - full data:', JSON.stringify(data, null, 2));
       if (error) {
         console.error('[OAuth Consent API] Deny error:', error);
         return NextResponse.json({ error: error.message }, { status: 400, headers: corsHeaders });
       }
       console.log('[OAuth Consent API] Authorization denied');
 
-      // Return the redirect URL so client can redirect
-      const redirectUrl = (data as { redirect_uri?: string })?.redirect_uri;
+      // Try to find redirect URL in various possible locations
+      const dataObj = data as Record<string, unknown>;
+      const redirectUrl = dataObj?.redirect_uri ||
+                          dataObj?.redirect_to ||
+                          dataObj?.url ||
+                          dataObj?.callback_url ||
+                          (dataObj as { redirect?: string })?.redirect;
+
       return NextResponse.json({
         success: true,
-        redirect_uri: redirectUrl
+        redirect_uri: redirectUrl,
+        _debug_data: data
       }, { headers: corsHeaders });
     }
 
