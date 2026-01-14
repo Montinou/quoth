@@ -24,45 +24,28 @@ export async function GET() {
   // Use Supabase as the OAuth server if configured
   const useSupabaseOAuth = SUPABASE_URL && process.env.USE_SUPABASE_OAUTH === 'true';
 
-  const metadata = useSupabaseOAuth
-    ? {
-        // Supabase OAuth Server configuration
-        issuer: SUPABASE_URL,
-        authorization_endpoint: `${SUPABASE_URL}/auth/v1/authorize`,
-        token_endpoint: `${SUPABASE_URL}/auth/v1/token`,
-        registration_endpoint: `${SUPABASE_URL}/auth/v1/oauth/register`,
+  // When using Supabase OAuth, we use proxy endpoints that add the apikey header
+  // This is required because Supabase endpoints need the apikey for project identification
+  const metadata = {
+    issuer: APP_URL,
+    authorization_endpoint: `${APP_URL}/api/oauth/authorize`,
+    token_endpoint: `${APP_URL}/api/oauth/token`,
+    registration_endpoint: `${APP_URL}/api/oauth/register`,
 
-        // Supported features
-        response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code', 'refresh_token'],
-        token_endpoint_auth_methods_supported: ['none'],
-        code_challenge_methods_supported: ['S256'],
+    // Supported features
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
+    token_endpoint_auth_methods_supported: ['none'],
+    code_challenge_methods_supported: ['S256'],
 
-        // OpenID Connect scopes
-        scopes_supported: ['openid', 'email', 'profile'],
+    // Scopes - use OpenID for Supabase OAuth, MCP scopes for legacy
+    scopes_supported: useSupabaseOAuth
+      ? ['openid', 'email', 'profile']
+      : ['mcp:read', 'mcp:write', 'mcp:admin'],
 
-        // Service documentation
-        service_documentation: `${APP_URL}/guide`,
-      }
-    : {
-        // Legacy custom OAuth configuration
-        issuer: APP_URL,
-        authorization_endpoint: `${APP_URL}/api/oauth/authorize`,
-        token_endpoint: `${APP_URL}/api/oauth/token`,
-        registration_endpoint: `${APP_URL}/api/oauth/register`,
-
-        // Supported features
-        response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code', 'refresh_token'],
-        token_endpoint_auth_methods_supported: ['none'],
-        code_challenge_methods_supported: ['S256'],
-
-        // MCP scopes
-        scopes_supported: ['mcp:read', 'mcp:write', 'mcp:admin'],
-
-        // Service documentation
-        service_documentation: `${APP_URL}/guide`,
-      };
+    // Service documentation
+    service_documentation: `${APP_URL}/guide`,
+  };
 
   return NextResponse.json(metadata, {
     headers: corsHeaders,

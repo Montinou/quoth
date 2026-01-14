@@ -1,97 +1,64 @@
 /**
- * OAuth Dynamic Client Registration (RFC 7591)
- * 
- * Allows Claude Code to register itself as an OAuth client.
- * We use a simple in-memory store since clients are short-lived.
- * 
- * @see https://datatracker.ietf.org/doc/html/rfc7591
+ * OAuth Dynamic Client Registration Proxy
+ *
+ * Proxies registration requests to Supabase OAuth Server
+ * adding the required apikey header that MCP clients don't know about.
+ *
+ * @see RFC 7591 - OAuth 2.0 Dynamic Client Registration
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Simple in-memory client store (in production, use Redis or database)
-// Clients expire after 24 hours
-const registeredClients = new Map<string, {
-  client_id: string;
-  client_name?: string;
-  redirect_uris: string[];
-  created_at: number;
-}>();
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Max-Age': '86400',
+};
 
-// Cleanup old clients periodically
-setInterval(() => {
-  const now = Date.now();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-  for (const [id, client] of registeredClients) {
-    if (now - client.created_at > maxAge) {
-      registeredClients.delete(id);
-    }
-  }
-}, 60 * 60 * 1000); // Check every hour
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    
-    // Generate a unique client ID
-    const clientId = `claude-${crypto.randomUUID()}`;
-    
-    // Extract redirect URIs (required for authorization code flow)
-    const redirectUris = body.redirect_uris || [];
-    
-    // Store the client
-    registeredClients.set(clientId, {
-      client_id: clientId,
-      client_name: body.client_name,
-      redirect_uris: redirectUris,
-      created_at: Date.now(),
-    });
-
-    // Return client credentials per RFC 7591
-    const response = {
-      client_id: clientId,
-      client_id_issued_at: Math.floor(Date.now() / 1000),
-      
-      // Echo back provided metadata
-      client_name: body.client_name,
-      redirect_uris: redirectUris,
-      
-      // Supported grant types
-      grant_types: ['authorization_code'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'none', // Public client
-    };
-
-    return NextResponse.json(response, {
-      status: 201,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-      },
-    });
-  } catch (error) {
-    console.error('Client registration error:', error);
+export async function POST(request: NextRequest) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     return NextResponse.json(
-      { error: 'invalid_client_metadata' },
-      { status: 400 }
+      { error: 'server_error', error_description: 'OAuth server not configured' },
+      { status: 500, headers: corsHeaders }
     );
   }
-}
 
-// Export the client store for use by other endpoints
-export function getRegisteredClient(clientId: string) {
-  return registeredClients.get(clientId);
+  try {
+    // Get the registration request body
+    const body = await request.json();
+
+    // Forward to Supabase OAuth registration endpoint with apikey
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/oauth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    return NextResponse.json(data, {
+      status: response.status,
+      headers: corsHeaders,
+    });
+  } catch (error) {
+    console.error('OAuth registration proxy error:', error);
+    return NextResponse.json(
+      { error: 'server_error', error_description: 'Failed to process registration' },
+      { status: 500, headers: corsHeaders }
+    );
+  }
 }
 
 export async function OPTIONS() {
   return new Response(null, {
     status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+    headers: corsHeaders,
   });
 }
