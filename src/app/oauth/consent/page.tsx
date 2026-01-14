@@ -42,20 +42,34 @@ function ConsentForm() {
   const authorizationId = searchParams.get('authorization_id');
 
   useEffect(() => {
+    let mounted = true;
+
     async function fetchAuthorizationDetails() {
       if (!authorizationId) {
-        setError('Missing authorization_id parameter');
-        setLoading(false);
+        if (mounted) {
+          setError('Missing authorization_id parameter');
+          setLoading(false);
+        }
         return;
       }
 
       try {
         const supabase = createClient();
 
-        // Check if user is logged in
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        // Check if user is logged in - with retry for abort race condition
+        let user = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { data, error: userError } = await supabase.auth.getUser();
+          if (!mounted) return;
+
+          // If aborted, wait and retry
+          if (userError?.message?.includes('aborted') || userError?.message?.includes('signal')) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+            continue;
+          }
+          user = data?.user;
+          break;
+        }
 
         if (!user) {
           // Redirect to login with return URL
@@ -67,6 +81,8 @@ function ConsentForm() {
         // Get authorization details from Supabase OAuth
         const { data, error: oauthError } =
           await supabase.auth.oauth.getAuthorizationDetails(authorizationId);
+
+        if (!mounted) return;
 
         if (oauthError || !data) {
           setError(oauthError?.message || 'Failed to get authorization details');
@@ -85,12 +101,21 @@ function ConsentForm() {
         });
         setLoading(false);
       } catch (err) {
+        if (!mounted) return;
+        // Ignore abort errors
+        if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+          return;
+        }
         setError(err instanceof Error ? err.message : 'An unexpected error occurred');
         setLoading(false);
       }
     }
 
     fetchAuthorizationDetails();
+
+    return () => {
+      mounted = false;
+    };
   }, [authorizationId, router]);
 
   async function handleApprove() {
