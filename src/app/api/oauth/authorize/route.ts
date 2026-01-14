@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   
   // Build Supabase authorize URL with all params
-  const supabaseUrl = new URL(`${SUPABASE_URL}/auth/v1/authorize`);
+  // Correct endpoint: /auth/v1/oauth/authorize
+  const supabaseUrl = new URL(`${SUPABASE_URL}/auth/v1/oauth/authorize`);
   
   // Copy all query parameters
   searchParams.forEach((value, key) => {

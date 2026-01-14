@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward to Supabase OAuth token endpoint with apikey
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=authorization_code`, {
+    // Correct endpoint: /auth/v1/oauth/token (grant_type is in the body)
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/oauth/token`, {
       method: 'POST',
       headers: {
         'Content-Type': forwardContentType,

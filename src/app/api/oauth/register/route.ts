@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Forward to Supabase OAuth registration endpoint with apikey
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/oauth/register`, {
+    // Correct endpoint: /auth/v1/oauth/clients/register
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/oauth/clients/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
