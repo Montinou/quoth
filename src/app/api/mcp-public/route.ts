@@ -2,7 +2,7 @@
  * Public Quoth MCP Server API Route
  * Unauthenticated demo access to quoth-knowledge-base project
  *
- * Endpoint: /api/mcp/public (Streamable HTTP/SSE)
+ * Endpoint: /api/mcp-public (Streamable HTTP/SSE)
  *
  * Features:
  * - No authentication required (public demo)
