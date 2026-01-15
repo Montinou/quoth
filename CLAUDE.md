@@ -199,6 +199,28 @@ Uses CSS-first configuration with `@theme` directive in `globals.css`:
 - Colors: `obsidian`, `charcoal`, `graphite`, `violet-spectral`, `violet-glow`, `violet-ghost`
 - Custom utilities: `.glass-panel`, `.glass-btn`, `.drift-highlight`, `.card-glow`
 
+## Accessibility Guidelines
+
+### Text Contrast on Dark Backgrounds
+
+When using dark backgrounds (`bg-obsidian`, `bg-charcoal`), follow these color patterns:
+
+- **Body text**: `text-gray-400` (8.03:1 contrast, WCAG AAA)
+- **Headings**: `text-white` (21:1 contrast)
+- **Accent labels**: `text-violet-ghost` (14.68:1 contrast)
+- **Never use**: `text-graphite` (only 1.35:1 contrast - accessibility failure)
+
+### Design System Color Usage
+
+| Color | Purpose | Usage |
+|-------|---------|-------|
+| `graphite` (#262626) | Background | Card backgrounds, subtle dividers |
+| `gray-400` (#9CA3AF) | Body text | Primary readable text on dark backgrounds |
+| `white` (#FFFFFF) | Headings | Maximum contrast for emphasis |
+| `violet-ghost` (#DDD6FE) | Accent text | Small labels, secondary text with violet theme |
+
+**Important**: The `graphite` color is defined as a background color (see "Backgrounds (The Void)" in [tailwind.config.ts](tailwind.config.ts#L15-L17)). Using it for text on dark backgrounds results in WCAG accessibility failures. Always use `text-gray-400` for readable body text.
+
 ## Vector Search Architecture
 
 Quoth uses a RAG pipeline: Jina Embeddings → Supabase Vector Search → Cohere Rerank.

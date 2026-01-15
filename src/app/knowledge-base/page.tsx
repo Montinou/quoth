@@ -76,23 +76,23 @@ export default function KnowledgeBasePage() {
   };
 
   return (
-    <div className="min-h-screen bg-obsidian text-graphite">
+    <div className="min-h-screen bg-obsidian text-gray-400">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         <h1 className="text-3xl font-bold text-white mb-2">Knowledge Base</h1>
-        <p className="text-graphite mb-8">
+        <p className="text-gray-400 mb-8">
           Ask questions about your documentation - powered by AI
         </p>
 
         {/* Search Input */}
         <div className="relative mb-8">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-graphite" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Ask a question or search documentation..."
-            className="w-full pl-12 pr-32 py-4 rounded-xl border border-charcoal bg-charcoal text-white placeholder:text-graphite focus:border-violet-spectral outline-none"
+            className="w-full pl-12 pr-32 py-4 rounded-xl border border-charcoal bg-charcoal text-white placeholder:text-gray-400 focus:border-violet-spectral outline-none"
           />
           <button
             onClick={() => handleSearch()}
@@ -128,20 +128,20 @@ export default function KnowledgeBasePage() {
               </div>
               <div>
                 <h2 className="font-semibold text-white">AI Answer</h2>
-                <p className="text-xs text-graphite">Powered by Gemini 2.0 Flash</p>
+                <p className="text-xs text-gray-400">Powered by Gemini 2.0 Flash</p>
               </div>
             </div>
 
             {/* Answer Content */}
             <div className="p-6">
-              <div className="prose prose-invert prose-violet max-w-none prose-p:text-graphite prose-headings:text-white prose-code:text-violet-glow prose-pre:bg-charcoal prose-pre:border prose-pre:border-charcoal">
+              <div className="prose prose-invert prose-violet max-w-none prose-p:text-gray-400 prose-headings:text-white prose-code:text-violet-glow prose-pre:bg-charcoal prose-pre:border prose-pre:border-charcoal">
                 <ReactMarkdown>{response.aiAnswer}</ReactMarkdown>
               </div>
 
               {/* Sources */}
               {response.sources.length > 0 && (
                 <div className="mt-6 pt-4 border-t border-charcoal">
-                  <p className="text-xs text-graphite mb-2 uppercase tracking-wide">Sources</p>
+                  <p className="text-xs text-gray-400 mb-2 uppercase tracking-wide">Sources</p>
                   <div className="flex flex-wrap gap-2">
                     {response.sources.map((source, i) => (
                       <button
@@ -163,7 +163,7 @@ export default function KnowledgeBasePage() {
               {/* Related Questions */}
               {response.relatedQuestions.length > 0 && (
                 <div className="mt-6 pt-4 border-t border-charcoal">
-                  <p className="text-xs text-graphite mb-3 uppercase tracking-wide flex items-center gap-2">
+                  <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide flex items-center gap-2">
                     <Lightbulb size={12} />
                     Related Questions
                   </p>
@@ -177,7 +177,7 @@ export default function KnowledgeBasePage() {
                         <span>{question}</span>
                         <ChevronRight
                           size={16}
-                          className="text-graphite group-hover:text-violet-glow transition-colors"
+                          className="text-gray-400 group-hover:text-violet-glow transition-colors"
                         />
                       </button>
                     ))}
@@ -191,7 +191,7 @@ export default function KnowledgeBasePage() {
         {/* Document Results Section */}
         {response && response.results.length > 0 && (
           <div className="mb-4">
-            <h3 className="text-sm text-graphite uppercase tracking-wide mb-4">
+            <h3 className="text-sm text-gray-400 uppercase tracking-wide mb-4">
               {response.aiAnswer ? 'Related Documents' : 'Search Results'} ({response.results.length})
             </h3>
           </div>
@@ -210,7 +210,7 @@ export default function KnowledgeBasePage() {
                   <FileText className="text-violet-spectral" />
                   <div>
                     <h3 className="font-semibold text-white">{result.title}</h3>
-                    <p className="text-sm text-graphite">{result.path}</p>
+                    <p className="text-sm text-gray-400">{result.path}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -218,17 +218,17 @@ export default function KnowledgeBasePage() {
                     {Math.round(result.relevance * 100)}% match
                   </span>
                   {result.version && (
-                    <span className="px-2 py-1 text-xs rounded-full bg-charcoal text-graphite">
+                    <span className="px-2 py-1 text-xs rounded-full bg-charcoal text-gray-400">
                       v{result.version}
                     </span>
                   )}
                 </div>
               </div>
               {result.snippet && (
-                <p className="mt-4 text-graphite line-clamp-2">{result.snippet}</p>
+                <p className="mt-4 text-gray-400 line-clamp-2">{result.snippet}</p>
               )}
               {result.lastUpdated && (
-                <div className="mt-2 flex items-center gap-1 text-xs text-graphite">
+                <div className="mt-2 flex items-center gap-1 text-xs text-gray-400">
                   <Clock size={12} />
                   <span>{new Date(result.lastUpdated).toLocaleDateString()}</span>
                 </div>
@@ -237,7 +237,7 @@ export default function KnowledgeBasePage() {
           ))}
 
           {response && response.results.length === 0 && query && !loading && !error && (
-            <div className="text-center py-12 text-graphite">
+            <div className="text-center py-12 text-gray-400">
               No results found for "{query}"
             </div>
           )}
@@ -250,7 +250,7 @@ export default function KnowledgeBasePage() {
               <Sparkles className="text-violet-glow" size={32} />
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">Ask anything about your docs</h3>
-            <p className="text-graphite max-w-md mx-auto">
+            <p className="text-gray-400 max-w-md mx-auto">
               Get instant AI-powered answers based on your team's documentation.
               Try asking "How do I implement authentication?" or "What are our testing patterns?"
             </p>

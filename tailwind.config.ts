@@ -12,6 +12,8 @@ const config: Config = {
         // Backgrounds (The Void)
         obsidian: '#050505',
         charcoal: '#121212',
+        // WARNING: graphite is a BACKGROUND color, NOT for text on dark backgrounds
+        // Use text-gray-400 for readable body text on dark backgrounds
         graphite: '#262626',
         // Accents (The Magic) - Violet spectrum
         violet: {
