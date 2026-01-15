@@ -19,13 +19,19 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get user's project membership
-    const { data: membership } = await authSupabase
+    // Get user's project membership (use limit(1) instead of single() for multi-project users)
+    const { data: memberships, error: membershipError } = await authSupabase
       .from('project_members')
       .select('project_id')
       .eq('user_id', user.id)
-      .single();
+      .limit(1);
 
+    if (membershipError) {
+      console.error('Membership query error:', membershipError);
+      return Response.json({ error: 'Failed to verify project access' }, { status: 500 });
+    }
+
+    const membership = memberships?.[0];
     if (!membership) {
       return Response.json({ error: 'No project access' }, { status: 403 });
     }
@@ -57,12 +63,17 @@ export async function POST(request: Request) {
 
     for (const result of topResults) {
       // Get full document content
-      const { data: doc } = await supabase
+      const { data: doc, error: fetchError } = await supabase
         .from('documents')
         .select('content')
         .eq('project_id', membership.project_id)
         .eq('file_path', result.path)
         .single();
+
+      if (fetchError) {
+        console.error('Document fetch error:', fetchError.message, 'for path:', result.path);
+        continue; // Skip this document but continue with others
+      }
 
       if (doc) {
         contexts.push({

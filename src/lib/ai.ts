@@ -17,7 +17,7 @@ const googleModel = genAI?.getGenerativeModel({ model: "text-embedding-004" });
 
 // Gemini 2.0 Flash for generative responses (RAG answers)
 const flashModel = genAI?.getGenerativeModel({
-  model: "gemini-2.0-flash-exp",
+  model: "gemini-2.0-flash",  // Stable model (exp was deprecated)
   generationConfig: {
     temperature: 0.3,  // Lower for more factual responses
     topP: 0.8,
@@ -277,7 +277,12 @@ export async function generateRAGAnswer(
     };
   } catch (error) {
     console.error("Gemini 2.0 Flash generation failed:", error);
-    throw new Error("Failed to generate AI answer");
+    // Return fallback response instead of throwing - graceful degradation
+    return {
+      answer: "Unable to generate AI answer at this time. Please review the documents below.",
+      sources: contexts.slice(0, 5).map(ctx => ({ title: ctx.title, path: ctx.path })),
+      relatedQuestions: [],
+    };
   }
 }
 
