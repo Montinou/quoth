@@ -52,16 +52,27 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   )
 
+  // Public pages that should always be accessible (even for authenticated users)
+  const alwaysPublicRoutes = ['/landing', '/manifesto', '/protocol', '/guide', '/pricing']
+  const isAlwaysPublic = alwaysPublicRoutes.some((route) =>
+    request.nextUrl.pathname.startsWith(route)
+  )
+
   // Redirect unauthenticated users to landing page
   if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone()
-    url.pathname = '/'
+    url.pathname = '/landing'
     return NextResponse.redirect(url)
   }
 
-  // Redirect authenticated users from landing page to dashboard
+  // Redirect authenticated users from root to dashboard (but not from /landing)
   if (request.nextUrl.pathname === '/' && user) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
+  }
+
+  // Public pages are always accessible - no redirects
+  if (isAlwaysPublic) {
+    return supabaseResponse
   }
 
   // Redirect authenticated users away from auth pages (except specific pages)
