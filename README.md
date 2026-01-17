@@ -17,10 +17,20 @@ Quoth is a Model Context Protocol (MCP) server designed to prevent AI hallucinat
 
 ### 🎭 Prompts (Personas)
 
-| Prompt | Description |
-|--------|-------------|
-| `quoth_architect` | Code generation persona - enforces "Single Source of Truth" rules |
-| `quoth_auditor` | Documentation review persona - distinguishes between new features and technical debt |
+**How to trigger prompts in Claude Code:**
+```bash
+/prompt quoth_architect    # Activate code generation persona
+/prompt quoth_auditor      # Activate documentation review persona
+/prompt quoth_documenter   # Activate incremental documentation persona
+```
+
+| Prompt | When to Use | Description |
+|--------|-------------|-------------|
+| `quoth_architect` | Before writing code/tests | Enforces "Single Source of Truth" rules - searches Quoth before generating code |
+| `quoth_auditor` | During code review | Distinguishes between new features vs technical debt - identifies violations |
+| `quoth_documenter` | While building features | Documents new code immediately - creates searchable, well-structured docs |
+
+**Note:** Prompts are NOT tools. They configure Claude's behavior for the conversation. Use `/prompt <name>` in Claude Code to activate them.
 
 ### 👥 Team Collaboration
 
@@ -134,19 +144,70 @@ status: active
 
 ### Using the Architect Persona
 
-1. AI receives a coding task
-2. Calls `quoth_search_index` to find relevant patterns
-3. Calls `quoth_read_doc` to get exact syntax and rules
-4. Generates code following documented patterns strictly
-5. If code contradicts docs, prioritizes documentation
+**Trigger with:** `/prompt quoth_architect` in Claude Code
+
+**What happens:**
+1. You give Claude a coding task (e.g., "Create a test for Feature X")
+2. Claude automatically calls `quoth_search_index` to find relevant patterns
+3. Claude calls `quoth_read_doc` to get exact syntax and rules
+4. Claude generates code following documented patterns strictly
+5. If code contradicts docs, Claude prioritizes documentation (docs = intended design)
+
+**Example:**
+```
+You: /prompt quoth_architect
+Claude: [Architect persona activated]
+You: Create a Vitest unit test for the authentication service
+Claude: [Searches Quoth for "vitest authentication test patterns"]
+Claude: [Reads the testing-patterns.md document]
+Claude: [Generates test following canonical examples]
+```
 
 ### Using the Auditor Persona
 
-1. AI reviews existing code
-2. Compares against documented standards
-3. Reports **VIOLATIONS** (code that breaks rules)
-4. Reports **UPDATES_NEEDED** (new patterns needing documentation)
-5. Uses `quoth_propose_update` for legitimate new patterns
+**Trigger with:** `/prompt quoth_auditor` in Claude Code
+
+**What happens:**
+1. You ask Claude to review existing code
+2. Claude compares code against documented standards
+3. Claude reports **VIOLATIONS** (code that breaks documented rules)
+4. Claude reports **UPDATES_NEEDED** (new patterns that should be documented)
+5. Claude uses `quoth_propose_update` for legitimate new patterns
+
+**Example:**
+```
+You: /prompt quoth_auditor
+Claude: [Auditor persona activated]
+You: Review the src/services/auth.ts file
+Claude: [Searches Quoth for authentication patterns]
+Claude: [Compares code vs documentation]
+Claude: VIOLATIONS: Using localStorage instead of cookies (violates security-patterns.md)
+Claude: UPDATES_NEEDED: New OAuth provider integration pattern found
+```
+
+### Using the Documenter Persona
+
+**Trigger with:** `/prompt quoth_documenter` in Claude Code
+
+**What happens:**
+1. You say "document this [code/feature]"
+2. Claude analyzes the code and determines the correct document type
+3. Claude searches for existing documentation with `quoth_search_index`
+4. Claude fetches the appropriate template with `quoth_get_template`
+5. Claude creates or updates documentation following the template structure
+6. Claude submits via `quoth_propose_update`
+
+**Example:**
+```
+You: /prompt quoth_documenter
+Claude: [Documenter persona activated]
+You: Document this new API endpoint [paste code]
+Claude: [Analyzes code → determines it's an API schema]
+Claude: [Searches for existing api-schemas.md]
+Claude: [Fetches api-schemas template]
+Claude: [Creates documentation with proper structure]
+Claude: [Submits proposal with code as evidence]
+```
 
 ## Deployment
 

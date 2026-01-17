@@ -30,11 +30,15 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.
 function setupServer(server: McpServer, authContext: AuthContext) {
   registerQuothTools(server, authContext);
 
+  // Register Prompts (Personas)
+  // IMPORTANT: Prompts are activated with /prompt command in Claude Code, NOT by calling them like tools
   server.registerPrompt(
     'quoth_architect',
     {
       description:
-        "Initialize the session for writing code or tests. Loads the 'Single Source of Truth' enforcement rules.",
+        "🏗️ Code Generation Persona - Activate with '/prompt quoth_architect' in Claude Code. " +
+        "Enforces 'Single Source of Truth' rules by searching Quoth before generating any code. " +
+        "Use BEFORE writing code/tests to ensure patterns follow documented standards.",
     },
     async () => getArchitectPrompt()
   );
@@ -43,7 +47,9 @@ function setupServer(server: McpServer, authContext: AuthContext) {
     'quoth_auditor',
     {
       description:
-        'Initialize the session for reviewing code and updating documentation.',
+        "🔍 Code Review Persona - Activate with '/prompt quoth_auditor' in Claude Code. " +
+        "Reviews existing code against documented standards. Distinguishes VIOLATIONS (code breaking rules) " +
+        "from UPDATES_NEEDED (new patterns to document). Use DURING code review.",
     },
     async () => getAuditorPrompt()
   );
@@ -52,7 +58,9 @@ function setupServer(server: McpServer, authContext: AuthContext) {
     'quoth_documenter',
     {
       description:
-        'Initialize the session for proactive incremental documentation. Use when documenting new code as you build.',
+        "📝 Incremental Documentation Persona - Activate with '/prompt quoth_documenter' in Claude Code. " +
+        "Documents new code immediately after implementation. Fetches templates, follows structure, " +
+        "and submits proposals. Use WHILE building features. Say 'document this [code]' after activation.",
     },
     async () => getDocumenterPrompt()
   );

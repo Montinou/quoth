@@ -8,6 +8,25 @@ Quoth is an MCP (Model Context Protocol) server that acts as a "Single Source of
 
 **Production URL**: https://quoth.ai-innovation.site
 
+## Quick Reference - Using Quoth Prompts
+
+**IMPORTANT:** Quoth prompts are personas that change Claude's behavior. They are NOT tools.
+
+**How to activate:**
+```bash
+# In Claude Code, type one of these slash commands:
+/prompt quoth_architect     # Before writing code - enforces documented patterns
+/prompt quoth_auditor       # During code review - identifies violations vs new patterns
+/prompt quoth_documenter    # While building - documents new code immediately
+```
+
+**What happens when you activate a prompt:**
+- Claude loads a specialized system prompt
+- Claude automatically uses Quoth tools (`quoth_search_index`, `quoth_read_doc`, etc.)
+- Claude follows the persona's rules for that conversation
+
+**Common mistake:** Trying to call prompts like tools (e.g., asking "use quoth_architect"). They're activated with `/prompt` command.
+
 ## Installation (for Claude Code Users)
 
 ### Quick Start (OAuth - Recommended)
@@ -20,10 +39,48 @@ claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for Quoth login, and once authenticated, Claude Code is automatically connected.
 
 This gives access to:
+
+**Tools (called automatically by Claude):**
 - `quoth_search_index` - Semantic search across documentation
 - `quoth_read_doc` - Read full document content
 - `quoth_propose_update` - Submit documentation updates
-- `quoth_architect` / `quoth_auditor` prompts
+- `quoth_list_templates` - List available document templates
+- `quoth_get_template` - Fetch template structure
+- `quoth_read_chunks` - Fetch specific chunks by ID
+- `quoth_genesis` - Bootstrap documentation for a new project
+
+**Prompts (YOU trigger manually with slash commands):**
+- `/prompt quoth_architect` - Activate code generation persona (enforces "Single Source of Truth")
+- `/prompt quoth_auditor` - Activate documentation review persona (distinguishes new features from bad code)
+- `/prompt quoth_documenter` - Activate incremental documentation persona (document code as you build)
+
+### How to Use Prompts
+
+**MCP prompts are NOT tools** - they configure Claude's behavior/persona for the conversation. To use them:
+
+1. **In Claude Code CLI**, type:
+   ```
+   /prompt quoth_architect
+   ```
+
+2. **Claude will load the architect persona** and start following "Single Source of Truth" rules
+
+3. **Continue your conversation** - Claude will now search Quoth before generating code
+
+**Example Workflow:**
+```
+You: /prompt quoth_architect
+Claude: [Loads architect system prompt]
+You: Create a Vitest test for the login function
+Claude: [Searches quoth_search_index for "vitest test patterns"]
+Claude: [Reads relevant docs with quoth_read_doc]
+Claude: [Generates code following documented patterns]
+```
+
+**When to Use Each Prompt:**
+- **quoth_architect**: When you want Claude to write code/tests that strictly follow documented patterns
+- **quoth_auditor**: When you want Claude to review existing code and identify violations vs. new patterns
+- **quoth_documenter**: When you want Claude to document new code immediately after building it
 
 ### Public Demo (No Auth)
 
@@ -538,3 +595,101 @@ Quoth supports multi-user collaboration on projects through a comprehensive invi
 - `jose` - JWT token verification
 - `resend` - Email delivery service for team invitations
 - `lucide-react` - Icons (1.5px stroke weight per branding)
+
+## Troubleshooting Quoth Prompts
+
+### "The architect/auditor prompt isn't working"
+
+**Problem:** You're trying to use prompts like tools
+
+**Wrong approach:**
+```
+❌ "Use quoth_architect to generate this code"
+❌ "Call the quoth_auditor tool"
+❌ Expecting Claude to automatically use architect mode
+```
+
+**Correct approach:**
+```
+✅ /prompt quoth_architect
+   [Then continue with your request]
+
+✅ /prompt quoth_auditor
+   [Then ask for code review]
+```
+
+### "I don't see the prompts available"
+
+**Check:**
+1. Verify Quoth MCP is connected: `claude mcp list` should show `quoth`
+2. Verify authentication: Try using a Quoth tool first (e.g., "search for test patterns in Quoth")
+3. Check MCP server logs for errors
+4. Try reconnecting: `claude mcp remove quoth` then `claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp`
+
+### "Prompts list in /prompt menu but don't activate"
+
+**Possible causes:**
+1. **MCP server not responding** - Check server is running at https://quoth.ai-innovation.site
+2. **Invalid token** - Regenerate API key from dashboard
+3. **Project access** - Verify you have access to a project with documentation
+
+**Test:**
+```bash
+# Test if MCP server is accessible
+curl -H "Authorization: Bearer YOUR_TOKEN" https://quoth.ai-innovation.site/api/mcp
+```
+
+### "How do I know if a prompt is active?"
+
+**Signs the architect prompt is active:**
+- Claude searches Quoth before generating code
+- Claude mentions "searching for patterns in Quoth"
+- Claude cites documentation paths in responses
+
+**Signs the auditor prompt is active:**
+- Claude compares code against docs
+- Claude reports "VIOLATIONS" and "UPDATES_NEEDED"
+- Claude proposes documentation updates
+
+**Signs the documenter prompt is active:**
+- Claude asks about documentation type
+- Claude fetches templates before writing
+- Claude structures docs with H2 sections
+
+### "Prompts vs Tools - What's the difference?"
+
+| Aspect | Tools | Prompts |
+|--------|-------|---------|
+| **What they are** | Functions that perform actions | System prompts that configure behavior |
+| **How to use** | Claude calls them automatically | You activate with `/prompt` command |
+| **Examples** | `quoth_search_index`, `quoth_read_doc` | `quoth_architect`, `quoth_auditor` |
+| **When to use** | Never - Claude decides | Before starting a task |
+| **Visibility** | Appear in tool calls | Change Claude's persona |
+
+### "Can I use multiple prompts at once?"
+
+**No.** Each `/prompt` command replaces the previous persona. Choose one based on your task:
+- **Writing code?** → `/prompt quoth_architect`
+- **Reviewing code?** → `/prompt quoth_auditor`
+- **Documenting code?** → `/prompt quoth_documenter`
+
+### "Do I need to reactivate prompts for each message?"
+
+**No.** Once activated with `/prompt quoth_architect`, the persona stays active for the entire conversation until you:
+- Start a new conversation
+- Activate a different prompt
+- Reset the context
+
+### "Prompts work but Claude isn't searching Quoth"
+
+**This means the prompt activated but Claude decided not to search.** Possible reasons:
+1. Your request doesn't require documentation (e.g., "What time is it?")
+2. The task is too general (be specific: "Create a Vitest test" not "write a test")
+3. Claude thinks it already knows the pattern (remind it: "Check Quoth first")
+
+**Force search:**
+```
+You: /prompt quoth_architect
+Claude: [Architect activated]
+You: Before generating any code, search Quoth for "vitest mocking patterns"
+```
