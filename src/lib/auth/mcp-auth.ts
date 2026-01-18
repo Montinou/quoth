@@ -27,6 +27,14 @@ export interface AuthContext {
   user_id: string;
   role: 'admin' | 'editor' | 'viewer';
   label?: string; // Optional token label for logging
+  // Multi-account support
+  connection_id?: string; // Unique per MCP connection
+  available_projects?: Array<{
+    project_id: string;
+    role: 'admin' | 'editor' | 'viewer';
+    project_name: string;
+    project_slug: string;
+  }>;
 }
 
 /**
@@ -94,11 +102,32 @@ async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
       return null;
     }
 
+    // Fetch all projects user has access to (for multi-account support)
+    debugLog('[MCP Auth] Fetching available projects for user:', user.id);
+    const { data: projectMembers, error: projectsError } = await supabase
+      .from('project_members')
+      .select(`
+        project_id,
+        role,
+        project:projects(id, name, slug)
+      `)
+      .eq('user_id', user.id);
+
+    debugLog('[MCP Auth] Available projects:', projectMembers?.length || 0);
+
+    const availableProjects = projectMembers?.map((pm: any) => ({
+      project_id: pm.project_id,
+      role: pm.role as 'admin' | 'editor' | 'viewer',
+      project_name: pm.project?.name || 'Unknown',
+      project_slug: pm.project?.slug || pm.project_id,
+    })) || [];
+
     return {
       project_id: projectId,
       user_id: user.id,
       role: (role as 'admin' | 'editor' | 'viewer') || 'viewer',
       label: user.email,
+      available_projects: availableProjects,
     };
   } catch (error) {
     console.error('[MCP Auth] Supabase token verification failed:', error);
@@ -135,6 +164,40 @@ async function verifyCustomJwt(token: string): Promise<AuthContext | null> {
 
     if (!['admin', 'editor', 'viewer'].includes(authContext.role)) {
       return null;
+    }
+
+    // Fetch available projects for multi-account support (same as Supabase OAuth)
+    try {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (supabaseUrl && supabaseServiceKey) {
+        const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        });
+
+        const { data: projectMembers } = await supabase
+          .from('project_members')
+          .select(`
+            project_id,
+            role,
+            project:projects(id, name, slug)
+          `)
+          .eq('user_id', authContext.user_id);
+
+        authContext.available_projects = projectMembers?.map((pm: any) => ({
+          project_id: pm.project_id,
+          role: pm.role as 'admin' | 'editor' | 'viewer',
+          project_name: pm.project?.name || 'Unknown',
+          project_slug: pm.project?.slug || pm.project_id,
+        })) || [];
+      }
+    } catch (error) {
+      console.warn('[MCP Auth] Could not fetch available projects for API key:', error);
+      // Continue without available_projects - single account mode
     }
 
     return authContext;

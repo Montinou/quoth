@@ -699,6 +699,131 @@ ${chunk.content}
     }
   );
 
+  // Tool 7: quoth_list_accounts (Multi-Account Support)
+  server.registerTool(
+    'quoth_list_accounts',
+    {
+      title: 'List Available Accounts',
+      description:
+        'Lists all project accounts available to the authenticated user. Shows which account is currently active and allows viewing all accessible projects with their roles.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const connectionId = authContext.connection_id;
+        if (!connectionId) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: 'Error: Multi-account support not available. No connection ID found.',
+            }],
+          };
+        }
+
+        const availableProjects = authContext.available_projects || [];
+        
+        if (availableProjects.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `You are connected to project: ${authContext.project_id}\n\nNo additional projects found. This is your only accessible project.`,
+            }],
+          };
+        }
+
+        const accountList = availableProjects.map(acc => {
+          const isActive = acc.project_id === authContext.project_id;
+          const marker = isActive ? '✓ **ACTIVE**' : ' ';
+          return `${marker} ${acc.project_name} (\`${acc.project_slug}\`) - Role: ${acc.role}\n   Project ID: \`${acc.project_id}\``;
+        }).join('\n\n');
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `# Available Project Accounts\n\n${accountList}\n\n---\n\n**Total Projects:** ${availableProjects.length}\n**Active Project:** ${authContext.project_id}\n\nUse \`quoth_switch_account\` with a project ID to switch your active context.`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error listing accounts: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 8: quoth_switch_account (Multi-Account Support)
+  server.registerTool(
+    'quoth_switch_account',
+    {
+      title: 'Switch Active Account',
+      description:
+        'Switches the active project account. All subsequent Quoth operations (search, read, propose) will use the selected project context until switched again.',
+      inputSchema: {
+        project_id: z.string().describe('The project ID to switch to (from quoth_list_accounts)'),
+      },
+    },
+    async ({ project_id }) => {
+      try {
+        const connectionId = authContext.connection_id;
+        if (!connectionId) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: 'Error: Multi-account support not available. No connection ID found.',
+            }],
+          };
+        }
+
+        // Import session manager
+        const { sessionManager } = await import('../auth/session-manager');
+        
+        const success = sessionManager.switchAccount(connectionId, project_id);
+
+        if (!success) {
+          const availableProjects = authContext.available_projects || [];
+          const projectList = availableProjects.map(p => `- ${p.project_name} (\`${p.project_id}\`)`).join('\n');
+          
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Error: Could not switch to project \`${project_id}\`.\n\nThis project either doesn't exist or you don't have access to it.\n\n**Available projects:**\n${projectList || '(none)'}`,
+            }],
+          };
+        }
+
+        // Get updated context
+        const newContext = sessionManager.getActiveContext(connectionId);
+        const matchingProject = authContext.available_projects?.find(p => p.project_id === project_id);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `✅ **Account Switched Successfully**\n\n` +
+                  `**Now Active:** ${matchingProject?.project_name || project_id}\n` +
+                  `**Project ID:** \`${project_id}\`\n` +
+                  `**Your Role:** ${newContext?.role}\n\n` +
+                  `---\n\n` +
+                  `All subsequent Quoth operations will use this project context:\n` +
+                  `- \`quoth_search_index\` will search this project's documents\n` +
+                  `- \`quoth_read_doc\` will read from this project\n` +
+                  `- \`quoth_propose_update\` will create proposals for this project\n\n` +
+                  `Use \`quoth_list_accounts\` to view all available projects.`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error switching account: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
   // Register Genesis tools
   registerGenesisTools(server, authContext);
 }
