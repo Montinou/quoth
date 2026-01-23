@@ -1,77 +1,84 @@
 # Quoth Plugin for Claude Code
 
-Living documentation layer for AI-native development. This plugin automatically detects Quoth-connected projects and injects context reminding Claude to use documented patterns.
+Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints that guide Claude to use `quoth_guidelines` when relevant.
 
 ## Features
 
-- **SessionStart**: Detects project, checks for Quoth docs, offers Genesis if missing
-- **PreToolUse (Edit/Write)**: Injects relevant patterns before code generation
-- **PostToolUse (Edit/Write)**: Audits generated code against documentation
-- **Stop**: Shows Quoth Badge with pattern summary
+- **~60 tokens per session** - Down from ~750 tokens (92% reduction)
+- **One adaptive tool** - `quoth_guidelines(mode)` with `code`, `review`, `document` modes
+- **🪶 Quoth Badge** - Transparent reporting when Quoth patterns are applied
+- **Strongly suggest, not force** - Claude decides when to use Quoth
 
-## Installation
-
-### Option 1: Clone into plugins directory
+## Quick Install
 
 ```bash
-# Navigate to your Claude Code plugins directory
-cd ~/.claude/plugins
-
-# Clone the plugin
-git clone https://github.com/Montinou/quoth quoth-plugin
-```
-
-### Option 2: Symlink from Quoth repository
-
-```bash
-# If you have Quoth cloned locally
-ln -s /path/to/quoth/quoth-plugin ~/.claude/plugins/quoth-plugin
-```
-
-### Option 3: Install via Claude Code
-
-```bash
-claude plugin add https://github.com/Montinou/quoth
-```
-
-## Requirements
-
-- Claude Code CLI installed
-- Quoth MCP server configured (optional, but recommended)
-
-### Setting up Quoth MCP
-
-```bash
-# Add Quoth MCP with OAuth authentication
+# One command: Add MCP server with OAuth
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
 
-# Or with API key
+This gives you all Quoth tools including `quoth_guidelines`. The lightweight hooks activate automatically when Quoth MCP is connected.
+
+### Alternative: With API Key
+
+```bash
+# Get a token from https://quoth.ai-innovation.site/dashboard/api-keys
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp \
   --header "Authorization: Bearer YOUR_TOKEN"
+```
+
+## What You Get
+
+### MCP Tools (via server)
+
+| Tool | Purpose |
+|------|---------|
+| `quoth_guidelines` | Adaptive guidelines for code/review/document modes |
+| `quoth_search_index` | Semantic search across documentation |
+| `quoth_read_doc` | Read full document content |
+| `quoth_propose_update` | Submit documentation updates |
+| `quoth_genesis` | Bootstrap project documentation |
+
+### Hooks (automatic)
+
+| Hook | Purpose | Tokens |
+|------|---------|--------|
+| SessionStart | Hint to use `quoth_guidelines('code')` | ~25 |
+| PreToolUse (Edit/Write) | Reminder that Quoth patterns available | ~15 |
+| Stop | Badge enforcement if Quoth was used | ~20 |
+
+## How It Works
+
+1. **Session starts**: Claude sees hint about `quoth_guidelines`
+2. **Before code**: Claude may call `quoth_guidelines('code')`
+3. **Search**: Claude may call `quoth_search_index` for patterns
+4. **Response ends**: If Quoth was used, badge shows which patterns applied
+
+```
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth                                        │
+│   ✓ patterns/testing-pattern.md (vitest mocks) │
+└─────────────────────────────────────────────────┘
 ```
 
 ## Configuration
 
 ### Plugin Settings
 
-Settings in `~/.claude/plugins/quoth.local.md`:
+Create `~/.claude/plugins/quoth.local.md`:
 
 ```yaml
 ---
-autoInjectPatterns: true
 showBadge: true
-auditEnabled: true
 ---
 ```
 
-### Project-level Configuration
+### Project Configuration
 
-Create a `.quoth/config.json` or `quoth.config.json` in your project root:
+Create `.quoth/config.json` or `quoth.config.json` in your project:
 
 ```json
 {
-  "project_id": "your-project-id",
-  "auto_search": true
+  "project_id": "your-project-id"
 }
 ```
 
@@ -79,90 +86,31 @@ Create a `.quoth/config.json` or `quoth.config.json` in your project root:
 
 - `/quoth-genesis` - Bootstrap documentation for a new project
 
-## What the Plugin Injects
-
-When Quoth is detected, the plugin adds context about:
-
-- Available Quoth tools (`quoth_search_index`, `quoth_read_doc`, etc.)
-- Workflow reminders (search before writing code)
-- The Single Source of Truth philosophy
-
 ## Plugin Structure
 
 ```
 quoth-plugin/
-  .claude-plugin/
-    plugin.json       # Plugin manifest
+  plugin.json           # Plugin manifest
   hooks/
-    hooks.json        # Hook configuration
-    session-start.sh  # SessionStart hook - injects Quoth context
-    pre-tool-use.sh   # PreToolUse hook - injects patterns
-    post-tool-use.sh  # PostToolUse hook - audits code
-    stop.sh           # Stop hook - shows badge summary
+    hooks.json          # Hook definitions
+    session-start.sh    # SessionStart - gentle hint (~25 tokens)
+    pre-edit-write.sh   # PreToolUse - pattern reminder (~15 tokens)
+    stop.sh             # Stop - badge enforcement (~20 tokens)
   skills/
-    genesis.md        # Genesis skill for bootstrapping docs
-  README.md           # This file
+    genesis.md          # Genesis skill
 ```
-
-## Hooks
-
-### SessionStart Hook
-
-Triggers on `startup` or `resume` events. Checks for:
-- `.quoth/config.json` or `quoth.config.json` files
-- Quoth MCP server in `claude mcp list`
-
-If found, injects context with:
-- Quoth documentation reminders
-- Available tools list
-- Workflow guidance
-
-### PreToolUse Hook
-
-Triggers before `Edit` or `Write` tools. Actions:
-- Searches Quoth for relevant patterns based on file path
-- Injects matching patterns into tool context
-
-### PostToolUse Hook
-
-Triggers after `Edit` or `Write` tools. Actions:
-- Audits generated code against documentation
-- Detects drift from documented patterns
-- Reports violations or new patterns
-
-### Stop Hook
-
-Triggers at session end. Displays:
-- Track documentation interaction counts
-- Display session summary
-- Award badges (Architect/Explorer/Observer/Wanderer)
 
 ## Development
 
-### Testing Hooks Locally
+### Testing Hooks
 
 ```bash
-# Test session-start hook
-cd /path/to/your/project
-/path/to/quoth-plugin/hooks/session-start.sh
-
-# Should output JSON with additionalContext if Quoth is configured
-```
-
-### Verifying JSON Output
-
-```bash
-# Ensure valid JSON output
 ./hooks/session-start.sh | jq .
 ./hooks/stop.sh | jq .
 ```
 
-## License
-
-MIT License - See [LICENSE](../LICENSE) for details.
-
 ## Links
 
 - [Quoth Documentation](https://quoth.ai-innovation.site)
-- [Quoth MCP Server](https://github.com/Montinou/quoth)
-- [Claude Code Plugins](https://docs.anthropic.com/claude-code/plugins)
+- [Quoth MCP Server](https://github.com/Montinou/quoth-mcp)
+- [Blog: Introducing the Quoth Plugin](https://quoth.ai-innovation.site/blog/quoth-plugin-launch)
