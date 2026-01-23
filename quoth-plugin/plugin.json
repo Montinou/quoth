@@ -1,0 +1,48 @@
+{
+  "$schema": "https://claude.ai/plugins/schema/v1.json",
+  "name": "quoth",
+  "version": "0.1.0",
+  "displayName": "Quoth Documentation",
+  "description": "AI-driven documentation as single source of truth. Auto-injects patterns before code generation, audits code after writing.",
+  "author": "Montinou",
+  "repository": "https://github.com/Montinou/quoth",
+
+  "hooks": {
+    "SessionStart": "hooks/session-start.md",
+    "PreToolUse": {
+      "Edit": "hooks/pre-edit.md",
+      "Write": "hooks/pre-write.md"
+    },
+    "PostToolUse": {
+      "Edit": "hooks/post-edit.md",
+      "Write": "hooks/post-write.md"
+    },
+    "Stop": "hooks/stop.md"
+  },
+
+  "skills": {
+    "quoth-genesis": "skills/genesis.md"
+  },
+
+  "mcp": {
+    "server": "quoth"
+  },
+
+  "settings": {
+    "autoInjectPatterns": {
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically inject relevant patterns before code generation"
+    },
+    "showBadge": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show Quoth badge after responses"
+    },
+    "auditEnabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Audit generated code against documentation"
+    }
+  }
+}
