@@ -1,0 +1,13 @@
+{
+  "name": "quoth",
+  "version": "0.1.0",
+  "description": "Living documentation layer for AI-native development - auto-injects Quoth context into your Claude Code sessions",
+  "author": {
+    "name": "Montinou",
+    "url": "https://github.com/Montinou"
+  },
+  "homepage": "https://quoth.ai-innovation.site",
+  "repository": "https://github.com/Montinou/quoth",
+  "license": "MIT",
+  "keywords": ["documentation", "mcp", "ai", "claude-code", "source-of-truth", "patterns"]
+}

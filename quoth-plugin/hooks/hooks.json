@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "type": "command",
+      "event": "SessionStart",
+      "matcher": "startup|resume",
+      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"]
+    },
+    {
+      "type": "command",
+      "event": "Stop",
+      "matcher": ".*",
+      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh"]
+    }
+  ]
+}

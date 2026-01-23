@@ -123,6 +123,157 @@ const Hero = () => (
 );
 
 /* -----------------------------------------------------------------------------
+   Genesis Demo Section
+   ----------------------------------------------------------------------------- */
+const GenesisDemo = () => {
+  return (
+    <section className="relative py-24 px-4 sm:px-6 overflow-hidden">
+      {/* Section background gradient */}
+      <div className="absolute inset-0 bg-gradient-to-b from-obsidian via-charcoal/50 to-obsidian" />
+
+      <div className="max-w-6xl mx-auto relative z-10">
+        {/* Section Header */}
+        <div className="text-center mb-12 sm:mb-16">
+          <h2
+            className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
+            style={{ fontFamily: "var(--font-cinzel), serif" }}
+          >
+            Document Your Codebase in Minutes
+          </h2>
+          <p
+            className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto"
+            style={{ animationDelay: "0.1s" }}
+          >
+            Genesis auto-documents your entire project. One command connects Quoth.
+            One question generates comprehensive documentation.
+          </p>
+        </div>
+
+        {/* Terminal Mockup */}
+        <div
+          className="animate-fade-in-scale max-w-3xl mx-auto"
+          style={{ animationDelay: "0.2s" }}
+        >
+          <div className="relative rounded-xl overflow-hidden border border-violet-spectral/20 bg-charcoal shadow-2xl shadow-violet-glow/10 font-mono text-sm code-window">
+            {/* Scanline effect */}
+            <div className="scanline opacity-30" />
+
+            {/* Terminal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-obsidian/80">
+              {/* Traffic lights */}
+              <div className="flex gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500/80 border border-red-500/40" />
+                <div className="w-3 h-3 rounded-full bg-yellow-500/80 border border-yellow-500/40" />
+                <div className="w-3 h-3 rounded-full bg-green-500/80 border border-green-500/40" />
+              </div>
+
+              {/* Terminal title */}
+              <div className="text-xs text-gray-500 font-medium">
+                Terminal
+              </div>
+
+              {/* Spacer */}
+              <div className="w-[52px]" />
+            </div>
+
+            {/* Terminal Body */}
+            <div className="p-4 sm:p-6 text-gray-400 leading-relaxed overflow-x-auto text-left space-y-4">
+              {/* Step 1: Add MCP */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-green-400">$</span>
+                  <span className="text-white">claude mcp add quoth</span>
+                </div>
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
+                  <span className="text-green-400">&#10003;</span> MCP server &apos;quoth&apos; added successfully
+                </div>
+              </div>
+
+              {/* Step 2: Run Genesis */}
+              <div className="space-y-2 mt-6">
+                <div className="flex items-center gap-2">
+                  <span className="text-green-400">$</span>
+                  <span className="text-white">Ask Claude:</span>
+                  <span className="text-violet-ghost">&quot;Run Genesis on this project&quot;</span>
+                </div>
+
+                {/* Genesis Output Animation */}
+                <div className="pl-4 space-y-2 border-l-2 border-violet-spectral/30 ml-1">
+                  {/* Phase 1 */}
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
+                    <span className="text-gray-400">Analyzing repository structure...</span>
+                    <span className="text-green-400 ml-auto">done</span>
+                  </div>
+
+                  {/* Phase 2 */}
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
+                    <span className="text-gray-400">Detecting tech stack: Next.js, TypeScript, Prisma</span>
+                    <span className="text-green-400 ml-auto">done</span>
+                  </div>
+
+                  {/* Phase 3 */}
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
+                    <span className="text-gray-400">Generating project-overview.md</span>
+                    <span className="text-green-400 ml-auto">done</span>
+                  </div>
+
+                  {/* Phase 4 */}
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
+                    <span className="text-gray-400">Generating tech-stack.md</span>
+                    <span className="text-green-400 ml-auto">done</span>
+                  </div>
+
+                  {/* Phase 5 */}
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
+                    <span className="text-gray-400">Generating repo-structure.md</span>
+                    <span className="text-green-400 ml-auto">done</span>
+                  </div>
+                </div>
+
+                {/* Completion */}
+                <div className="mt-4 p-3 bg-gradient-to-r from-green-500/10 to-green-500/5 border-l-2 border-green-400 rounded-r-lg">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-green-400 text-lg">&#10003;</span>
+                    <span className="text-white font-medium">Genesis complete!</span>
+                    <span className="text-gray-400 ml-2 text-xs sm:text-sm">5 documents generated in 3m 42s</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* CTA Button */}
+        <div
+          className="animate-fade-in-scale text-center mt-10"
+          style={{ animationDelay: "0.4s" }}
+        >
+          <Button
+            variant="glass"
+            size="lg"
+            className="bg-violet-spectral/15 border-violet-spectral/50 hover:bg-violet-spectral/25 group btn-shine px-8 py-6 text-base"
+            asChild
+          >
+            <Link href="/guide">
+              <Sparkles size={18} strokeWidth={1.5} className="mr-2 opacity-70" />
+              Get Started in 3 Minutes
+              <span className="group-hover:translate-x-1 transition-transform duration-300 ml-2">
+                &#8594;
+              </span>
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+/* -----------------------------------------------------------------------------
    Features Section
    ----------------------------------------------------------------------------- */
 const Features = () => (
@@ -256,6 +407,7 @@ export default function Home() {
       <Navbar />
       <main>
         <Hero />
+        <GenesisDemo />
         <Features />
         <Stats />
         <CallToAction />
