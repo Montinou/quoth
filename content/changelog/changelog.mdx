@@ -7,6 +7,15 @@ description: "All notable changes to Quoth"
 
 ### 2026-01-23
 
+**Insights Dashboard** - Documentation health monitoring
+
+The Analytics page now tracks documentation health with four new features:
+
+- **Drift Detection** - Timeline view showing when code diverged from docs, with severity levels (critical, warning, info) and one-click resolution
+- **Health Dashboard** - Visual staleness indicators (fresh <14d, aging 14-30d, stale 30-60d, critical >60d) with health score gauge
+- **Miss Rate Analytics** - Track searches returning no results to identify documentation gaps
+- **Weekly Health Reports** - Automated email reports to project admins every Monday via GitHub Actions
+
 **Genesis v2.0** - Configurable documentation depth
 
 - Added depth levels: `minimal` (3 docs), `standard` (5 docs), `comprehensive` (11 docs)

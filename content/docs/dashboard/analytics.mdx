@@ -1,0 +1,124 @@
+---
+title: "Analytics & Insights"
+description: "Monitor documentation health, detect drift, and track usage patterns"
+order: 2
+---
+
+The Analytics page provides comprehensive insights into your documentation health and usage patterns.
+
+## Accessing Analytics
+
+Navigate to **Dashboard → Analytics** or visit `https://quoth.ai-innovation.site/dashboard/analytics`.
+
+## Usage Statistics
+
+The top section shows key metrics for your selected time period (7, 30, or 90 days):
+
+| Metric | Description |
+|--------|-------------|
+| **Total Queries** | All MCP tool calls |
+| **Searches** | `quoth_search_index` calls |
+| **Doc Reads** | `quoth_read_doc` calls |
+| **Avg Results/Search** | Average documents returned per search |
+
+## Health Dashboard
+
+The Health Dashboard visualizes documentation freshness across your project.
+
+### Health Score
+
+A 0-100 score indicating overall documentation health:
+
+| Score | Status | Meaning |
+|-------|--------|---------|
+| 80-100 | Excellent | Documentation is well-maintained |
+| 60-79 | Good | Some documents need attention |
+| 40-59 | Fair | Multiple stale documents |
+| 0-39 | Critical | Immediate attention required |
+
+### Staleness Levels
+
+Documents are categorized by how recently they were updated:
+
+| Level | Age | Color |
+|-------|-----|-------|
+| **Fresh** | < 14 days | Green |
+| **Aging** | 14-30 days | Yellow |
+| **Stale** | 30-60 days | Orange |
+| **Critical** | > 60 days | Red |
+
+### Documents Needing Attention
+
+A prioritized list of documents that should be reviewed, sorted by staleness severity.
+
+## Drift Detection
+
+The Drift Timeline shows events where code diverged from documentation.
+
+### Drift Types
+
+| Type | Description |
+|------|-------------|
+| `code_diverged` | Implementation doesn't match documented pattern |
+| `missing_doc` | Code exists without documentation |
+| `stale_doc` | Document hasn't been updated alongside code |
+| `pattern_violation` | Code violates a documented convention |
+
+### Severity Levels
+
+- **Critical** (Red) - Significant inconsistency requiring immediate attention
+- **Warning** (Amber) - Notable drift that should be addressed
+- **Info** (Blue) - Minor inconsistency or informational
+
+### Resolving Drift
+
+Click **Resolve** on any drift event to mark it as addressed. You can add a resolution note explaining the fix.
+
+<Callout type="tip">
+  Use the "Show resolved" toggle to review previously addressed drift events.
+</Callout>
+
+## Miss Rate Analytics
+
+Track searches that returned no results to identify documentation gaps.
+
+### Miss Rate Chart
+
+Shows the percentage of searches with zero results over time. A decreasing trend indicates improving documentation coverage.
+
+### Top Missed Queries
+
+Lists the most frequently searched terms that returned no results. Use this to prioritize which documentation to add.
+
+<Callout type="info">
+  High miss count for a query = high demand for that topic. Prioritize documenting these areas.
+</Callout>
+
+## Weekly Health Reports
+
+Project admins automatically receive a weekly email report every Monday at 9:00 AM UTC.
+
+### Report Contents
+
+- Overall health score and trend
+- Drift event summary (critical/warning/info counts)
+- Miss rate statistics for the week
+- Direct link to the Analytics dashboard
+
+### Requirements
+
+- You must have **admin** role on the project
+- Your email must be verified
+- No configuration needed - reports are automatic
+
+<Callout type="warning">
+  Weekly reports are sent to all admins. To stop receiving reports, have another admin change your role to editor or viewer.
+</Callout>
+
+## Top Searches
+
+View the most common search queries across your team. This helps identify:
+
+- Which patterns are most referenced
+- Popular documentation topics
+- Potential areas needing better organization

@@ -1,0 +1,142 @@
+---
+title: "Insights Dashboard: Know When Your Docs Fall Behind"
+description: "Introducing drift detection, health tracking, miss rate analytics, and weekly reports - comprehensive documentation health monitoring for AI-native teams."
+date: "2026-01-23"
+author: "Quoth Team"
+tags: ["release", "analytics", "dashboard", "drift-detection"]
+featured: true
+---
+
+Documentation drift is silent but deadly. Your codebase evolves daily, but how do you know when your docs fall behind? Today we're launching the **Insights Dashboard** - comprehensive monitoring that makes documentation health visible, measurable, and actionable.
+
+## The Problem: Documentation Drift
+
+Every team has experienced this: you confidently tell your AI to follow the documented patterns, but the code it generates doesn't match reality. Why? Because the docs describe how things *were*, not how they *are*.
+
+Until now, there was no easy way to:
+
+- **Detect drift** - When did code and docs diverge?
+- **Measure staleness** - Which docs need urgent attention?
+- **Identify gaps** - What questions can't your docs answer?
+
+## Introducing the Insights Dashboard
+
+Your Analytics page now includes four new capabilities designed to keep your documentation healthy:
+
+<CardGrid>
+  <Card
+    title="Drift Detection"
+    description="Timeline view of when code diverged from documentation"
+    icon="GitBranch"
+  />
+  <Card
+    title="Health Dashboard"
+    description="Visual staleness indicators with severity levels"
+    icon="HeartPulse"
+  />
+  <Card
+    title="Miss Rate Analytics"
+    description="Track searches that return no results"
+    icon="SearchX"
+  />
+  <Card
+    title="Weekly Reports"
+    description="Automated health reports sent to your inbox"
+    icon="Mail"
+  />
+</CardGrid>
+
+## Drift Detection
+
+The new **Drift Timeline** shows you exactly when code started diverging from documentation. Each drift event includes:
+
+- **Severity level** - Critical (red), Warning (amber), or Info (blue)
+- **Drift type** - Code diverged, missing doc, stale doc, or pattern violation
+- **Side-by-side comparison** - What the doc says vs. what the code does
+- **One-click resolution** - Mark issues as resolved with notes
+
+<Callout type="info">
+  Drift events are detected automatically when you run audits or when MCP tools identify inconsistencies during code generation.
+</Callout>
+
+## Health Dashboard
+
+The **Health Dashboard** provides a bird's-eye view of your documentation freshness:
+
+| Status | Age | Action |
+|--------|-----|--------|
+| **Fresh** | < 14 days | No action needed |
+| **Aging** | 14-30 days | Review soon |
+| **Stale** | 30-60 days | Update recommended |
+| **Critical** | > 60 days | Immediate attention |
+
+The dashboard includes:
+
+- **Health Score** (0-100) - Overall documentation health gauge
+- **Staleness Distribution** - Visual breakdown of fresh/aging/stale/critical
+- **Documents Needing Attention** - Prioritized list of what to update first
+
+## Miss Rate Analytics
+
+Ever wonder what questions your documentation *can't* answer? The **Miss Rate Chart** tracks:
+
+- Searches that returned zero results
+- Trending missed queries over time
+- Top 5 most-missed search terms
+
+This data reveals gaps in your knowledge base. If users keep searching for "authentication flow" and finding nothing, that's a doc you need to write.
+
+<Callout type="tip">
+  Use the miss rate data to prioritize your documentation backlog. High miss count = high demand for that topic.
+</Callout>
+
+## Weekly Health Reports
+
+Stay informed without checking the dashboard daily. Every Monday at 9:00 AM UTC, project admins receive an email report including:
+
+- Overall health score and trend
+- Drift event summary (critical/warning/info counts)
+- Miss rate statistics
+- Direct link to the Analytics dashboard
+
+<Steps>
+  <Step>
+    **Automatic** - No setup required for existing projects
+  </Step>
+  <Step>
+    **Admin-only** - Reports go to users with admin role
+  </Step>
+  <Step>
+    **Actionable** - Each section links to relevant dashboard views
+  </Step>
+</Steps>
+
+## Try It Now
+
+The Insights Dashboard is available now for all Quoth users. Simply visit your project's **Analytics** page to see:
+
+- Your documentation health score
+- Any drift events detected
+- Miss rate trends for the last 7 days
+
+Not using Quoth yet? Get started in 30 seconds:
+
+```bash
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
+
+---
+
+## What's Next?
+
+The Insights Dashboard completes the core Quoth vision: **documentation that stays alive**. Coming soon:
+
+- **Pattern Enforcement** - Automatic pattern detection and validation
+- **Integrations** - GitHub PR comments, Slack notifications
+- **Self-Healing Docs** - AI-assisted documentation updates
+
+We're building the future of documentation for AI-native teams. [Join us on GitHub](https://github.com/quoth/quoth-mcp) or share your feedback in the community.
+
+---
+
+*Ready to see your documentation health? [Open your Analytics dashboard](https://quoth.ai-innovation.site/dashboard/analytics) now.*
