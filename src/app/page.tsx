@@ -182,7 +182,7 @@ const GenesisDemo = () => {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">claude mcp add quoth</span>
+                  <span className="text-white">claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp/public</span>
                 </div>
                 <div className="pl-4 text-gray-500 text-xs sm:text-sm">
                   <span className="text-green-400">&#10003;</span> MCP server &apos;quoth&apos; added successfully
