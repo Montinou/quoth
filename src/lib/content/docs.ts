@@ -14,20 +14,49 @@ const SECTION_TITLES: Record<string, string> = {
   'dashboard': 'Dashboard',
 };
 
+/**
+ * Extract headings from markdown content with unique slugs.
+ * Handles duplicate heading text by appending a counter suffix.
+ */
 function extractHeadings(content: string): DocHeading[] {
   const headingRegex = /^(#{2,3})\s+(.+)$/gm;
   const headings: DocHeading[] = [];
+  const usedSlugs = new Map<string, number>();
   let match;
 
   while ((match = headingRegex.exec(content)) !== null) {
+    const baseSlug = match[2].toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+
+    // Handle duplicate slugs by appending counter
+    const count = usedSlugs.get(baseSlug) || 0;
+    const slug = count === 0 ? baseSlug : `${baseSlug}-${count}`;
+    usedSlugs.set(baseSlug, count + 1);
+
     headings.push({
       level: match[1].length,
       text: match[2],
-      slug: match[2].toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, ''),
+      slug,
     });
   }
 
   return headings;
+}
+
+/**
+ * Safely parse frontmatter data into a DocPage with defaults for missing fields.
+ * Prevents type assertion from masking missing required fields.
+ */
+function parseDocPage(data: Record<string, unknown>, slug: string[], content: string, headings: DocHeading[]): DocPage {
+  return {
+    title: String(data.title || 'Untitled'),
+    description: String(data.description || ''),
+    slug,
+    content,
+    headings,
+    order: typeof data.order === 'number' ? data.order : undefined,
+    icon: data.icon ? String(data.icon) : undefined,
+    draft: Boolean(data.draft),
+  };
 }
 
 export async function getDocsSidebar(): Promise<DocSection[]> {
@@ -72,12 +101,7 @@ export async function getDocBySlug(slugParts: string[]): Promise<DocPage | null>
 
   const headings = extractHeadings(content);
 
-  return {
-    ...data,
-    slug: slugParts,
-    content,
-    headings,
-  } as DocPage;
+  return parseDocPage(data, slugParts, content, headings);
 }
 
 export async function getAdjacentDocs(currentSlug: string[]): Promise<{

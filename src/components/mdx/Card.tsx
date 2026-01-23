@@ -20,7 +20,7 @@ import type { LucideIcon } from 'lucide-react';
 interface CardProps {
   title: string;
   description: string;
-  href: string;
+  href?: string;
   icon?: string;
 }
 
@@ -47,11 +47,8 @@ function CardIcon({ name }: { name: string }) {
 }
 
 export function Card({ title, description, href, icon }: CardProps) {
-  return (
-    <Link
-      href={href}
-      className="block glass-panel rounded-xl p-5 group hover:border-violet-spectral/30 transition-all duration-300"
-    >
+  const content = (
+    <>
       {icon && iconMap[icon] && (
         <div className="p-2 rounded-lg bg-violet-spectral/15 w-fit mb-3">
           <CardIcon name={icon} />
@@ -61,10 +58,29 @@ export function Card({ title, description, href, icon }: CardProps) {
         {title}
       </h3>
       <p className="text-sm text-gray-500 mb-3">{description}</p>
-      <span className="text-sm text-violet-spectral flex items-center gap-1">
-        Learn more <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-      </span>
-    </Link>
+      {href && (
+        <span className="text-sm text-violet-spectral flex items-center gap-1">
+          Learn more <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+        </span>
+      )}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block glass-panel rounded-xl p-5 group hover:border-violet-spectral/30 transition-all duration-300"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="glass-panel rounded-xl p-5 group">
+      {content}
+    </div>
   );
 }
 

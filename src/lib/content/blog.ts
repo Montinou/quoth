@@ -13,6 +13,26 @@ function calculateReadingTime(content: string): number {
   return Math.ceil(words / wordsPerMinute);
 }
 
+/**
+ * Safely parse frontmatter data into a BlogPost with defaults for missing fields.
+ * Prevents type assertion from masking missing required fields.
+ */
+function parseBlogPost(data: Record<string, unknown>, slug: string, content: string): BlogPost {
+  return {
+    title: String(data.title || 'Untitled'),
+    description: String(data.description || ''),
+    date: String(data.date || new Date().toISOString().split('T')[0]),
+    author: String(data.author || 'Unknown'),
+    slug,
+    content,
+    tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+    image: data.image ? String(data.image) : undefined,
+    featured: Boolean(data.featured),
+    draft: Boolean(data.draft),
+    readingTime: typeof data.readingTime === 'number' ? data.readingTime : calculateReadingTime(content),
+  };
+}
+
 export async function getAllPosts(): Promise<BlogPost[]> {
   if (!fs.existsSync(BLOG_DIR)) return [];
 
@@ -22,13 +42,9 @@ export async function getAllPosts(): Promise<BlogPost[]> {
     const filePath = path.join(BLOG_DIR, filename);
     const fileContent = fs.readFileSync(filePath, 'utf8');
     const { data, content } = matter(fileContent);
+    const slug = filename.replace('.mdx', '');
 
-    return {
-      ...data,
-      slug: filename.replace('.mdx', ''),
-      content,
-      readingTime: data.readingTime || calculateReadingTime(content),
-    } as BlogPost;
+    return parseBlogPost(data, slug, content);
   });
 
   return posts
@@ -44,12 +60,7 @@ export async function getPostBySlug(slug: string): Promise<BlogPost | null> {
   const fileContent = fs.readFileSync(filePath, 'utf8');
   const { data, content } = matter(fileContent);
 
-  return {
-    ...data,
-    slug,
-    content,
-    readingTime: data.readingTime || calculateReadingTime(content),
-  } as BlogPost;
+  return parseBlogPost(data, slug, content);
 }
 
 export async function getFeaturedPost(): Promise<BlogPost | null> {
