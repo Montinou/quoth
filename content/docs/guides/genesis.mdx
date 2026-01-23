@@ -1,0 +1,113 @@
+---
+title: "Genesis Documentation"
+description: "Automatically document your codebase with AI-powered analysis"
+order: 1
+---
+
+Genesis is Quoth's automated documentation system. It analyzes your codebase and creates structured documentation that AI agents can use to understand your project.
+
+## How Genesis Works
+
+<Steps>
+  <Step>
+    **Configuration** - Genesis asks about your preferred documentation depth
+  </Step>
+  <Step>
+    **Analysis** - Your AI tool reads local files using its native capabilities
+  </Step>
+  <Step>
+    **Documentation** - Each document is created and uploaded incrementally
+  </Step>
+  <Step>
+    **Indexing** - Documents are embedded for semantic search
+  </Step>
+</Steps>
+
+## Depth Levels
+
+Genesis offers three depth levels to match your documentation needs:
+
+| Level | Documents | Time | Best For |
+|-------|-----------|------|----------|
+| `minimal` | 3 | ~3 min | Quick overview, prototypes |
+| `standard` | 5 | ~7 min | Team onboarding, regular development |
+| `comprehensive` | 11 | ~20 min | Enterprise audit, full documentation |
+
+### Minimal (3 Documents)
+
+- `project-overview.md` - High-level system overview
+- `tech-stack.md` - Dependencies and frameworks
+- `repo-structure.md` - Directory organization
+
+### Standard (5 Documents)
+
+Everything in minimal, plus:
+
+- `coding-conventions.md` - Code style and patterns
+- `testing-patterns.md` - Test structure and examples
+
+### Comprehensive (11 Documents)
+
+Everything in standard, plus:
+
+- `api-schemas.md` - REST/GraphQL endpoints
+- `database-models.md` - Tables and relations
+- `shared-types.md` - TypeScript interfaces
+- `error-handling.md` - Error patterns
+- `security-patterns.md` - Auth and validation
+- `tech-debt.md` - Known issues and improvements
+
+## Running Genesis
+
+Activate the architect persona and request Genesis:
+
+```
+/prompt quoth_architect
+"Run Genesis with comprehensive depth"
+```
+
+<Callout type="info">
+  Genesis respects your `.gitignore` and won't document sensitive files like `.env` or `node_modules`.
+</Callout>
+
+## Updating Documentation
+
+Genesis creates initial documentation, but keeping it current is important. You have two options:
+
+### Incremental Updates
+
+Use the documenter persona to update specific sections:
+
+```
+/prompt quoth_documenter
+"Update the API schemas documentation with the new /users endpoint"
+```
+
+### Full Regeneration
+
+Run Genesis again with `update_only` focus:
+
+```
+/prompt quoth_architect
+"Run Genesis with update_only focus to refresh documentation"
+```
+
+## Best Practices
+
+<CardGrid>
+  <Card
+    title="Start Small"
+    description="Begin with minimal depth, expand as needed"
+    icon="Minimize2"
+  />
+  <Card
+    title="Keep Current"
+    description="Run Genesis after major changes"
+    icon="RefreshCw"
+  />
+  <Card
+    title="Review Output"
+    description="Verify generated docs match your project"
+    icon="CheckCircle"
+  />
+</CardGrid>

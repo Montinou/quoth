@@ -1,0 +1,126 @@
+---
+title: "Dashboard Overview"
+description: "Navigate the Quoth dashboard and manage your projects"
+order: 1
+---
+
+The Quoth dashboard is your central hub for managing projects, teams, and API keys.
+
+## Accessing the Dashboard
+
+Visit [quoth.ai-innovation.site/dashboard](https://quoth.ai-innovation.site/dashboard) and sign in with your account.
+
+## Dashboard Sections
+
+<CardGrid>
+  <Card
+    title="Projects"
+    description="View and manage your knowledge bases"
+    icon="Folder"
+  />
+  <Card
+    title="API Keys"
+    description="Generate and revoke MCP tokens"
+    icon="Key"
+  />
+  <Card
+    title="Team"
+    description="Invite collaborators and manage roles"
+    icon="Users"
+  />
+  <Card
+    title="Proposals"
+    description="Review and approve documentation updates"
+    icon="GitPullRequest"
+  />
+</CardGrid>
+
+## Projects
+
+Each project represents a separate knowledge base. When you sign up, a default project is automatically created: `{username}-knowledge-base`.
+
+### Project Settings
+
+- **Name** - Display name for your project
+- **Slug** - URL-friendly identifier
+- **Visibility** - Public (anyone can read) or Private
+- **Approval Flow** - Whether proposals require admin approval
+
+## API Keys
+
+API keys are JWT tokens that authenticate MCP connections.
+
+### Generating a Key
+
+<Steps>
+  <Step>
+    Navigate to **API Keys** in the dashboard
+  </Step>
+  <Step>
+    Click **Generate New Key**
+  </Step>
+  <Step>
+    Add a descriptive label (e.g., "Claude Desktop - MacBook")
+  </Step>
+  <Step>
+    Copy the token immediately - it won't be shown again
+  </Step>
+</Steps>
+
+<Callout type="danger">
+  **Security Warning:** Treat API keys like passwords. Never commit them to version control or share them publicly.
+</Callout>
+
+### Key Properties
+
+| Property | Description |
+|----------|-------------|
+| Label | Your description for the key |
+| Prefix | First 12 characters (visible in dashboard) |
+| Expiration | 90 days from creation |
+| Last Used | Timestamp of most recent API call |
+
+## Team Management
+
+Invite collaborators to your project with role-based access control.
+
+### Roles
+
+| Role | Permissions |
+|------|-------------|
+| **Viewer** | Search and read documentation |
+| **Editor** | All viewer permissions + propose updates |
+| **Admin** | All editor permissions + approve proposals, manage team, generate keys |
+
+### Inviting Members
+
+<Steps>
+  <Step>
+    Go to your project's **Team** page
+  </Step>
+  <Step>
+    Click **Invite Member**
+  </Step>
+  <Step>
+    Enter their email and select a role
+  </Step>
+  <Step>
+    They'll receive an invitation email valid for 7 days
+  </Step>
+</Steps>
+
+## Proposals
+
+When team members propose documentation updates, they appear in the Proposals section for review.
+
+### Proposal Workflow
+
+1. **Editor** proposes an update via `quoth_propose_update`
+2. **Proposal** appears in dashboard as "Pending"
+3. **Admin** reviews the proposal with evidence
+4. **Admin** approves or rejects with optional feedback
+5. If approved, documentation is updated automatically
+
+<Callout type="info">
+  Projects can disable the approval requirement, allowing editors to update documentation directly.
+</Callout>

@@ -9,6 +9,7 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Clock, RotateCcw, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { useToast } from '@/contexts/ToastContext';
 
 interface DocumentVersion {
   id: string;
@@ -30,6 +31,7 @@ interface DocumentData {
 export default function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { success, error: showError } = useToast();
   const [doc, setDoc] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,14 +70,14 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Rollback failed');
+        showError('Rollback failed', data.error || 'Please try again');
         return;
       }
       await fetchDocument();
       setViewingVersion(null);
-      alert('Version restored successfully');
-    } catch (err) {
-      alert('Rollback failed');
+      success('Version restored', 'Document has been rolled back successfully');
+    } catch {
+      showError('Rollback failed', 'Please try again');
     } finally {
       setRollingBack(false);
     }

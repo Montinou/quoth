@@ -1202,6 +1202,35 @@ html {
   animation: toast-exit 0.3s var(--ease-smooth) forwards;
 }
 
+/* Slide up animation for new toast system */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-progress {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s var(--spring) forwards;
+}
+
+.animate-toast-progress {
+  animation: toast-progress 4s linear forwards;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

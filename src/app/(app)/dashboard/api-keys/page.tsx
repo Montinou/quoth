@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
 
@@ -26,6 +27,7 @@ export default function ApiKeysPage() {
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [label, setLabel] = useState('Claude Desktop');
   const { session, user } = useAuth();
+  const { success, error: showError } = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -78,11 +80,11 @@ export default function ApiKeysPage() {
         setLabel('Claude Desktop'); // Reset label
         fetchKeys(); // Refresh keys list
       } else {
-        const error = await res.json();
-        alert(`Failed to generate token: ${error.error}`);
+        const errorData = await res.json();
+        showError('Failed to generate token', errorData.error);
       }
-    } catch (error) {
-      alert('Failed to generate token. Please try again.');
+    } catch {
+      showError('Failed to generate token', 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -90,7 +92,7 @@ export default function ApiKeysPage() {
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
-    alert('Copied to clipboard!');
+    success('Copied to clipboard');
   }
 
   if (!user) {

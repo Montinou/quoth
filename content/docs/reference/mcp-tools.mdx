@@ -1,0 +1,130 @@
+---
+title: "MCP Tools Reference"
+description: "Complete reference for all Quoth MCP tools"
+order: 1
+---
+
+Quoth exposes several tools through the Model Context Protocol (MCP). These tools are called automatically by your AI assistant when relevant.
+
+## Tools Overview
+
+| Tool | Purpose | Auth Required |
+|------|---------|---------------|
+| `quoth_search_index` | Semantic search across documentation | Yes |
+| `quoth_read_doc` | Read full document content | Yes |
+| `quoth_propose_update` | Submit documentation updates | Yes (editor+) |
+| `quoth_list_templates` | List available templates | Yes |
+| `quoth_get_template` | Fetch template structure | Yes |
+| `quoth_read_chunks` | Fetch specific chunks | Yes |
+| `quoth_genesis` | Bootstrap project documentation | Yes (admin) |
+
+## quoth_search_index
+
+Performs semantic search across your knowledge base using AI embeddings.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Natural language search query |
+| `limit` | number | No | Max results (default: 15) |
+| `rerank` | boolean | No | Enable Cohere reranking (default: true) |
+
+### Example
+
+```
+Search Quoth for "authentication patterns"
+```
+
+Returns ranked results with relevance scores and content snippets.
+
+## quoth_read_doc
+
+Retrieves the full content of a specific document.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `doc_id` | string | Yes | Document title or path |
+
+### Example
+
+```
+Read the "testing-patterns" document from Quoth
+```
+
+## quoth_propose_update
+
+Submits a documentation update proposal with evidence.
+
+<Callout type="warning">
+  Requires **editor** or **admin** role. Viewers cannot propose updates.
+</Callout>
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `doc_id` | string | Yes | Document to update |
+| `new_content` | string | Yes | Proposed new content (full markdown) |
+| `evidence_snippet` | string | Yes | Code or commit reference |
+| `reasoning` | string | Yes | Why this update is needed |
+
+## quoth_genesis
+
+Bootstraps documentation for a new project. See the [Genesis Guide](/docs/guides/genesis) for detailed usage.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `depth_level` | string | No | `minimal`, `standard`, or `comprehensive` |
+| `focus` | string | No | `full_scan` or `update_only` |
+| `language_hint` | string | No | Primary language hint |
+
+## Prompts (Personas)
+
+In addition to tools, Quoth provides prompts that configure AI behavior:
+
+### quoth_architect
+
+Enforces "Single Source of Truth" rules. Use before writing code:
+
+```
+/prompt quoth_architect
+```
+
+The AI will automatically search documentation before generating code.
+
+### quoth_auditor
+
+Reviews code against documentation. Use for code review:
+
+```
+/prompt quoth_auditor
+```
+
+Distinguishes between violations (bad code) and new patterns (needs documentation).
+
+### quoth_documenter
+
+Documents code as you build:
+
+```
+/prompt quoth_documenter
+```
+
+Fetches templates and creates structured documentation immediately.
+
+## Rate Limits
+
+| Tier | Requests/min | Search/day |
+|------|--------------|------------|
+| Free | 10 | 100 |
+| Pro | 60 | 1,000 |
+| Enterprise | Unlimited | Unlimited |
+
+<Callout type="tip">
+  Rate limits apply per API key. Generate separate keys for different projects to avoid hitting limits.
+</Callout>

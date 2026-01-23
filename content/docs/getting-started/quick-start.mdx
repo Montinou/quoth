@@ -1,0 +1,118 @@
+---
+title: "Quick Start"
+description: "Get Quoth running in 5 minutes"
+order: 1
+---
+
+This guide will help you connect Quoth to your AI tool and start using it to improve your AI-assisted development workflow.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- An AI tool that supports MCP (Model Context Protocol)
+  - Claude Desktop
+  - Claude Code (CLI)
+  - Cursor
+  - Or any MCP-compatible client
+- A Quoth account (free tier available)
+
+## Step 1: Create an Account
+
+<Steps>
+  <Step>
+    Visit [quoth.ai-innovation.site](https://quoth.ai-innovation.site) and click **Get Started**
+  </Step>
+  <Step>
+    Sign up with your email address
+  </Step>
+  <Step>
+    Verify your email to activate your account
+  </Step>
+</Steps>
+
+## Step 2: Connect Your AI Tool
+
+### Claude Code (Recommended)
+
+The fastest way to connect is using OAuth authentication:
+
+```bash
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
+
+When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for login.
+
+### Manual Setup
+
+If you prefer token-based authentication:
+
+<Steps>
+  <Step>
+    Go to your [Dashboard](https://quoth.ai-innovation.site/dashboard)
+  </Step>
+  <Step>
+    Navigate to **API Keys** and generate a new token
+  </Step>
+  <Step>
+    Add the token to your MCP configuration:
+    ```json
+    {
+      "mcpServers": {
+        "quoth": {
+          "url": "https://quoth.ai-innovation.site/api/mcp",
+          "headers": {
+            "Authorization": "Bearer YOUR_TOKEN"
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Step 3: Initialize Your Knowledge Base
+
+Run Genesis to automatically document your codebase:
+
+```
+/prompt quoth_architect
+"Run Genesis to document this project"
+```
+
+Genesis will analyze your code and create documentation for:
+- Project structure and architecture
+- Tech stack and dependencies
+- Coding conventions and patterns
+
+<Callout type="tip">
+  Start with the `minimal` depth level for a quick overview, then run `comprehensive` when you need full documentation.
+</Callout>
+
+## Step 4: Start Building
+
+Now when you write code with AI assistance, activate the architect persona first:
+
+```
+/prompt quoth_architect
+"Create a new API endpoint for user authentication"
+```
+
+The AI will search your knowledge base before generating code, ensuring it follows your documented patterns.
+
+## Next Steps
+
+<CardGrid>
+  <Card
+    title="Genesis Guide"
+    description="Learn about documentation depth levels and customization"
+    icon="BookOpen"
+    href="/docs/guides/genesis"
+  />
+  <Card
+    title="MCP Tools Reference"
+    description="Explore all available Quoth tools"
+    icon="Wrench"
+    href="/docs/reference/mcp-tools"
+  />
+</CardGrid>

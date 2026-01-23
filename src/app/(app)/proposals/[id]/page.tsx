@@ -8,6 +8,7 @@
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
+import { useToast } from '@/contexts/ToastContext';
 
 interface Proposal {
   id: string;
@@ -26,6 +27,7 @@ interface Proposal {
 export default function ProposalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { success, error: showError, warning } = useToast();
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [showApproveDialog, setShowApproveDialog] = useState(false);
@@ -56,7 +58,7 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
 
   async function handleApprove() {
     if (!reviewerEmail) {
-      alert('Please enter your email');
+      warning('Please enter your email');
       return;
     }
 
@@ -73,7 +75,7 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
       const data = await res.json();
 
       if (res.ok) {
-        alert('Proposal approved and applied to knowledge base!');
+        success('Proposal approved', 'Changes applied to knowledge base');
         router.push('/proposals');
       } else {
         setError(data.error || 'Failed to approve proposal');
@@ -88,12 +90,12 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
 
   async function handleReject() {
     if (!reviewerEmail || !rejectReason) {
-      alert('Please enter your email and rejection reason');
+      warning('Please enter your email and rejection reason');
       return;
     }
 
     if (rejectReason.length < 10) {
-      alert('Rejection reason must be at least 10 characters');
+      warning('Rejection reason must be at least 10 characters');
       return;
     }
 
@@ -110,7 +112,7 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
       const data = await res.json();
 
       if (res.ok) {
-        alert('Proposal rejected');
+        success('Proposal rejected');
         router.push('/proposals');
       } else {
         setError(data.error || 'Failed to reject proposal');

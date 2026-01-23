@@ -1,0 +1,111 @@
+---
+title: "Installation"
+description: "Detailed installation instructions for all supported platforms"
+order: 2
+---
+
+Quoth can be connected to any MCP-compatible AI tool. This guide covers installation for popular platforms.
+
+## Claude Code (CLI)
+
+### OAuth Installation (Recommended)
+
+```bash
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
+
+Then authenticate from the `/mcp` menu.
+
+### Token-Based Installation
+
+```bash
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Claude Desktop
+
+Add to your Claude Desktop configuration file:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "quoth": {
+      "url": "https://quoth.ai-innovation.site/api/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+<Callout type="warning">
+  Restart Claude Desktop after modifying the configuration file.
+</Callout>
+
+## Cursor
+
+Cursor supports MCP through its settings:
+
+<Steps>
+  <Step>
+    Open Cursor Settings (`Cmd/Ctrl + ,`)
+  </Step>
+  <Step>
+    Navigate to **Features** → **MCP Servers**
+  </Step>
+  <Step>
+    Add a new server with URL: `https://quoth.ai-innovation.site/api/mcp`
+  </Step>
+  <Step>
+    Add the Authorization header with your token
+  </Step>
+</Steps>
+
+## SSE Transport
+
+For clients that require Server-Sent Events transport:
+
+```bash
+claude mcp add --transport sse quoth \
+  "https://quoth.ai-innovation.site/api/mcp/sse?token=YOUR_TOKEN"
+```
+
+## Public Demo (No Auth)
+
+For testing without authentication (read-only access):
+
+```bash
+claude mcp add --transport http quoth-public \
+  https://quoth.ai-innovation.site/api/mcp/public
+```
+
+## Verify Installation
+
+Test that Quoth is connected:
+
+```
+Search Quoth for "test patterns"
+```
+
+If connected, you'll see search results from the Quoth knowledge base.
+
+## Troubleshooting
+
+<Callout type="danger">
+  **Connection Failed?** Make sure your token hasn't expired. Generate a new one from the [API Keys dashboard](https://quoth.ai-innovation.site/dashboard/api-keys).
+</Callout>
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| "Invalid token" | Regenerate API key from dashboard |
+| "Connection refused" | Check your internet connection |
+| "Server not responding" | Verify the MCP URL is correct |
+| "Unauthorized" | Ensure token is properly formatted in header |

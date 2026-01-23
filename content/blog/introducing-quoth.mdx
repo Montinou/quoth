@@ -1,0 +1,76 @@
+---
+title: "Introducing Quoth: The Documentation Layer for AI-Native Development"
+description: "Today we're launching Quoth, a documentation-as-code platform that keeps your AI agents in sync with your codebase."
+date: "2026-01-23"
+author: "Quoth Team"
+tags: ["announcement", "ai", "documentation"]
+featured: true
+---
+
+Building software with AI agents is powerful—but there's a catch. Your AI doesn't actually know your codebase. It hallucinates patterns, invents APIs that don't exist, and confidently generates code that contradicts your architecture.
+
+**Quoth changes that.**
+
+## The Problem with AI-Assisted Development
+
+When you ask an AI to write code for your project, it's essentially guessing. It doesn't know:
+
+- Your testing patterns and conventions
+- Your API schemas and data models
+- Your architectural decisions and their rationale
+- The actual structure of your codebase
+
+The result? Code that looks right but doesn't fit. Tests that follow the wrong patterns. Components that don't match your design system.
+
+## Enter Quoth: Your Single Source of Truth
+
+Quoth is an MCP (Model Context Protocol) server that acts as an auditor between your AI and your codebase. It provides:
+
+<CardGrid>
+  <Card
+    title="Semantic Search"
+    description="Find relevant documentation using natural language queries"
+    icon="Search"
+  />
+  <Card
+    title="Pattern Enforcement"
+    description="Ensure AI-generated code follows your documented standards"
+    icon="Shield"
+  />
+  <Card
+    title="Living Documentation"
+    description="Keep docs in sync with code through proposal workflows"
+    icon="RefreshCw"
+  />
+</CardGrid>
+
+## How It Works
+
+<Steps>
+  <Step>
+    **Connect Quoth to your AI tool** via MCP protocol (Claude Desktop, Cursor, etc.)
+  </Step>
+  <Step>
+    **Run Genesis** to automatically document your codebase structure and patterns
+  </Step>
+  <Step>
+    **Activate the Architect persona** before writing code to enforce documented patterns
+  </Step>
+</Steps>
+
+## Get Started Today
+
+Quoth is available now with a free tier for individual developers. Check out our [Quick Start Guide](/docs/getting-started/quick-start) to connect your first project.
+
+<Callout type="tip">
+  Already using Claude Code? Add Quoth with a single command:
+  ```bash
+  claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+  ```
+</Callout>
+
+We can't wait to see what you build with AI that actually understands your code.
+
+---
+
+*Have questions? Join our community or reach out on GitHub.*
