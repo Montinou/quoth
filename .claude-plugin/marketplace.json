@@ -1,0 +1,27 @@
+{
+  "name": "quoth-marketplace",
+  "owner": {
+    "name": "Montinou",
+    "email": "montinou@ai-innovation.site"
+  },
+  "metadata": {
+    "description": "Quoth - Documentation as Single Source of Truth for AI-native development",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "quoth",
+      "source": "./quoth-plugin",
+      "description": "Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints that guide Claude to use quoth_guidelines when relevant.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Montinou"
+      },
+      "homepage": "https://quoth.ai-innovation.site",
+      "repository": "https://github.com/Montinou/quoth-mcp",
+      "license": "MIT",
+      "keywords": ["documentation", "mcp", "ai", "claude-code", "source-of-truth", "patterns", "quoth"],
+      "category": "documentation"
+    }
+  ]
+}

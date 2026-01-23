@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "quoth": {
+      "type": "http",
+      "url": "https://quoth.ai-innovation.site/api/mcp"
+    }
+  }
+}

@@ -69,7 +69,7 @@ quoth_guidelines({
 **Compact mode** (~150 tokens) gives Claude the core rules:
 
 - Search first with `quoth_search_index`
-- Trust levels: >80% follow exactly, 60-80% verify, <60% cross-reference
+- Trust levels: >80% follow exactly, 60-80% verify, &lt;60% cross-reference
 - Docs = intended design (when code conflicts, docs win)
 - Templates required before any Quoth updates
 
@@ -121,14 +121,25 @@ The new model trusts Claude's judgment. The hints are clear. The tool is discove
 
 ## Installing the Plugin
 
-The Quoth Plugin comes bundled with your Quoth MCP connection:
+### Full Install (MCP + Hooks)
 
 ```bash
-# If you haven't connected Quoth yet
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+# Add the Quoth marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install the plugin
+/plugin install quoth@quoth-marketplace
 ```
 
-The hooks activate automatically when Quoth detects a Claude Code session.
+This installs everything: MCP server, lightweight hooks, and the `/quoth-genesis` skill.
+
+### MCP Only (No Hooks)
+
+If you prefer just the MCP tools without the hook reminders:
+
+```bash
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
 
 ## What About the Old Personas?
 

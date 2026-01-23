@@ -11,14 +11,32 @@ Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints
 
 ## Quick Install
 
+### Option 1: From Marketplace (Recommended)
+
 ```bash
-# One command: Add MCP server with OAuth
+# Add the Quoth marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install the plugin
+/plugin install quoth@quoth-marketplace
+```
+
+This installs everything:
+- **Quoth MCP Server** - All tools (`quoth_guidelines`, `quoth_search_index`, etc.)
+- **Lightweight Hooks** - Gentle hints (~60 tokens)
+- **Skills** - `/quoth-genesis` for bootstrapping
+
+### Option 2: MCP Only (No Hooks)
+
+If you only want the MCP server without hooks:
+
+```bash
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 ```
 
-This gives you all Quoth tools including `quoth_guidelines`. The lightweight hooks activate automatically when Quoth MCP is connected.
+### With API Key
 
-### Alternative: With API Key
+For authenticated access:
 
 ```bash
 # Get a token from https://quoth.ai-innovation.site/dashboard/api-keys
