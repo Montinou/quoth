@@ -7,6 +7,15 @@ description: "All notable changes to Quoth"
 
 ### 2026-01-23
 
+**Production Hardening** - Security and reliability improvements
+
+- Rate limiting on MCP endpoints (60 requests/minute)
+- Security headers via middleware (CSP, HSTS, X-Frame-Options)
+- Input validation and sanitization for all API endpoints
+- Public demo endpoint at `/api/mcp/public` (read-only, no auth required)
+- Improved error handling with structured error responses
+- Token validation improvements for API keys
+
 **Insights Dashboard** - Documentation health monitoring
 
 The Analytics page now tracks documentation health with four new features:

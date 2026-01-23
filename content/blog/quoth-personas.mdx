@@ -1,0 +1,206 @@
+---
+title: "Quoth Personas: Architect, Auditor, and Documenter"
+description: "Learn how to use Quoth's three AI personas to enforce documentation patterns, review code, and maintain living documentation."
+date: "2026-01-23"
+author: "Quoth Team"
+tags: ["personas", "claude-code", "workflow", "ai"]
+featured: false
+---
+
+Quoth isn't just an MCP server—it's a complete documentation enforcement system. At its core are three specialized personas that change how Claude interacts with your codebase.
+
+## The Problem: AI That Doesn't Know Your Rules
+
+When you ask Claude to write code, it draws from general knowledge. It doesn't know:
+
+- That your team uses Vitest, not Jest
+- That your API follows specific naming conventions
+- That certain patterns are explicitly forbidden
+
+The result? Code that works but doesn't fit your architecture.
+
+## The Solution: Persona-Driven Development
+
+Quoth introduces three personas that change Claude's behavior:
+
+<CardGrid>
+  <Card
+    title="Architect"
+    description="Search-then-write: enforces patterns before generating code"
+    icon="Wand2"
+  />
+  <Card
+    title="Auditor"
+    description="Review-then-report: distinguishes violations from new features"
+    icon="FileSearch"
+  />
+  <Card
+    title="Documenter"
+    description="Build-then-document: creates structured docs as you code"
+    icon="Pencil"
+  />
+</CardGrid>
+
+## Activating Personas
+
+Personas are activated with the `/prompt` command in Claude Code:
+
+```bash
+# Before writing code
+/prompt quoth_architect
+
+# Before reviewing code
+/prompt quoth_auditor
+
+# Before documenting
+/prompt quoth_documenter
+```
+
+Once activated, the persona stays active for your entire conversation.
+
+## The Architect Persona
+
+**When to use:** Before writing any new code
+
+The Architect enforces a "search-then-write" pattern:
+
+1. **Search first** — Claude queries Quoth for relevant patterns
+2. **Read documentation** — Fetches full content of matching docs
+3. **Generate code** — Writes code that follows documented patterns
+4. **Cite sources** — References which docs influenced the output
+
+<Callout type="tip">
+  The Architect never generates code without searching Quoth first. If no patterns exist, it asks whether to create new documentation.
+</Callout>
+
+### Example Workflow
+
+```
+You: /prompt quoth_architect
+
+Claude: Architect persona activated. I will search Quoth before
+generating any code.
+
+You: Create a Vitest test for the UserService
+
+Claude: [Searching Quoth for "vitest testing patterns"...]
+        [Reading patterns/backend-unit-vitest.md...]
+
+According to your documented patterns, Vitest tests should:
+- Use `describe/it` blocks with descriptive names
+- Mock dependencies with `vi.fn()` (never `jest.fn()`)
+- Follow the Arrange-Act-Assert pattern
+
+Here's your test following these patterns:
+[generates compliant code]
+```
+
+## The Auditor Persona
+
+**When to use:** During code review or PR analysis
+
+The Auditor distinguishes between two types of deviations:
+
+| Type | Meaning | Action |
+|------|---------|--------|
+| **Violation** | Code breaks documented patterns | Flag for fix |
+| **New Pattern** | Legitimate new approach | Document it |
+
+This prevents the common trap of marking every deviation as "wrong" when some are intentional improvements.
+
+### Example Workflow
+
+```
+You: /prompt quoth_auditor
+
+Claude: Auditor persona activated. I will compare code against
+documented patterns.
+
+You: Review this PR for pattern compliance
+
+Claude: [Searching Quoth for relevant patterns...]
+
+## Audit Report
+
+### Violations (2)
+1. Line 45: Uses `jest.fn()` but docs require `vi.fn()`
+2. Line 89: Missing error boundary per error-handling.md
+
+### New Patterns (1)
+1. Line 120: Introduces retry logic not in current docs
+   Recommendation: Document this pattern if approved
+```
+
+## The Documenter Persona
+
+**When to use:** After building new features or patterns
+
+The Documenter creates structured documentation following your templates:
+
+1. **Analyze code** — Understands what was built
+2. **Fetch template** — Gets the appropriate doc template from Quoth
+3. **Generate doc** — Creates documentation in your format
+4. **Propose update** — Submits to Quoth for review
+
+### Example Workflow
+
+```
+You: /prompt quoth_documenter
+
+Claude: Documenter persona activated. I will help document your code.
+
+You: Document the new retry utility I just built
+
+Claude: [Fetching template for "utility patterns"...]
+
+I'll create documentation following your patterns/utilities template:
+
+## retry-utility.md
+
+### Purpose
+Provides exponential backoff retry logic for API calls.
+
+### Usage
+[structured examples]
+
+### Configuration Options
+[documented parameters]
+
+Shall I propose this update to Quoth?
+```
+
+## Personas vs Tools: Key Distinction
+
+| Aspect | Tools | Personas |
+|--------|-------|----------|
+| **What** | Functions that do things | Behavior configurations |
+| **How** | Claude calls automatically | You activate with `/prompt` |
+| **Examples** | `quoth_search_index`, `quoth_read_doc` | `quoth_architect`, `quoth_auditor` |
+
+Tools are the "hands" — they perform actions. Personas are the "mindset" — they determine when and how tools are used.
+
+## Best Practices
+
+1. **One persona per task** — Don't try to mix them
+2. **Activate early** — Start with `/prompt` before your request
+3. **Trust the process** — Let the persona guide the workflow
+4. **Document discoveries** — When Auditor finds new patterns, use Documenter
+
+## Getting Started
+
+1. Connect Quoth to Claude Code:
+   ```bash
+   claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+   ```
+
+2. Run Genesis to populate your knowledge base:
+   ```
+   /prompt quoth_architect
+   Run Genesis for this project
+   ```
+
+3. Start using personas in your daily workflow
+
+---
+
+*Questions about personas? Check our [Personas Guide](/docs/guides/personas) or reach out on GitHub.*
