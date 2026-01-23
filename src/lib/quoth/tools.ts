@@ -22,6 +22,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
 import { logActivity } from './activity';
+import { formatCompactGuidelines, formatFullGuidelines, type GuidelinesMode } from './guidelines';
 
 // Templates directory path (relative to project root)
 const TEMPLATES_DIR = path.join(process.cwd(), 'quoth-knowledge-template', 'templates');
@@ -894,6 +895,64 @@ ${chunk.content}
           content: [{
             type: 'text' as const,
             text: `Error switching account: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 9: quoth_guidelines (Adaptive Guidelines)
+  server.registerTool(
+    'quoth_guidelines',
+    {
+      title: 'Get Quoth Guidelines',
+      description:
+        `Get Quoth guidelines for your current task.
+
+STRONGLY RECOMMENDED before writing code, reviewing, or documenting:
+1. Call this tool to get guidelines
+2. Call quoth_search_index to find relevant patterns
+3. Follow documented patterns exactly
+
+Modes:
+- "code": Writing/editing code (patterns, anti-patterns)
+- "review": Auditing existing code (violations, drift)
+- "document": Creating/updating Quoth docs (templates first)`,
+      inputSchema: {
+        mode: z.enum(['code', 'review', 'document'])
+          .describe('Guidelines mode: "code" for writing, "review" for auditing, "document" for docs'),
+        full: z.boolean().optional()
+          .describe('If true, returns full guidelines (~500 tokens). Default: compact (~150 tokens)'),
+      },
+    },
+    async ({ mode, full }) => {
+      try {
+        const guidelinesMode = mode as GuidelinesMode;
+        const content = full
+          ? formatFullGuidelines(guidelinesMode)
+          : formatCompactGuidelines(guidelinesMode);
+
+        // Log activity
+        logActivity({
+          projectId: authContext.project_id,
+          userId: authContext.user_id,
+          eventType: 'read',
+          query: `guidelines:${mode}${full ? ':full' : ''}`,
+          resultCount: 1,
+          toolName: 'quoth_guidelines',
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: content,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error getting guidelines: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
         };
       }

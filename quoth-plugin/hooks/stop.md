@@ -1,68 +1,40 @@
 ---
 event: Stop
-description: Display Quoth Badge summarizing pattern usage
+description: Enforce badge display when Quoth tools used
 ---
 
-# Quoth Stop Hook - Badge Output
+# Quoth Stop Hook
 
-## Badge Display
+## Output
 
-At the end of each response, if Quoth was active during the session:
-
-### Badge Format
+Badge enforcement instruction (~20 tokens):
 
 ```
-┌─────────────────────────────────────────┐
-│ 🔮 Quoth: ✓ {{patterns_applied}} patterns applied
-│          {{#if drift}}⚠ {{drift_count}} potential drift{{/if}}
-│          {{#if undocumented}}📝 {{undocumented_count}} undocumented{{/if}}
-└─────────────────────────────────────────┘
+If you used any `quoth_*` tools in this response, end with a Quoth Badge:
+
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth                                        │
+│   ✓ [doc path]: [what was applied]              │
+└─────────────────────────────────────────────────┘
 ```
 
-### Conditions for Display
+## Badge Examples
 
-**Show Badge If**:
-- showBadge setting is true
-- At least one Edit/Write tool was used
-- Quoth patterns were searched/applied
-
-**Badge Content**:
-- **Patterns Applied**: Count of documented patterns that were followed
-- **Potential Drift**: Count of deviations from documented patterns (warning)
-- **Undocumented**: Count of new patterns that should be documented
-
-### Examples
-
-**Clean Response (all patterns followed)**:
+**Used search + followed patterns:**
 ```
-┌─────────────────────────────────────────┐
-│ 🔮 Quoth: ✓ 3 patterns applied          │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth                                        │
+│   ✓ patterns/testing-pattern.md (vitest mocks) │
+│   ✓ patterns/error-handling.md (try-catch)     │
+└─────────────────────────────────────────────────┘
 ```
 
-**Response with Warnings**:
+**Searched, no matches:**
 ```
-┌─────────────────────────────────────────┐
-│ 🔮 Quoth: ✓ 2 patterns applied          │
-│          ⚠ 1 potential drift            │
-│          📝 1 undocumented area          │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth: Searched, no matching patterns        │
+└─────────────────────────────────────────────────┘
 ```
 
-**Expandable Details** (if user asks "show quoth details"):
-```
-Patterns Applied:
-- backend-unit-vitest: Mock pattern used correctly
-- error-handling: Try-catch with logging
-
-Potential Drift:
-- api-response-format: Response structure differs from documented schema
-
-Undocumented:
-- New utility function `parseUserInput` - consider documenting
-```
-
-## Token Budget
-
-- Badge: 2-3 lines max (< 50 tokens)
-- Details only on user request
+**Didn't use Quoth:**
+No badge. Clean response.

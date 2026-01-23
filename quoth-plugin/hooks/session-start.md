@@ -1,40 +1,25 @@
 ---
 event: SessionStart
-description: Detect project and inject Quoth context
+description: Lightweight hint for Quoth availability
 ---
 
 # Quoth SessionStart Hook
 
-## Check for Quoth Configuration
+## Output
 
-1. **Detect Quoth MCP**: Check if `quoth` MCP server is connected
-   - If not connected: Skip remaining steps (plugin inactive)
+Single line hint (~25 tokens):
 
-2. **Check Project Documentation**: Call `quoth_search_index` with query "project overview"
-   - If results found: Project has Quoth docs
-   - If no results: Project may need Genesis
+```
+Quoth MCP active. Strongly recommend `quoth_guidelines('code')` and `quoth_search_index` before writing code.
+```
 
-## Actions Based on Detection
+## Behavior
 
-### If Project Has Quoth Docs
+1. Check if Quoth MCP is installed
+2. Initialize session state
+3. Output lightweight hint
 
-Load architect context silently:
-
-> **Quoth Active**: Documentation patterns will be injected automatically.
-> Use `/prompt quoth_architect` for explicit pattern enforcement.
-
-### If Project Needs Documentation
-
-Offer Genesis:
-
-> **No Quoth documentation found for this project.**
->
-> Would you like to bootstrap documentation with Genesis?
-> - Run `/quoth-genesis` to create project documentation
-> - Or connect an existing Quoth project
-
-## Token Efficiency
-
-- Only log a single line acknowledgment
-- Do NOT dump full documentation
-- Let PreToolUse inject specific patterns as needed
+Does NOT:
+- Force Claude to use Quoth
+- Dump full documentation
+- List all available tools

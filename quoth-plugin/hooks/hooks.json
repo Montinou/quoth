@@ -9,26 +9,8 @@
     {
       "type": "command",
       "event": "PreToolUse",
-      "matcher": "Edit",
-      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit.sh"]
-    },
-    {
-      "type": "command",
-      "event": "PreToolUse",
-      "matcher": "Write",
-      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-write.sh"]
-    },
-    {
-      "type": "command",
-      "event": "PostToolUse",
-      "matcher": "Edit",
-      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/post-edit.sh"]
-    },
-    {
-      "type": "command",
-      "event": "PostToolUse",
-      "matcher": "Write",
-      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/post-write.sh"]
+      "matcher": "Edit|Write",
+      "command": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-write.sh"]
     },
     {
       "type": "command",

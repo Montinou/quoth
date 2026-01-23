@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Quoth Plugin - PostToolUse Hook (Write)
-# Audits new files against documentation
+# Quoth Plugin - PreToolUse Hook (Edit|Write)
+# Lightweight reminder for Quoth patterns
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
-
-# ============================================================================
-# MAIN LOGIC
-# ============================================================================
 
 main() {
     # Check if MCP is available and session exists
@@ -33,10 +29,10 @@ main() {
         exit 0
     fi
 
-    # Record new file in session state
-    # Full audit implementation would analyze against templates
+    # Lightweight hint - strongly suggest, not force
+    local context="Quoth patterns available via \`quoth_guidelines()\` and \`quoth_search_index\`"
 
-    output_empty
+    output_context "$context"
 }
 
 main "$@"
