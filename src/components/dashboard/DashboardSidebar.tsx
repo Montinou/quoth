@@ -17,6 +17,7 @@ import {
   LogOut,
   ChevronUp,
   Sparkles,
+  PieChart,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Logo } from "@/components/quoth/Logo";
@@ -61,6 +62,12 @@ const mainNavItems = [
     href: "/proposals",
     icon: FileEdit,
     description: "Review updates",
+  },
+  {
+    title: "Coverage",
+    href: "/coverage",
+    icon: PieChart,
+    description: "Doc coverage metrics",
   },
 ];
 
