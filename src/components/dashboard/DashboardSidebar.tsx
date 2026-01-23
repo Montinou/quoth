@@ -11,6 +11,7 @@ import {
   Home,
   BookOpen,
   FileEdit,
+  BarChart3,
   Key,
   Users,
   Settings,
@@ -61,6 +62,12 @@ const mainNavItems = [
     href: "/proposals",
     icon: FileEdit,
     description: "Review updates",
+  },
+  {
+    title: "Analytics",
+    href: "/dashboard/analytics",
+    icon: BarChart3,
+    description: "Usage & metrics",
   },
 ];
 
