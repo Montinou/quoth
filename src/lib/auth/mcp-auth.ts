@@ -103,24 +103,35 @@ async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
     }
 
     // Fetch all projects user has access to (for multi-account support)
-    debugLog('[MCP Auth] Fetching available projects for user:', user.id);
-    const { data: projectMembers, error: projectsError } = await supabase
-      .from('project_members')
-      .select(`
-        project_id,
-        role,
-        project:projects(id, name, slug)
-      `)
-      .eq('user_id', user.id);
+    // This query is optional - if it fails, we continue with single-project mode
+    // to prevent random re-auth issues from serverless cold starts or DB timeouts
+    let availableProjects: AuthContext['available_projects'] = [];
+    try {
+      debugLog('[MCP Auth] Fetching available projects for user:', user.id);
+      const { data: projectMembers, error: projectsError } = await supabase
+        .from('project_members')
+        .select(`
+          project_id,
+          role,
+          project:projects(id, name, slug)
+        `)
+        .eq('user_id', user.id);
 
-    debugLog('[MCP Auth] Available projects:', projectMembers?.length || 0);
-
-    const availableProjects = projectMembers?.map((pm: any) => ({
-      project_id: pm.project_id,
-      role: pm.role as 'admin' | 'editor' | 'viewer',
-      project_name: pm.project?.name || 'Unknown',
-      project_slug: pm.project?.slug || pm.project_id,
-    })) || [];
+      if (projectsError) {
+        console.warn('[MCP Auth] Could not fetch available projects:', projectsError.message);
+      } else {
+        debugLog('[MCP Auth] Available projects:', projectMembers?.length || 0);
+        availableProjects = projectMembers?.map((pm: any) => ({
+          project_id: pm.project_id,
+          role: pm.role as 'admin' | 'editor' | 'viewer',
+          project_name: pm.project?.name || 'Unknown',
+          project_slug: pm.project?.slug || pm.project_id,
+        })) || [];
+      }
+    } catch (error) {
+      console.warn('[MCP Auth] Database query failed for available projects, continuing with single-project mode:', error);
+      // Continue without available_projects - single account mode
+    }
 
     return {
       project_id: projectId,

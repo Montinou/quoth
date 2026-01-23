@@ -1,11 +1,23 @@
 /**
  * Main Dashboard Page
- * Shows user's projects, proposal stats, and quick actions
+ * Elegant overview with animated stats, projects, and quick actions
  */
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import {
+  FolderOpen,
+  FileText,
+  GitPullRequest,
+  Key,
+  ArrowRight,
+  BookOpen,
+  Sparkles,
+  Users,
+  Shield,
+  Globe,
+} from 'lucide-react';
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient();
@@ -36,151 +48,214 @@ export default async function DashboardPage() {
     .select('*', { count: 'exact', head: true })
     .in('project_id', projectIds);
 
+  // Stats data
+  const stats = [
+    {
+      label: 'Projects',
+      value: projects?.length || 0,
+      icon: FolderOpen,
+      color: 'violet',
+      href: null,
+    },
+    {
+      label: 'Documents',
+      value: documentCount || 0,
+      icon: FileText,
+      color: 'blue',
+      href: '/knowledge-base',
+    },
+    {
+      label: 'Proposals',
+      value: proposalCount || 0,
+      icon: GitPullRequest,
+      color: 'amber',
+      href: '/proposals',
+    },
+    {
+      label: 'API Keys',
+      value: 'Manage',
+      icon: Key,
+      color: 'emerald',
+      href: '/dashboard/api-keys',
+      isAction: true,
+    },
+  ];
+
+  const quickActions = [
+    {
+      title: 'Review Proposals',
+      description: 'View and approve documentation updates from AI agents',
+      icon: GitPullRequest,
+      href: '/proposals',
+      color: 'from-violet-spectral/20 to-violet-glow/10',
+    },
+    {
+      title: 'MCP Integration',
+      description: 'Generate API keys for Claude Desktop and other MCP clients',
+      icon: Key,
+      href: '/dashboard/api-keys',
+      color: 'from-emerald-muted/20 to-emerald-muted/10',
+    },
+    {
+      title: 'Documentation',
+      description: 'Learn how to use Quoth MCP tools and best practices',
+      icon: BookOpen,
+      href: '/protocol',
+      color: 'from-blue-500/20 to-blue-500/10',
+    },
+  ];
+
   return (
-    <div className="px-6 py-8 md:pt-8">
+    <div className="px-6 py-8 md:py-10">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold font-cinzel mb-2">Dashboard</h1>
-          <p className="text-gray-400">Manage your Quoth projects and documentation</p>
+        {/* Header */}
+        <div className="mb-10 animate-stagger stagger-1">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-violet-spectral/20 to-violet-glow/10 border border-violet-spectral/20">
+              <Sparkles className="w-5 h-5 text-violet-spectral" />
+            </div>
+            <span className="text-sm font-medium text-violet-ghost/70 uppercase tracking-wider">
+              Welcome back
+            </span>
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold font-cinzel mb-3 text-white">
+            Dashboard
+          </h1>
+          <p className="text-gray-400 text-lg max-w-2xl">
+            Manage your Quoth projects, review AI-proposed documentation updates, and configure MCP integrations.
+          </p>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-400">Projects</h3>
-              <svg
-                className="w-5 h-5 text-violet-spectral"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-10">
+          {stats.map((stat, index) => {
+            const Icon = stat.icon;
+            const content = (
+              <div
+                className={`
+                  glass-panel stat-card rounded-2xl p-6
+                  ${stat.href ? 'cursor-pointer group' : ''}
+                  animate-stagger stagger-${index + 2}
+                `}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                />
-              </svg>
-            </div>
-            <p className="text-3xl font-bold">{projects?.length || 0}</p>
-          </div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-gray-400">{stat.label}</h3>
+                  <div
+                    className={`
+                      p-2 rounded-lg transition-all duration-300
+                      ${stat.color === 'violet' ? 'bg-violet-spectral/15 text-violet-spectral group-hover:bg-violet-spectral/25' : ''}
+                      ${stat.color === 'blue' ? 'bg-blue-500/15 text-blue-400 group-hover:bg-blue-500/25' : ''}
+                      ${stat.color === 'amber' ? 'bg-amber-warning/15 text-amber-warning group-hover:bg-amber-warning/25' : ''}
+                      ${stat.color === 'emerald' ? 'bg-emerald-muted/15 text-emerald-muted group-hover:bg-emerald-muted/25' : ''}
+                    `}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="flex items-end justify-between">
+                  <p
+                    className={`
+                      text-3xl md:text-4xl font-bold stat-number
+                      ${stat.isAction ? 'text-lg md:text-xl text-violet-ghost' : 'text-white'}
+                    `}
+                    style={{ animationDelay: `${0.3 + index * 0.1}s` }}
+                  >
+                    {stat.value}
+                  </p>
+                  {stat.href && (
+                    <ArrowRight className="w-4 h-4 text-gray-500 action-arrow group-hover:text-violet-spectral transition-colors" />
+                  )}
+                </div>
+              </div>
+            );
 
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-400">Documents</h3>
-              <svg
-                className="w-5 h-5 text-violet-spectral"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-            </div>
-            <p className="text-3xl font-bold">{documentCount || 0}</p>
-          </div>
-
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-400">Proposals</h3>
-              <svg
-                className="w-5 h-5 text-violet-spectral"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                />
-              </svg>
-            </div>
-            <p className="text-3xl font-bold">{proposalCount || 0}</p>
-          </div>
-
-          <Link
-            href="/dashboard/api-keys"
-            className="glass-panel p-6 hover:border-violet-spectral transition-colors cursor-pointer group"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-400">API Keys</h3>
-              <svg
-                className="w-5 h-5 text-violet-spectral group-hover:translate-x-1 transition-transform"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </div>
-            <p className="text-3xl font-bold">Manage</p>
-          </Link>
+            return stat.href ? (
+              <Link key={stat.label} href={stat.href}>
+                {content}
+              </Link>
+            ) : (
+              <div key={stat.label}>{content}</div>
+            );
+          })}
         </div>
 
-        {/* Projects List */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold font-cinzel mb-4">Your Projects</h2>
+        {/* Projects Section */}
+        <div className="mb-10 animate-stagger stagger-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold font-cinzel text-white flex items-center gap-3">
+              <FolderOpen className="w-6 h-6 text-violet-spectral" />
+              Your Projects
+            </h2>
+          </div>
+
           <div className="space-y-4">
             {projects && projects.length > 0 ? (
-              projects.map((project) => (
-                <div key={project.id} className="glass-panel p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold mb-1">{project.slug}</h3>
-                      {project.github_repo && (
-                        <p className="text-sm text-gray-400 mb-2">
-                          <span className="text-violet-ghost">GitHub:</span> {project.github_repo}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-gray-400">
-                          Role:{' '}
-                          <span className="text-violet-spectral font-medium">
+              projects.map((project, index) => (
+                <div
+                  key={project.id}
+                  className="glass-panel interactive-card rounded-2xl p-6 animate-stagger"
+                  style={{ animationDelay: `${0.4 + index * 0.1}s` }}
+                >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-xl font-bold text-white">{project.slug}</h3>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`
+                              px-2.5 py-1 text-xs font-medium rounded-full border
+                              ${project.project_members[0]?.role === 'admin'
+                                ? 'bg-violet-spectral/15 text-violet-ghost border-violet-spectral/30'
+                                : project.project_members[0]?.role === 'editor'
+                                ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                                : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
+                              }
+                            `}
+                          >
+                            <Shield className="w-3 h-3 inline-block mr-1" />
                             {project.project_members[0]?.role}
                           </span>
-                        </span>
-                        {project.is_public && (
-                          <span className="px-2 py-1 bg-violet-spectral/10 text-violet-spectral text-xs rounded-full border border-violet-spectral/20">
-                            Public
-                          </span>
-                        )}
+                          {project.is_public && (
+                            <span className="px-2.5 py-1 bg-emerald-muted/15 text-emerald-muted text-xs font-medium rounded-full border border-emerald-muted/30">
+                              <Globe className="w-3 h-3 inline-block mr-1" />
+                              Public
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      {project.github_repo && (
+                        <p className="text-sm text-gray-500">
+                          <span className="text-violet-ghost/70">GitHub:</span> {project.github_repo}
+                        </p>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
                       <Link
                         href={`/dashboard/${project.slug}/team`}
-                        className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-charcoal/80 text-gray-300 hover:text-white hover:bg-violet-spectral/20 border border-transparent hover:border-violet-spectral/30 transition-all duration-300"
                       >
-                        Manage Team →
+                        <Users className="w-4 h-4" />
+                        Team
                       </Link>
                       <Link
                         href="/proposals"
-                        className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-violet-spectral/20 text-violet-ghost hover:bg-violet-spectral/30 border border-violet-spectral/30 transition-all duration-300"
                       >
-                        View Proposals →
+                        <GitPullRequest className="w-4 h-4" />
+                        Proposals
                       </Link>
                     </div>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="glass-panel p-8 text-center">
-                <p className="text-gray-400 mb-4">No projects found</p>
-                <p className="text-sm text-gray-500">
-                  Your default project will be created automatically after email verification
+              <div className="glass-panel rounded-2xl p-12 text-center">
+                <div className="inline-flex p-4 rounded-2xl bg-violet-spectral/10 mb-4 empty-state-icon">
+                  <FolderOpen className="w-8 h-8 text-violet-spectral" />
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">No projects yet</h3>
+                <p className="text-gray-400 mb-4 max-w-md mx-auto">
+                  Your default project will be created automatically after email verification.
                 </p>
               </div>
             )}
@@ -188,42 +263,47 @@ export default async function DashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Link
-            href="/proposals"
-            className="glass-panel p-6 hover:border-violet-spectral transition-colors group"
-          >
-            <h3 className="text-lg font-bold mb-2 group-hover:text-violet-ghost transition-colors">
-              Review Proposals
-            </h3>
-            <p className="text-sm text-gray-400">
-              View and manage documentation update proposals
-            </p>
-          </Link>
+        <div className="animate-stagger stagger-7">
+          <h2 className="text-2xl font-bold font-cinzel text-white mb-6 flex items-center gap-3">
+            <Sparkles className="w-6 h-6 text-violet-spectral" />
+            Quick Actions
+          </h2>
 
-          <Link
-            href="/dashboard/api-keys"
-            className="glass-panel p-6 hover:border-violet-spectral transition-colors group"
-          >
-            <h3 className="text-lg font-bold mb-2 group-hover:text-violet-ghost transition-colors">
-              MCP Integration
-            </h3>
-            <p className="text-sm text-gray-400">
-              Generate API keys for Claude Desktop
-            </p>
-          </Link>
-
-          <Link
-            href="/protocol"
-            className="glass-panel p-6 hover:border-violet-spectral transition-colors group"
-          >
-            <h3 className="text-lg font-bold mb-2 group-hover:text-violet-ghost transition-colors">
-              Documentation
-            </h3>
-            <p className="text-sm text-gray-400">
-              Learn how to use Quoth MCP tools
-            </p>
-          </Link>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+            {quickActions.map((action, index) => {
+              const Icon = action.icon;
+              return (
+                <Link
+                  key={action.title}
+                  href={action.href}
+                  className={`
+                    glass-panel interactive-card rounded-2xl p-6 group
+                    animate-stagger
+                  `}
+                  style={{ animationDelay: `${0.5 + index * 0.1}s` }}
+                >
+                  <div
+                    className={`
+                      inline-flex p-3 rounded-xl mb-4 bg-gradient-to-br ${action.color}
+                      transition-all duration-300 group-hover:scale-110
+                    `}
+                  >
+                    <Icon className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white mb-2 group-hover:text-violet-ghost transition-colors">
+                    {action.title}
+                  </h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    {action.description}
+                  </p>
+                  <div className="flex items-center text-sm text-violet-spectral font-medium">
+                    <span>Get started</span>
+                    <ArrowRight className="w-4 h-4 ml-2 action-arrow" />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

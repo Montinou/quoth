@@ -2,11 +2,22 @@
 
 /**
  * Proposals Dashboard - List View
- * Displays all documentation update proposals with filters
+ * Elegant display of documentation update proposals with filters and animations
  */
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import {
+  GitPullRequest,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  FileText,
+  ArrowRight,
+  Filter,
+  Loader2,
+} from 'lucide-react';
 
 interface Proposal {
   id: string;
@@ -16,6 +27,44 @@ interface Proposal {
   created_at: string;
   document_title: string;
 }
+
+const statusConfig: Record<string, {
+  label: string;
+  icon: typeof Clock;
+  className: string;
+  dotColor: string;
+}> = {
+  pending: {
+    label: 'Pending',
+    icon: Clock,
+    className: 'bg-amber-warning/15 text-amber-warning border-amber-warning/30',
+    dotColor: 'bg-amber-warning',
+  },
+  approved: {
+    label: 'Approved',
+    icon: CheckCircle2,
+    className: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    dotColor: 'bg-blue-400',
+  },
+  applied: {
+    label: 'Applied',
+    icon: CheckCircle2,
+    className: 'bg-emerald-muted/15 text-emerald-muted border-emerald-muted/30',
+    dotColor: 'bg-emerald-muted',
+  },
+  rejected: {
+    label: 'Rejected',
+    icon: XCircle,
+    className: 'bg-red-500/15 text-red-400 border-red-500/30',
+    dotColor: 'bg-red-400',
+  },
+  error: {
+    label: 'Error',
+    icon: AlertCircle,
+    className: 'bg-red-500/15 text-red-400 border-red-500/30',
+    dotColor: 'bg-red-400',
+  },
+};
 
 export default function ProposalsPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -46,148 +95,224 @@ export default function ProposalsPage() {
     }
   }
 
-  const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-    approved: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    applied: 'bg-green-500/10 text-green-400 border-green-500/20',
-    rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
-    error: 'bg-red-500/10 text-red-400 border-red-500/20'
-  };
-
   const statusCounts = proposals.reduce((acc, p) => {
     acc[p.status] = (acc[p.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
+  const filters = ['all', 'pending', 'approved', 'applied', 'rejected', 'error'];
+
   return (
-    <div className="px-6 py-8 md:pt-8">
+    <div className="px-6 py-8 md:py-10">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold font-cinzel mb-2">
+        <div className="mb-10 animate-stagger stagger-1">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-violet-spectral/20 to-violet-glow/10 border border-violet-spectral/20">
+              <GitPullRequest className="w-5 h-5 text-violet-spectral" />
+            </div>
+            <span className="text-sm font-medium text-violet-ghost/70 uppercase tracking-wider">
+              Review & Approve
+            </span>
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold font-cinzel text-white mb-3">
             Documentation Proposals
           </h1>
-          <p className="text-gray-400">
-            Review and approve AI-proposed documentation updates
+          <p className="text-gray-400 text-lg max-w-2xl">
+            Review and approve AI-proposed documentation updates. Each proposal includes reasoning and evidence.
           </p>
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-10">
+          {/* Total */}
+          <div className="glass-panel stat-card rounded-2xl p-5 animate-stagger stagger-2">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-400">Total</h3>
-              <svg className="w-5 h-5 text-violet-spectral" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+              <div className="p-2 rounded-lg bg-violet-spectral/15">
+                <FileText className="w-4 h-4 text-violet-spectral" />
+              </div>
             </div>
-            <p className="text-3xl font-bold">{proposals.length}</p>
+            <p className="text-3xl font-bold text-white stat-number">{proposals.length}</p>
           </div>
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
+
+          {/* Pending */}
+          <div className="glass-panel stat-card rounded-2xl p-5 animate-stagger stagger-3">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-400">Pending</h3>
-              <svg className="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <div className="p-2 rounded-lg bg-amber-warning/15">
+                <Clock className="w-4 h-4 text-amber-warning" />
+              </div>
             </div>
-            <p className="text-3xl font-bold text-yellow-400">{statusCounts['pending'] || 0}</p>
+            <p className="text-3xl font-bold text-amber-warning stat-number">
+              {statusCounts['pending'] || 0}
+            </p>
           </div>
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
+
+          {/* Applied */}
+          <div className="glass-panel stat-card rounded-2xl p-5 animate-stagger stagger-4">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-400">Applied</h3>
-              <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <div className="p-2 rounded-lg bg-emerald-muted/15">
+                <CheckCircle2 className="w-4 h-4 text-emerald-muted" />
+              </div>
             </div>
-            <p className="text-3xl font-bold text-green-400">{statusCounts['applied'] || 0}</p>
+            <p className="text-3xl font-bold text-emerald-muted stat-number">
+              {statusCounts['applied'] || 0}
+            </p>
           </div>
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
+
+          {/* Rejected */}
+          <div className="glass-panel stat-card rounded-2xl p-5 animate-stagger stagger-5">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-400">Rejected</h3>
-              <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <div className="p-2 rounded-lg bg-red-500/15">
+                <XCircle className="w-4 h-4 text-red-400" />
+              </div>
             </div>
-            <p className="text-3xl font-bold text-red-400">{statusCounts['rejected'] || 0}</p>
+            <p className="text-3xl font-bold text-red-400 stat-number">
+              {statusCounts['rejected'] || 0}
+            </p>
           </div>
-          <div className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-2">
+
+          {/* Approved */}
+          <div className="glass-panel stat-card rounded-2xl p-5 animate-stagger stagger-6">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-400">Approved</h3>
-              <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
+              <div className="p-2 rounded-lg bg-blue-500/15">
+                <CheckCircle2 className="w-4 h-4 text-blue-400" />
+              </div>
             </div>
-            <p className="text-3xl font-bold text-blue-400">{statusCounts['approved'] || 0}</p>
+            <p className="text-3xl font-bold text-blue-400 stat-number">
+              {statusCounts['approved'] || 0}
+            </p>
           </div>
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex flex-wrap gap-3 mb-8">
-          {['all', 'pending', 'approved', 'applied', 'rejected', 'error'].map(status => (
-            <button
-              key={status}
-              onClick={() => setFilter(status)}
-              className={`px-4 py-2 rounded-lg transition-colors font-medium text-sm ${
-                filter === status
-                  ? 'bg-violet-spectral text-white'
-                  : 'glass-panel text-gray-400 hover:text-white hover:border-violet-spectral/40'
-              }`}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
-          ))}
+        <div className="mb-8 animate-stagger stagger-7">
+          <div className="flex items-center gap-2 mb-4">
+            <Filter className="w-4 h-4 text-gray-500" />
+            <span className="text-sm text-gray-500 uppercase tracking-wider font-medium">Filter by status</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {filters.map((status, index) => {
+              const isActive = filter === status;
+              const count = status === 'all' ? proposals.length : (statusCounts[status] || 0);
+              return (
+                <button
+                  key={status}
+                  onClick={() => setFilter(status)}
+                  data-active={isActive}
+                  className={`
+                    filter-tab px-4 py-2.5 rounded-xl font-medium text-sm flex items-center gap-2
+                    transition-all duration-300
+                    ${isActive
+                      ? 'bg-violet-spectral text-white shadow-lg shadow-violet-spectral/20'
+                      : 'glass-panel text-gray-400 hover:text-white hover:bg-violet-spectral/10 hover:border-violet-spectral/30'
+                    }
+                  `}
+                  style={{ animationDelay: `${index * 0.05}s` }}
+                >
+                  {status !== 'all' && statusConfig[status] && (
+                    <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : statusConfig[status].dotColor}`} />
+                  )}
+                  <span>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                  <span className={`
+                    px-1.5 py-0.5 text-xs rounded-md
+                    ${isActive ? 'bg-white/20' : 'bg-charcoal'}
+                  `}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Proposals List */}
         {loading ? (
-          <div className="glass-panel p-12 text-center">
-            <div className="flex items-center justify-center gap-3">
-              <div className="w-5 h-5 border-2 border-violet-spectral border-t-transparent rounded-full animate-spin" />
-              <span className="text-gray-400">Loading proposals...</span>
+          <div className="glass-panel rounded-2xl p-12 text-center animate-content-reveal">
+            <div className="inline-flex p-4 rounded-2xl bg-violet-spectral/10 mb-4">
+              <Loader2 className="w-8 h-8 text-violet-spectral spinner-glow" />
             </div>
+            <p className="text-gray-400">Loading proposals...</p>
           </div>
         ) : proposals.length === 0 ? (
-          <div className="glass-panel p-12 text-center">
-            <svg className="w-12 h-12 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-gray-400 mb-4">No proposals found</p>
+          <div className="glass-panel rounded-2xl p-12 text-center animate-content-reveal">
+            <div className="inline-flex p-4 rounded-2xl bg-charcoal mb-4 empty-state-icon">
+              <GitPullRequest className="w-8 h-8 text-gray-500" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">No proposals found</h3>
+            <p className="text-gray-400 mb-4">
+              {filter !== 'all'
+                ? `No ${filter} proposals at the moment.`
+                : 'Documentation update proposals will appear here when AI agents suggest changes.'}
+            </p>
             {filter !== 'all' && (
               <button
                 onClick={() => setFilter('all')}
-                className="text-violet-spectral hover:text-violet-glow transition-colors text-sm"
+                className="text-violet-spectral hover:text-violet-glow transition-colors text-sm inline-flex items-center gap-2"
               >
-                View all proposals →
+                View all proposals
+                <ArrowRight className="w-4 h-4" />
               </button>
             )}
           </div>
         ) : (
           <div className="space-y-4">
-            {proposals.map(proposal => (
-              <Link
-                key={proposal.id}
-                href={`/proposals/${proposal.id}`}
-                className="glass-panel p-6 block hover:border-violet-spectral/40 transition-all group"
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="text-xl font-bold group-hover:text-violet-ghost transition-colors">
-                    {proposal.document_title || proposal.file_path}
-                  </h3>
-                  <span className={`px-3 py-1 rounded-full text-xs border ${statusColors[proposal.status]}`}>
-                    {proposal.status}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-500 mb-3">
-                  <code className="bg-charcoal px-2 py-1 rounded text-gray-400">{proposal.file_path}</code>
-                </p>
-                <p className="text-gray-400 line-clamp-2">
-                  {proposal.reasoning}
-                </p>
-                <p className="text-xs text-gray-500 mt-4">
-                  Created {new Date(proposal.created_at).toLocaleString()}
-                </p>
-              </Link>
-            ))}
+            {proposals.map((proposal, index) => {
+              const config = statusConfig[proposal.status] || statusConfig['pending'];
+              const StatusIcon = config.icon;
+
+              return (
+                <Link
+                  key={proposal.id}
+                  href={`/proposals/${proposal.id}`}
+                  className="glass-panel interactive-card rounded-2xl p-6 block group animate-stagger"
+                  style={{ animationDelay: `${0.3 + index * 0.05}s` }}
+                >
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-4">
+                    <div className="flex items-start gap-4">
+                      <div className="p-2.5 rounded-xl bg-violet-spectral/15 text-violet-spectral group-hover:bg-violet-spectral/25 transition-colors">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-white group-hover:text-violet-ghost transition-colors mb-1">
+                          {proposal.document_title || proposal.file_path}
+                        </h3>
+                        <code className="text-sm px-2 py-1 rounded-lg bg-charcoal/80 text-gray-400">
+                          {proposal.file_path}
+                        </code>
+                      </div>
+                    </div>
+                    <span className={`
+                      px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-2 shrink-0
+                      ${config.className}
+                    `}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor} ${proposal.status === 'pending' ? 'animate-pulse' : ''}`} />
+                      <StatusIcon className="w-3.5 h-3.5" />
+                      {config.label}
+                    </span>
+                  </div>
+
+                  <p className="text-gray-400 line-clamp-2 mb-4 pl-14">
+                    {proposal.reasoning}
+                  </p>
+
+                  <div className="flex items-center justify-between pl-14">
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <Clock className="w-3 h-3" />
+                      <span>Created {new Date(proposal.created_at).toLocaleDateString()} at {new Date(proposal.created_at).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-violet-spectral opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span>Review</span>
+                      <ArrowRight className="w-4 h-4 action-arrow" />
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
