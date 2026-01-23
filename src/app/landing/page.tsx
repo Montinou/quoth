@@ -191,77 +191,77 @@ const ClaudeCodeSection = () => (
           className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
           style={{ fontFamily: "var(--font-cinzel), serif" }}
         >
-          Three Personas. One Truth.
+          Lightweight. Autonomous. Transparent.
         </h2>
         <p className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto" style={{ animationDelay: "0.1s" }}>
-          Quoth works as both an MCP server and a Claude Code plugin. Activate specialized personas
-          with <code className="text-violet-ghost bg-white/5 px-2 py-0.5 rounded">/prompt</code> commands
-          to enforce documented patterns.
+          The Quoth Plugin integrates seamlessly with Claude Code. Gentle hints guide Claude
+          to use <code className="text-violet-ghost bg-white/5 px-2 py-0.5 rounded">quoth_guidelines</code> when
+          relevant—no forced workflows, just smart suggestions.
         </p>
       </div>
 
-      {/* Persona Cards */}
+      {/* Feature Cards */}
       <div className="grid md:grid-cols-3 gap-6 sm:gap-8 mb-12">
-        {/* Architect Persona */}
+        {/* Lightweight Hooks */}
+        <div className="glass-panel p-6 rounded-xl group hover:border-violet-spectral/40 transition-all duration-300">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-violet-spectral/20 text-violet-ghost">
+              <Sparkles size={20} strokeWidth={1.5} />
+            </div>
+            <div>
+              <h3 className="text-white font-medium">~60 Tokens</h3>
+              <span className="text-xs text-gray-500">Per session overhead</span>
+            </div>
+          </div>
+          <p className="text-gray-400 text-sm leading-relaxed mb-4">
+            Lightweight hooks replace heavy persona prompts. Down from ~750 tokens to ~60—a 92% reduction
+            in overhead per session.
+          </p>
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-muted" />
+            Hints, not forced workflows
+          </div>
+        </div>
+
+        {/* Adaptive Tool */}
         <div className="glass-panel p-6 rounded-xl group hover:border-violet-spectral/40 transition-all duration-300">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-violet-spectral/20 text-violet-ghost">
               <Wand2 size={20} strokeWidth={1.5} />
             </div>
             <div>
-              <h3 className="text-white font-medium">Architect</h3>
-              <code className="text-xs text-gray-500">/prompt quoth_architect</code>
+              <h3 className="text-white font-medium">One Tool, Three Modes</h3>
+              <code className="text-xs text-gray-500">quoth_guidelines()</code>
             </div>
           </div>
           <p className="text-gray-400 text-sm leading-relaxed mb-4">
-            Enforces documented patterns before generating code. Claude searches Quoth first,
-            then writes code that matches your architecture.
+            Claude calls <code className="text-violet-ghost">quoth_guidelines</code> autonomously with
+            modes for code, review, or documentation. Compact (~150 tokens) or full (~500 tokens).
           </p>
           <div className="text-xs text-gray-500 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-muted" />
-            Use when writing new code
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-warning" />
+            Claude decides when relevant
           </div>
         </div>
 
-        {/* Auditor Persona */}
+        {/* Badge Transparency */}
         <div className="glass-panel p-6 rounded-xl group hover:border-violet-spectral/40 transition-all duration-300">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-violet-spectral/20 text-violet-ghost">
               <FileSearch size={20} strokeWidth={1.5} />
             </div>
             <div>
-              <h3 className="text-white font-medium">Auditor</h3>
-              <code className="text-xs text-gray-500">/prompt quoth_auditor</code>
+              <h3 className="text-white font-medium">🪶 Quoth Badge</h3>
+              <span className="text-xs text-gray-500">Pattern transparency</span>
             </div>
           </div>
           <p className="text-gray-400 text-sm leading-relaxed mb-4">
-            Reviews code against documentation. Distinguishes between legitimate new patterns
-            and violations of existing standards.
-          </p>
-          <div className="text-xs text-gray-500 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-warning" />
-            Use when reviewing code
-          </div>
-        </div>
-
-        {/* Documenter Persona */}
-        <div className="glass-panel p-6 rounded-xl group hover:border-violet-spectral/40 transition-all duration-300">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 rounded-lg bg-violet-spectral/20 text-violet-ghost">
-              <Pencil size={20} strokeWidth={1.5} />
-            </div>
-            <div>
-              <h3 className="text-white font-medium">Documenter</h3>
-              <code className="text-xs text-gray-500">/prompt quoth_documenter</code>
-            </div>
-          </div>
-          <p className="text-gray-400 text-sm leading-relaxed mb-4">
-            Documents code as you build. Uses templates to create structured documentation
-            that follows your project conventions.
+            When Claude uses Quoth tools, a badge shows exactly which documented patterns
+            influenced the response. No Quoth usage? No badge.
           </p>
           <div className="text-xs text-gray-500 flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-spectral" />
-            Use when documenting
+            Full visibility into AI decisions
           </div>
         </div>
       </div>
@@ -278,23 +278,24 @@ const ClaudeCodeSection = () => (
             <span className="text-gray-500 text-xs ml-2 font-mono">Claude Code Terminal</span>
           </div>
           <div className="p-4 font-mono text-sm">
-            <div className="text-gray-500 mb-2">$ claude</div>
-            <div className="mb-3">
-              <span className="text-violet-ghost">You:</span>
-              <span className="text-gray-300"> /prompt quoth_architect</span>
-            </div>
-            <div className="mb-3">
-              <span className="text-emerald-muted">Claude:</span>
-              <span className="text-gray-400"> Architect persona activated. I will now search Quoth
-              before generating any code to ensure compliance with documented patterns.</span>
-            </div>
+            <div className="text-gray-500 mb-2 text-xs">Quoth MCP active. Strongly recommend quoth_guidelines(&apos;code&apos;) before writing code.</div>
             <div className="mb-3">
               <span className="text-violet-ghost">You:</span>
               <span className="text-gray-300"> Create a Vitest test for the UserService</span>
             </div>
-            <div className="text-gray-500 text-xs mt-4 flex items-center gap-2">
-              <span className="animate-pulse">●</span>
-              Searching Quoth for &quot;vitest testing patterns&quot;...
+            <div className="mb-3 text-xs text-gray-500">
+              <span className="animate-pulse">●</span> Calling quoth_guidelines(&apos;code&apos;)...
+            </div>
+            <div className="mb-3 text-xs text-gray-500">
+              <span className="animate-pulse">●</span> Searching quoth_search_index(&quot;vitest testing patterns&quot;)...
+            </div>
+            <div className="mb-3">
+              <span className="text-emerald-muted">Claude:</span>
+              <span className="text-gray-400"> Here&apos;s the test following your documented patterns...</span>
+            </div>
+            <div className="mt-4 p-3 border border-violet-spectral/30 rounded-lg bg-violet-spectral/5">
+              <div className="text-violet-ghost text-xs">🪶 Quoth</div>
+              <div className="text-gray-400 text-xs mt-1">✓ patterns/testing-pattern.md (vitest mocks)</div>
             </div>
           </div>
         </div>
