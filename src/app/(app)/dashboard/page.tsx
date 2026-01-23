@@ -4,6 +4,8 @@
  */
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getLatestCoverage } from '@/lib/quoth/coverage';
+import { CoverageCard } from '@/components/dashboard/CoverageCard';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
@@ -47,6 +49,13 @@ export default async function DashboardPage() {
     .from('documents')
     .select('*', { count: 'exact', head: true })
     .in('project_id', projectIds);
+
+  // Fetch coverage for first project
+  let initialCoverage = null;
+  const firstProject = projects?.[0];
+  if (firstProject) {
+    initialCoverage = await getLatestCoverage(firstProject.id);
+  }
 
   // Stats data
   const stats = [
@@ -178,6 +187,13 @@ export default async function DashboardPage() {
             );
           })}
         </div>
+
+        {/* Coverage Card */}
+        {firstProject && (
+          <div className="mb-10 animate-stagger stagger-5">
+            <CoverageCard projectId={firstProject.id} initialCoverage={initialCoverage} />
+          </div>
+        )}
 
         {/* Projects Section */}
         <div className="mb-10 animate-stagger stagger-6">
