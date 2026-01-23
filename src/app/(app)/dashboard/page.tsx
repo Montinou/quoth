@@ -6,6 +6,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
+import { ActivityCard } from '@/components/dashboard/ActivityCard';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
@@ -195,8 +196,15 @@ export default async function DashboardPage() {
           </div>
         )}
 
+        {/* Activity Section */}
+        {firstProject && (
+          <div className="mb-10 animate-stagger stagger-6">
+            <ActivityCard projectId={firstProject.id} />
+          </div>
+        )}
+
         {/* Projects Section */}
-        <div className="mb-10 animate-stagger stagger-6">
+        <div className="mb-10 animate-stagger stagger-7">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold font-cinzel text-white flex items-center gap-3">
               <FolderOpen className="w-6 h-6 text-violet-spectral" />
@@ -279,7 +287,7 @@ export default async function DashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <div className="animate-stagger stagger-7">
+        <div className="animate-stagger stagger-8">
           <h2 className="text-2xl font-bold font-cinzel text-white mb-6 flex items-center gap-3">
             <Sparkles className="w-6 h-6 text-violet-spectral" />
             Quick Actions
