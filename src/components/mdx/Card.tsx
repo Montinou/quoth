@@ -1,8 +1,20 @@
 // src/components/mdx/Card.tsx
 
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
-import * as Icons from 'lucide-react';
+import {
+  ArrowRight,
+  BookOpen,
+  CheckCircle,
+  Folder,
+  GitPullRequest,
+  Key,
+  Minimize2,
+  RefreshCw,
+  Search,
+  Shield,
+  Users,
+  Wrench,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 interface CardProps {
@@ -12,23 +24,37 @@ interface CardProps {
   icon?: string;
 }
 
-// Type-safe icon lookup from lucide-react
-function getIcon(name: string): LucideIcon | null {
-  const icon = (Icons as unknown as Record<string, LucideIcon>)[name];
-  return typeof icon === 'function' ? icon : null;
+// Static map of available icons to avoid dynamic component creation
+const iconMap: Record<string, LucideIcon> = {
+  BookOpen,
+  CheckCircle,
+  Folder,
+  GitPullRequest,
+  Key,
+  Minimize2,
+  RefreshCw,
+  Search,
+  Shield,
+  Users,
+  Wrench,
+};
+
+// Icon wrapper component - avoids dynamic component creation during render
+function CardIcon({ name }: { name: string }) {
+  const IconComponent = iconMap[name];
+  if (!IconComponent) return null;
+  return <IconComponent className="w-5 h-5 text-violet-spectral" strokeWidth={1.5} />;
 }
 
 export function Card({ title, description, href, icon }: CardProps) {
-  const Icon = icon ? getIcon(icon) : null;
-
   return (
     <Link
       href={href}
       className="block glass-panel rounded-xl p-5 group hover:border-violet-spectral/30 transition-all duration-300"
     >
-      {Icon && (
+      {icon && iconMap[icon] && (
         <div className="p-2 rounded-lg bg-violet-spectral/15 w-fit mb-3">
-          <Icon className="w-5 h-5 text-violet-spectral" strokeWidth={1.5} />
+          <CardIcon name={icon} />
         </div>
       )}
       <h3 className="font-semibold text-white mb-1 group-hover:text-violet-ghost transition-colors">
