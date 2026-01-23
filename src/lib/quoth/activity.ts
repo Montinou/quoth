@@ -154,3 +154,131 @@ export async function getActivitySummary(
     missRate: Math.round(missRate * 10) / 10,
   };
 }
+
+/**
+ * Get miss rate trends over time
+ */
+export async function getMissRateTrends(
+  projectId: string,
+  days: number = 7
+): Promise<{
+  dailyMissRates: Array<{ date: string; missRate: number; searchCount: number }>;
+  averageMissRate: number;
+  trend: 'improving' | 'stable' | 'degrading';
+}> {
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const { data: activities, error } = await supabase
+    .from('quoth_activity')
+    .select('event_type, result_count, created_at')
+    .eq('project_id', projectId)
+    .eq('event_type', 'search')
+    .gte('created_at', since.toISOString())
+    .order('created_at', { ascending: true });
+
+  if (error || !activities) {
+    return {
+      dailyMissRates: [],
+      averageMissRate: 0,
+      trend: 'stable',
+    };
+  }
+
+  // Group by date
+  const byDate = new Map<string, { searches: number; misses: number }>();
+
+  activities.forEach((a) => {
+    const date = new Date(a.created_at).toISOString().split('T')[0];
+    const current = byDate.get(date) || { searches: 0, misses: 0 };
+    current.searches++;
+    if ((a.result_count ?? 0) === 0) {
+      current.misses++;
+    }
+    byDate.set(date, current);
+  });
+
+  const dailyMissRates = Array.from(byDate.entries()).map(([date, stats]) => ({
+    date,
+    missRate: stats.searches > 0 ? Math.round((stats.misses / stats.searches) * 100) : 0,
+    searchCount: stats.searches,
+  }));
+
+  // Calculate average
+  const totalMisses = activities.filter((a) => (a.result_count ?? 0) === 0).length;
+  const averageMissRate = activities.length > 0
+    ? Math.round((totalMisses / activities.length) * 100)
+    : 0;
+
+  // Determine trend (compare first half vs second half)
+  const mid = Math.floor(dailyMissRates.length / 2);
+  const firstHalf = dailyMissRates.slice(0, mid);
+  const secondHalf = dailyMissRates.slice(mid);
+
+  const avgFirst = firstHalf.length > 0
+    ? firstHalf.reduce((sum, d) => sum + d.missRate, 0) / firstHalf.length
+    : 0;
+  const avgSecond = secondHalf.length > 0
+    ? secondHalf.reduce((sum, d) => sum + d.missRate, 0) / secondHalf.length
+    : 0;
+
+  let trend: 'improving' | 'stable' | 'degrading' = 'stable';
+  if (avgSecond < avgFirst - 5) trend = 'improving';
+  else if (avgSecond > avgFirst + 5) trend = 'degrading';
+
+  return {
+    dailyMissRates,
+    averageMissRate,
+    trend,
+  };
+}
+
+/**
+ * Get queries that resulted in zero results (gaps in documentation)
+ */
+export async function getTopMissedQueries(
+  projectId: string,
+  limit: number = 10
+): Promise<Array<{ query: string; missCount: number; lastMissed: string }>> {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const { data: activities, error } = await supabase
+    .from('quoth_activity')
+    .select('query, created_at')
+    .eq('project_id', projectId)
+    .eq('event_type', 'search')
+    .eq('result_count', 0)
+    .gte('created_at', thirtyDaysAgo.toISOString());
+
+  if (error || !activities) {
+    return [];
+  }
+
+  // Count misses per query
+  const queryMisses = new Map<string, { count: number; lastMissed: string }>();
+
+  activities.forEach((a) => {
+    if (a.query) {
+      const normalized = a.query.toLowerCase().trim();
+      const existing = queryMisses.get(normalized);
+      if (!existing || new Date(a.created_at) > new Date(existing.lastMissed)) {
+        queryMisses.set(normalized, {
+          count: (existing?.count || 0) + 1,
+          lastMissed: a.created_at,
+        });
+      } else {
+        existing.count++;
+      }
+    }
+  });
+
+  return Array.from(queryMisses.entries())
+    .map(([query, stats]) => ({
+      query,
+      missCount: stats.count,
+      lastMissed: stats.lastMissed,
+    }))
+    .sort((a, b) => b.missCount - a.missCount)
+    .slice(0, limit);
+}
