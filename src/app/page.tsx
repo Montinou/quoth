@@ -178,18 +178,29 @@ const GenesisDemo = () => {
 
             {/* Terminal Body */}
             <div className="p-4 sm:p-6 text-gray-400 leading-relaxed overflow-x-auto text-left space-y-4">
-              {/* Step 1: Add MCP */}
+              {/* Step 1: Add Marketplace */}
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp/public</span>
+                  <span className="text-white">/plugin marketplace add Montinou/quoth-mcp</span>
                 </div>
                 <div className="pl-4 text-gray-500 text-xs sm:text-sm">
-                  <span className="text-green-400">&#10003;</span> MCP server &apos;quoth&apos; added successfully
+                  <span className="text-green-400">&#10003;</span> Marketplace &apos;quoth-marketplace&apos; added
                 </div>
               </div>
 
-              {/* Step 2: Run Genesis */}
+              {/* Step 2: Install Plugin */}
+              <div className="space-y-1 mt-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-green-400">$</span>
+                  <span className="text-white">/plugin install quoth@quoth-marketplace</span>
+                </div>
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
+                  <span className="text-green-400">&#10003;</span> Plugin &apos;quoth&apos; installed (MCP + hooks + skills)
+                </div>
+              </div>
+
+              {/* Step 3: Run Genesis */}
               <div className="space-y-2 mt-6">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>

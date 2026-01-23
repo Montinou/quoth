@@ -40,35 +40,50 @@ Quoth is a Model Context Protocol (MCP) server designed to prevent AI hallucinat
 - **Team management** - Add, remove, and manage member roles through dashboard
 - **Secure isolation** - Row-level security ensures projects remain private
 
-## Getting Started
+## Installation
 
-### Prerequisites
+### Recommended: Plugin Install (MCP + Hooks + Skills)
 
-- Node.js 18+
-- npm or pnpm
+Install the complete Quoth plugin via Claude Code marketplace:
 
-### Installation
+```bash
+# 1. Add marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# 2. Install plugin
+/plugin install quoth@quoth-marketplace
+```
+
+This bundles:
+- MCP server with all tools
+- Lightweight session hooks (~60 tokens)
+- `/quoth-genesis` skill for documentation bootstrapping
+
+### Alternative: MCP Server Only (No Hooks)
+
+If you prefer just the MCP server without hooks or want to integrate with other clients:
+
+```bash
+# Claude Code with OAuth
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+
+# Public demo (read-only, no auth)
+claude mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
+```
+
+### For Developers: Local Setup
+
+Clone and run the Next.js server locally:
 
 ```bash
 cd quoth-mcp
 npm install
-```
-
-### Development
-
-```bash
 npm run dev
 ```
 
 The MCP server will be available at `http://localhost:3000/api/mcp`
 
-### Build
-
-```bash
-npm run build
-```
-
-## Connecting Clients
+## Connecting Other Clients
 
 ### Claude Desktop / Cursor / Windsurf
 
@@ -77,7 +92,10 @@ If your client supports Streamable HTTP, add to your MCP configuration:
 ```json
 {
   "quoth": {
-    "url": "http://localhost:3000/api/mcp"
+    "url": "https://quoth.ai-innovation.site/api/mcp",
+    "headers": {
+      "Authorization": "Bearer YOUR_TOKEN"
+    }
   }
 }
 ```
@@ -88,7 +106,7 @@ For stdio-only clients, use mcp-remote:
 {
   "quoth": {
     "command": "npx",
-    "args": ["-y", "mcp-remote", "http://localhost:3000/api/mcp"]
+    "args": ["-y", "mcp-remote", "https://quoth.ai-innovation.site/api/mcp"]
   }
 }
 ```

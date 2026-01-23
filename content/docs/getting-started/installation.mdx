@@ -8,7 +8,26 @@ Quoth can be connected to any MCP-compatible AI tool. This guide covers installa
 
 ## Claude Code (CLI)
 
-### OAuth Installation (Recommended)
+### Plugin Installation (Recommended)
+
+The Quoth Plugin bundles the MCP server, lightweight hooks (~60 tokens), and the `/quoth-genesis` skill:
+
+```bash
+# Add the Quoth marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install the plugin
+/plugin install quoth@quoth-marketplace
+```
+
+This gives you:
+- All MCP tools including `quoth_guidelines`
+- Lightweight hooks that hint Claude to use Quoth patterns
+- 🪶 Badge transparency when Quoth is used
+
+### MCP-Only Installation
+
+If you prefer just the MCP server without hooks:
 
 ```bash
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp

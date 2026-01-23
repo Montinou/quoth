@@ -1,7 +1,7 @@
 "use client";
 
 import { Terminal, Key, Zap, CheckCircle, Settings } from "lucide-react";
-import { Navbar, Footer, PageHeader, GlassCard } from "@/components/quoth";
+import { Navbar, Footer, PageHeader } from "@/components/quoth";
 import {
   CodeBlock,
   CodeLine,
@@ -69,7 +69,7 @@ export default function GuidePage() {
 
       <section className="py-16 px-6">
         <div className="max-w-4xl mx-auto space-y-20">
-          {/* Step 1: Quick Start */}
+          {/* Step 1: Plugin Install (Recommended) */}
           <div>
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded bg-violet-spectral/20 flex items-center justify-center">
@@ -79,15 +79,57 @@ export default function GuidePage() {
                 className="font-serif text-2xl text-white"
                 style={{ fontFamily: "var(--font-cinzel), serif" }}
               >
-                Quick Start
+                Plugin Install (Recommended)
               </h2>
               <Badge variant="outline" className="border-green-500/50 text-green-400">
-                OAuth Auto-Login
+                MCP + Hooks + Skills
               </Badge>
             </div>
 
             <p className="text-gray-400 mb-6">
-              Add Quoth to Claude Code. When you authenticate, your browser opens for login and connects automatically.
+              Install the complete Quoth plugin with marketplace integration. This bundles the MCP server, lightweight hooks, and the <code className="text-violet-spectral">/quoth-genesis</code> skill.
+            </p>
+
+            <CodeBlock filename="terminal">
+              <CodeLine>
+                <span className="text-gray-500"># 1. Add the marketplace (one time)</span>
+              </CodeLine>
+              <CodeLine>
+                <CodeKeyword>/plugin</CodeKeyword> marketplace add Montinou/quoth-mcp
+              </CodeLine>
+              <br />
+              <CodeLine>
+                <span className="text-gray-500"># 2. Install the plugin</span>
+              </CodeLine>
+              <CodeLine>
+                <CodeKeyword>/plugin</CodeKeyword> install quoth@quoth-marketplace
+              </CodeLine>
+            </CodeBlock>
+
+            <p className="text-gray-500 text-sm mt-4">
+              Two commands, full integration. The plugin auto-configures authentication and activates hooks on session start.
+            </p>
+          </div>
+
+          {/* Step 2: MCP Only (Alternative) */}
+          <div>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded bg-violet-spectral/20 flex items-center justify-center">
+                <Settings size={20} strokeWidth={1.5} className="text-violet-spectral" />
+              </div>
+              <h2
+                className="font-serif text-2xl text-white"
+                style={{ fontFamily: "var(--font-cinzel), serif" }}
+              >
+                MCP Only (Alternative)
+              </h2>
+              <Badge variant="outline" className="border-violet-spectral/50 text-violet-ghost">
+                No Hooks
+              </Badge>
+            </div>
+
+            <p className="text-gray-400 mb-6">
+              Install just the MCP server without hooks or skills. Use this if you prefer manual control or want to integrate Quoth with other clients.
             </p>
 
             <CodeBlock filename="terminal">
@@ -107,7 +149,7 @@ export default function GuidePage() {
             </CodeBlock>
 
             <p className="text-gray-500 text-sm mt-4">
-              This gives full access to all tools and your private knowledge bases.
+              MCP-only gives access to all tools but requires manual invocation (no automatic hooks).
             </p>
           </div>
 

@@ -35,7 +35,23 @@ Before you begin, make sure you have:
 
 ### Claude Code (Recommended)
 
-The fastest way to connect is using OAuth authentication:
+Install the Quoth Plugin to get everything: MCP server, lightweight hooks, and the `/quoth-genesis` skill:
+
+```bash
+# Add the Quoth marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install the plugin
+/plugin install quoth@quoth-marketplace
+```
+
+<Callout type="info">
+  The plugin includes ~60 tokens of lightweight hooks that gently remind Claude to use `quoth_guidelines` when relevant.
+</Callout>
+
+### MCP-Only Setup
+
+If you prefer just the MCP tools without hooks:
 
 ```bash
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
@@ -43,42 +59,15 @@ claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 
 When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for login.
 
-### Manual Setup
-
-If you prefer token-based authentication:
-
-<Steps>
-  <Step>
-    Go to your [Dashboard](https://quoth.ai-innovation.site/dashboard)
-  </Step>
-  <Step>
-    Navigate to **API Keys** and generate a new token
-  </Step>
-  <Step>
-    Add the token to your MCP configuration:
-    ```json
-    {
-      "mcpServers": {
-        "quoth": {
-          "url": "https://quoth.ai-innovation.site/api/mcp",
-          "headers": {
-            "Authorization": "Bearer YOUR_TOKEN"
-          }
-        }
-      }
-    }
-    ```
-  </Step>
-</Steps>
-
 ## Step 3: Initialize Your Knowledge Base
 
 Run Genesis to automatically document your codebase:
 
 ```
-/prompt quoth_architect
-"Run Genesis to document this project"
+/quoth-genesis
 ```
+
+Or ask Claude directly: "Run Genesis to document this project"
 
 Genesis will analyze your code and create documentation for:
 - Project structure and architecture
@@ -91,14 +80,14 @@ Genesis will analyze your code and create documentation for:
 
 ## Step 4: Start Building
 
-Now when you write code with AI assistance, activate the architect persona first:
+Now when you write code with AI assistance, Claude will automatically receive hints to use Quoth patterns. You can also explicitly ask for guidelines:
 
 ```
-/prompt quoth_architect
+Use quoth_guidelines('code') and search for authentication patterns
 "Create a new API endpoint for user authentication"
 ```
 
-The AI will search your knowledge base before generating code, ensuring it follows your documented patterns.
+Claude will search your knowledge base before generating code, ensuring it follows your documented patterns. When Quoth is used, you'll see the 🪶 badge showing which patterns were applied.
 
 ## Next Steps
 

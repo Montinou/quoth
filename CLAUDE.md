@@ -29,7 +29,45 @@ Quoth is an MCP (Model Context Protocol) server that acts as a "Single Source of
 
 ## Installation (for Claude Code Users)
 
-### Quick Start (OAuth - Recommended)
+### Recommended: Plugin Install (MCP + Hooks + Skills)
+
+Install the complete Quoth plugin via Claude Code marketplace:
+
+```bash
+# 1. Add marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# 2. Install plugin
+/plugin install quoth@quoth-marketplace
+```
+
+This bundles:
+- MCP server with all tools
+- Lightweight session hooks (~60 tokens overhead)
+- `/quoth-genesis` skill for documentation bootstrapping
+
+**What you get:**
+
+**Tools (called automatically by Claude):**
+- `quoth_search_index` - Semantic search across documentation
+- `quoth_read_doc` - Read full document content
+- `quoth_propose_update` - Submit documentation updates
+- `quoth_guidelines` - Adaptive guidelines tool (replaces heavy personas)
+- `quoth_list_templates` - List available document templates
+- `quoth_get_template` - Fetch template structure
+- `quoth_read_chunks` - Fetch specific chunks by ID
+
+**Prompts (YOU trigger manually with slash commands):**
+- `/prompt quoth_architect` - Activate code generation persona (enforces "Single Source of Truth")
+- `/prompt quoth_auditor` - Activate documentation review persona (distinguishes new features from bad code)
+- `/prompt quoth_documenter` - Activate incremental documentation persona (document code as you build)
+
+**Skills:**
+- `/quoth-genesis` - Run Genesis documentation bootstrapping
+
+### Alternative: MCP Server Only (No Hooks)
+
+If you prefer just the MCP server without hooks:
 
 ```bash
 # Add to Claude Code with OAuth authentication
@@ -38,21 +76,7 @@ claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 
 When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for Quoth login, and once authenticated, Claude Code is automatically connected.
 
-This gives access to:
-
-**Tools (called automatically by Claude):**
-- `quoth_search_index` - Semantic search across documentation
-- `quoth_read_doc` - Read full document content
-- `quoth_propose_update` - Submit documentation updates
-- `quoth_list_templates` - List available document templates
-- `quoth_get_template` - Fetch template structure
-- `quoth_read_chunks` - Fetch specific chunks by ID
-- `quoth_genesis` - Bootstrap documentation for a new project
-
-**Prompts (YOU trigger manually with slash commands):**
-- `/prompt quoth_architect` - Activate code generation persona (enforces "Single Source of Truth")
-- `/prompt quoth_auditor` - Activate documentation review persona (distinguishes new features from bad code)
-- `/prompt quoth_documenter` - Activate incremental documentation persona (document code as you build)
+This gives access to all MCP tools but requires manual invocation (no automatic hook reminders).
 
 ### How to Use Prompts
 

@@ -16,7 +16,16 @@ The new Quoth Plugin replaces heavy persona prompts with an efficient, autonomou
 - **Badge enforcement** - 🪶 feather badge displays which patterns were applied when Quoth tools are used.
 - **92% token reduction** - Hooks dropped from ~750 to ~60 tokens. Full guidelines from 6,000 to 500 tokens.
 
-The plugin works automatically when Quoth MCP is connected to Claude Code.
+**Two-Command Install:**
+```bash
+# Add marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install plugin (includes MCP + hooks + skills)
+/plugin install quoth@quoth-marketplace
+```
+
+The plugin bundles the MCP server, lightweight hooks, and the `/quoth-genesis` skill. For MCP-only usage without hooks, you can still install via `claude mcp add`.
 
 **Production Hardening** - Security and reliability improvements
 
