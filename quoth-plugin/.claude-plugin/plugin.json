@@ -24,7 +24,7 @@
     "quoth-genesis": "skills/genesis.md"
   },
 
-  "mcpServers": "../.mcp.json",
+  "mcpServers": "./.mcp.json",
 
   "settings": {
     "showBadge": {
