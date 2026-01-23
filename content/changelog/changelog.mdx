@@ -7,6 +7,17 @@ description: "All notable changes to Quoth"
 
 ### 2026-01-23
 
+**Quoth Plugin for Claude Code** - Lightweight hooks and adaptive guidelines
+
+The new Quoth Plugin replaces heavy persona prompts with an efficient, autonomous integration:
+
+- **`quoth_guidelines` tool** - One adaptive tool with three modes (`code`, `review`, `document`) replacing three separate personas. Compact (~150 tokens) or full (~500 tokens) guidelines on demand.
+- **Lightweight hooks** - ~60 tokens per session instead of ~750. Gentle hints that strongly suggest, not force.
+- **Badge enforcement** - 🪶 feather badge displays which patterns were applied when Quoth tools are used.
+- **92% token reduction** - Hooks dropped from ~750 to ~60 tokens. Full guidelines from 6,000 to 500 tokens.
+
+The plugin works automatically when Quoth MCP is connected to Claude Code.
+
 **Production Hardening** - Security and reliability improvements
 
 - Rate limiting on MCP endpoints (60 requests/minute)

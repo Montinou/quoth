@@ -1,0 +1,153 @@
+---
+title: "Introducing the Quoth Plugin for Claude Code"
+description: "Lightweight hooks and adaptive guidelines that integrate seamlessly into your Claude Code workflow—without the token bloat."
+date: "2026-01-23"
+author: "Quoth Team"
+tags: ["plugin", "claude-code", "hooks", "guidelines", "optimization"]
+featured: true
+---
+
+We've rebuilt how Quoth integrates with Claude Code. Instead of heavy persona prompts that cost thousands of tokens, the new Quoth Plugin uses lightweight hooks and an adaptive tool that Claude calls when it needs guidance.
+
+## The Problem with Personas
+
+Our original approach used three MCP prompts—Architect, Auditor, and Documenter—each weighing in at ~2,000 tokens. Combined with verbose hooks, a typical session consumed **~750 tokens** before you even asked a question.
+
+For power users running dozens of sessions daily, this added up fast.
+
+## The New Approach: Hints + Autonomy
+
+The Quoth Plugin flips the model:
+
+<CardGrid>
+  <Card
+    title="Lightweight Hooks"
+    description="~60 tokens per session instead of ~750"
+    icon="Feather"
+  />
+  <Card
+    title="Adaptive Tool"
+    description="One tool with modes, not three separate personas"
+    icon="Settings"
+  />
+  <Card
+    title="Claude Decides"
+    description="Strongly suggested, not forced—Claude uses it when relevant"
+    icon="Brain"
+  />
+  <Card
+    title="Badge Reporting"
+    description="Transparent feedback on which patterns were applied"
+    icon="BadgeCheck"
+  />
+</CardGrid>
+
+## How It Works
+
+### 1. Session Start: A Gentle Hint
+
+When you start a Claude Code session with Quoth connected, you'll see:
+
+```
+Quoth MCP active. Strongly recommend `quoth_guidelines('code')`
+and `quoth_search_index` before writing code.
+```
+
+That's it. ~25 tokens. Claude now knows Quoth is available.
+
+### 2. The `quoth_guidelines` Tool
+
+Instead of three separate prompts, there's now one adaptive tool:
+
+```typescript
+quoth_guidelines({
+  mode: "code" | "review" | "document",
+  full?: boolean  // compact by default
+})
+```
+
+**Compact mode** (~150 tokens) gives Claude the core rules:
+
+- Search first with `quoth_search_index`
+- Trust levels: >80% follow exactly, 60-80% verify, <60% cross-reference
+- Docs = intended design (when code conflicts, docs win)
+- Templates required before any Quoth updates
+
+**Full mode** (~500 tokens) adds detailed workflows, trust level examples, and template mappings.
+
+### 3. Pre-Edit/Write Reminders
+
+Before Claude edits or creates code files, a lightweight reminder appears:
+
+```
+Quoth patterns available via `quoth_guidelines()` and `quoth_search_index`
+```
+
+~15 tokens. Just a nudge—Claude decides whether to use it.
+
+### 4. Badge Enforcement
+
+At the end of each response, if Claude used any Quoth tools, it displays a badge:
+
+```
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth                                        │
+│   ✓ patterns/testing-pattern.md (vitest mocks) │
+│   ✓ patterns/error-handling.md (try-catch)     │
+└─────────────────────────────────────────────────┘
+```
+
+No Quoth usage? No badge. Clean response.
+
+## Token Comparison
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Hooks per session | ~750 tokens | ~60 tokens |
+| Full guidelines | 6,000 tokens (3×2,000) | 500 tokens |
+| Compact guidelines | N/A | 150 tokens |
+
+**92% reduction** in hook overhead. **92% reduction** in full guidelines size.
+
+## Why "Strongly Suggest" Instead of Force?
+
+We experimented with mandatory searches before every edit. It works, but:
+
+1. **Adds friction** for simple fixes where Quoth isn't relevant
+2. **Wastes tokens** when Claude already knows the pattern
+3. **Slows down** trivial tasks
+
+The new model trusts Claude's judgment. The hints are clear. The tool is discoverable. Claude uses it when the task warrants it.
+
+## Installing the Plugin
+
+The Quoth Plugin comes bundled with your Quoth MCP connection:
+
+```bash
+# If you haven't connected Quoth yet
+claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+```
+
+The hooks activate automatically when Quoth detects a Claude Code session.
+
+## What About the Old Personas?
+
+The `/prompt quoth_architect`, `/prompt quoth_auditor`, and `/prompt quoth_documenter` commands still work. They're useful when you want to enforce a strict behavioral mode for an entire conversation.
+
+But for most workflows, `quoth_guidelines('code')` gives you the same rules with:
+- Lower token cost
+- More flexibility
+- Better Claude autonomy
+
+## The Feather Badge 🪶
+
+Why a feather? Quoth references Edgar Allan Poe's raven—"Quoth the Raven, Nevermore." The feather symbolizes the documentation patterns that keep your codebase consistent.
+
+When you see 🪶 in a response, you know:
+- Claude consulted your documentation
+- Specific patterns were applied
+- The code follows your team's standards
+
+---
+
+*The Quoth Plugin is available now. Connect your MCP server and start your next Claude Code session to see it in action.*

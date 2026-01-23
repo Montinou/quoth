@@ -10,6 +10,7 @@ Quoth exposes several tools through the Model Context Protocol (MCP). These tool
 
 | Tool | Purpose | Auth Required |
 |------|---------|---------------|
+| `quoth_guidelines` | Get adaptive guidelines for coding/review/documentation | Yes |
 | `quoth_search_index` | Semantic search across documentation | Yes |
 | `quoth_read_doc` | Read full document content | Yes |
 | `quoth_propose_update` | Submit documentation updates | Yes (editor+) |
@@ -17,6 +18,56 @@ Quoth exposes several tools through the Model Context Protocol (MCP). These tool
 | `quoth_get_template` | Fetch template structure | Yes |
 | `quoth_read_chunks` | Fetch specific chunks | Yes |
 | `quoth_genesis` | Bootstrap project documentation | Yes (admin) |
+
+## quoth_guidelines
+
+Get adaptive guidelines for your current task. **Strongly recommended** before writing code, reviewing, or documenting.
+
+<Callout type="tip">
+  This tool replaces the need to manually activate personas. Claude can call it autonomously when writing code.
+</Callout>
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | string | Yes | `code`, `review`, or `document` |
+| `full` | boolean | No | Return full guidelines (~500 tokens) instead of compact (~150 tokens) |
+
+### Modes
+
+| Mode | Use When | Returns |
+|------|----------|---------|
+| `code` | Writing or editing code | Patterns, anti-patterns, trust levels |
+| `review` | Auditing existing code | Violation detection, drift vs new pattern |
+| `document` | Creating/updating Quoth docs | Template requirements, embedding rules |
+
+### Example
+
+```
+Get Quoth guidelines for writing code
+→ quoth_guidelines({ mode: "code" })
+```
+
+### Response (Compact)
+
+```markdown
+## Quoth Guidelines: Code
+
+**STRONGLY RECOMMENDED:** Call `quoth_search_index` before proceeding.
+
+### Core Rules
+1. Search first - `quoth_search_index` before coding
+2. Trust levels: >80% follow exactly, 60-80% verify, <60% cross-ref
+3. Docs = intended design - when code conflicts, docs win
+4. Never invent patterns - only use what's documented
+5. Templates required - `quoth_get_template` before Quoth updates
+
+### Anti-Patterns
+- Assuming patterns without searching
+- Inventing patterns not in documentation
+- Ignoring LOW trust warnings
+```
 
 ## quoth_search_index
 
@@ -85,7 +136,11 @@ Bootstraps documentation for a new project. See the [Genesis Guide](/docs/guides
 
 ## Prompts (Personas)
 
-In addition to tools, Quoth provides prompts that configure AI behavior:
+<Callout type="info">
+  **Recommended:** Use `quoth_guidelines` tool instead of prompts. It provides the same rules with lower token cost (~150 tokens vs ~2,000) and Claude can call it autonomously.
+</Callout>
+
+For strict behavioral enforcement, Quoth still provides prompts that configure AI behavior for an entire conversation:
 
 ### quoth_architect
 
@@ -116,6 +171,27 @@ Documents code as you build:
 ```
 
 Fetches templates and creates structured documentation immediately.
+
+## Quoth Plugin Hooks
+
+When using Claude Code with Quoth connected, lightweight hooks provide automatic hints:
+
+| Hook | Output | Tokens |
+|------|--------|--------|
+| SessionStart | "Quoth MCP active. Strongly recommend `quoth_guidelines('code')` and `quoth_search_index` before writing code." | ~25 |
+| PreToolUse (Edit/Write) | "Quoth patterns available via `quoth_guidelines()` and `quoth_search_index`" | ~15 |
+| Stop | Badge enforcement instruction | ~20 |
+
+### Badge Format
+
+When you use any `quoth_*` tools, end your response with:
+
+```
+┌─────────────────────────────────────────────────┐
+│ 🪶 Quoth                                        │
+│   ✓ patterns/testing-pattern.md (vitest mocks) │
+└─────────────────────────────────────────────────┘
+```
 
 ## Rate Limits
 
