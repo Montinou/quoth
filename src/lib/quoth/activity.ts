@@ -3,24 +3,7 @@
  * Tracks all Quoth tool activity for analytics dashboard
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-// Lazy initialization - only create client when needed (not at build time)
-let supabase: SupabaseClient | null = null;
-
-function getSupabaseClient(): SupabaseClient {
-  if (!supabase) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      throw new Error('Missing Supabase environment variables for activity logging');
-    }
-
-    supabase = createClient(supabaseUrl, supabaseServiceKey);
-  }
-  return supabase;
-}
+import { supabase } from '../supabase';
 
 export type ActivityEventType =
   | 'search'
@@ -55,7 +38,7 @@ export interface ActivityLogParams {
  */
 export async function logActivity(params: ActivityLogParams): Promise<void> {
   try {
-    const { error } = await getSupabaseClient()
+    const { error } = await supabase
       .from('quoth_activity')
       .insert({
         project_id: params.projectId,
@@ -117,7 +100,7 @@ export async function getActivitySummary(
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const { data: activities, error } = await getSupabaseClient()
+  const { data: activities, error } = await supabase
     .from('quoth_activity')
     .select('event_type, query, result_count')
     .eq('project_id', projectId)
@@ -180,7 +163,7 @@ export async function getMissRateTrends(
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const { data: activities, error } = await getSupabaseClient()
+  const { data: activities, error } = await supabase
     .from('quoth_activity')
     .select('event_type, result_count, created_at')
     .eq('project_id', projectId)
@@ -254,7 +237,7 @@ export async function getTopMissedQueries(
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const { data: activities, error } = await getSupabaseClient()
+  const { data: activities, error } = await supabase
     .from('quoth_activity')
     .select('query, created_at')
     .eq('project_id', projectId)

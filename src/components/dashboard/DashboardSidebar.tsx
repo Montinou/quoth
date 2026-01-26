@@ -5,7 +5,7 @@
  * Elegant collapsible sidebar with smooth animations and intuitive navigation
  */
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   Home,
@@ -21,6 +21,7 @@ import {
   PieChart,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { signOutAction } from "@/app/auth/actions";
 import { Logo } from "@/components/quoth/Logo";
 import {
   Sidebar,
@@ -98,15 +99,9 @@ const settingsNavItems = [
 // Inner component that uses useSidebar hook (must be inside Sidebar context)
 function SidebarInner() {
   const pathname = usePathname();
-  const router = useRouter();
-  const { user, profile, signOut, isHydrated } = useAuth();
+  const { user, profile, isHydrated } = useAuth();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-  };
 
   // Check if a nav item is active
   const isActive = (href: string) => {
@@ -373,13 +368,17 @@ function SidebarInner() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-sidebar-border/50" />
-                <DropdownMenuItem
-                  onClick={handleSignOut}
-                  className="cursor-pointer rounded-lg text-red-400 focus:text-red-400 focus:bg-red-500/10 transition-colors duration-200"
-                >
-                  <LogOut className="mr-2 size-4" />
-                  Sign Out
-                </DropdownMenuItem>
+                <form action={signOutAction}>
+                  <DropdownMenuItem asChild>
+                    <button
+                      type="submit"
+                      className="w-full cursor-pointer rounded-lg text-red-400 focus:text-red-400 focus:bg-red-500/10 transition-colors duration-200 flex items-center"
+                    >
+                      <LogOut className="mr-2 size-4" />
+                      Sign Out
+                    </button>
+                  </DropdownMenuItem>
+                </form>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
