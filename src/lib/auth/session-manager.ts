@@ -137,12 +137,12 @@ class McpSessionManager {
   }
   
   /**
-   * Cleanup stale sessions (older than 24 hours since last use)
+   * Cleanup stale sessions (older than 48 hours since last use)
    * Should be called periodically by a cleanup job
    */
   cleanupStaleSessions(): number {
     const now = new Date();
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const maxAge = 48 * 60 * 60 * 1000; // 48 hours in milliseconds
     let cleaned = 0;
     
     for (const [connectionId, session] of this.sessions.entries()) {
