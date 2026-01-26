@@ -1,6 +1,6 @@
 {
   "name": "quoth",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints that guide Claude to use quoth_guidelines when relevant.",
   "author": {
     "name": "Montinou",
@@ -9,5 +9,7 @@
   "homepage": "https://quoth.ai-innovation.site",
   "repository": "https://github.com/Montinou/quoth-mcp",
   "license": "MIT",
-  "keywords": ["documentation", "mcp", "ai", "claude-code", "source-of-truth", "patterns", "quoth"]
+  "keywords": ["documentation", "mcp", "ai", "claude-code", "source-of-truth", "patterns", "quoth"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
 }
