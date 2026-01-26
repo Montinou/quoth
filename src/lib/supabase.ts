@@ -16,6 +16,7 @@ export interface Document {
   content: string;
   checksum: string;
   last_updated: string;
+  doc_type: 'testing-pattern' | 'architecture' | 'contract' | 'meta' | 'template' | null;
 }
 
 export interface DocumentEmbedding {

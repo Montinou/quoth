@@ -87,12 +87,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Parse optional codebase paths from request body
-    const body = await request.json().catch(() => ({}));
-    const codebasePaths = body.paths as string[] | undefined;
-
-    // Calculate coverage
-    const coverage = await calculateCoverage(projectId, codebasePaths);
+    // Calculate coverage based on document types
+    const coverage = await calculateCoverage(projectId);
 
     // Save snapshot
     await saveCoverageSnapshot(coverage, 'manual');

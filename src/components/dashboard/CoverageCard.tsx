@@ -3,6 +3,7 @@
 /**
  * Coverage Card Component
  * Displays documentation coverage metrics with visual breakdown
+ * Aligned with Genesis phases and document types
  */
 
 import { useState } from 'react';
@@ -13,25 +14,24 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  Layers,
 } from 'lucide-react';
 
 interface CategoryCoverage {
   documented: number;
-  total: number;
+  expected: number;
 }
 
 interface CoverageBreakdown {
-  api_endpoints: CategoryCoverage;
-  components: CategoryCoverage;
-  testing_patterns: CategoryCoverage;
-  database_models: CategoryCoverage;
   architecture: CategoryCoverage;
+  testing_pattern: CategoryCoverage;
+  contract: CategoryCoverage;
 }
 
 interface UndocumentedItem {
-  path: string;
   category: keyof CoverageBreakdown;
   suggestion: string;
+  expectedDoc: string;
 }
 
 interface CoverageData {
@@ -40,6 +40,7 @@ interface CoverageData {
   totalDocumented: number;
   breakdown: CoverageBreakdown;
   undocumentedItems: UndocumentedItem[];
+  genesisDepth?: 'minimal' | 'standard' | 'comprehensive' | 'unknown';
 }
 
 interface CoverageCardProps {
@@ -48,11 +49,16 @@ interface CoverageCardProps {
 }
 
 const CATEGORY_LABELS: Record<keyof CoverageBreakdown, string> = {
-  api_endpoints: 'API Endpoints',
-  components: 'Components',
-  testing_patterns: 'Testing Patterns',
-  database_models: 'Database Models',
   architecture: 'Architecture',
+  testing_pattern: 'Testing Patterns',
+  contract: 'Contracts',
+};
+
+const GENESIS_DEPTH_LABELS: Record<string, { label: string; color: string }> = {
+  minimal: { label: 'Minimal', color: 'text-gray-400' },
+  standard: { label: 'Standard', color: 'text-violet-ghost' },
+  comprehensive: { label: 'Comprehensive', color: 'text-emerald-muted' },
+  unknown: { label: 'Unknown', color: 'text-gray-500' },
 };
 
 export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) {
@@ -91,7 +97,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
   };
 
   const getCategoryPercentage = (cat: CategoryCoverage): number => {
-    return cat.total > 0 ? Math.round((cat.documented / cat.total) * 100) : 0;
+    return cat.expected > 0 ? Math.round((cat.documented / cat.expected) * 100) : 0;
   };
 
   return (
@@ -104,7 +110,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
           </div>
           <div>
             <h3 className="text-lg font-bold text-white">Documentation Coverage</h3>
-            <p className="text-sm text-gray-500">Convention-based analysis</p>
+            <p className="text-sm text-gray-500">Genesis-aligned analysis</p>
           </div>
         </div>
         <button
@@ -131,6 +137,17 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
 
       {coverage ? (
         <>
+          {/* Genesis Depth Indicator */}
+          {coverage.genesisDepth && coverage.genesisDepth !== 'unknown' && (
+            <div className="mb-4 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-gray-500" />
+              <span className="text-sm text-gray-500">Genesis Depth:</span>
+              <span className={`text-sm font-medium ${GENESIS_DEPTH_LABELS[coverage.genesisDepth]?.color || 'text-gray-400'}`}>
+                {GENESIS_DEPTH_LABELS[coverage.genesisDepth]?.label || 'Unknown'}
+              </span>
+            </div>
+          )}
+
           {/* Overall Coverage */}
           <div className="mb-6">
             <div className="flex items-end justify-between mb-2">
@@ -154,6 +171,8 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
             {Object.entries(coverage.breakdown).map(([key, value]) => {
               const categoryKey = key as keyof CoverageBreakdown;
               const percentage = getCategoryPercentage(value);
+              // Skip categories with 0 expected (not applicable for this depth)
+              if (value.expected === 0) return null;
               return (
                 <div key={key} className="flex items-center gap-3">
                   <span className="text-sm text-gray-400 w-32 truncate">
@@ -166,7 +185,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
                     />
                   </div>
                   <span className="text-xs text-gray-500 w-16 text-right">
-                    {value.documented}/{value.total}
+                    {value.documented}/{value.expected}
                   </span>
                 </div>
               );
@@ -181,7 +200,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
                 className="flex items-center gap-2 text-sm text-amber-warning hover:text-amber-warning/80 transition-colors"
               >
                 <AlertCircle className="w-4 h-4" />
-                {coverage.undocumentedItems.length} undocumented areas
+                {coverage.undocumentedItems.length} missing document{coverage.undocumentedItems.length !== 1 ? 's' : ''}
                 {showUndocumented ? (
                   <ChevronUp className="w-4 h-4" />
                 ) : (
@@ -198,8 +217,8 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
                     >
                       <FileText className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
                       <div>
-                        <p className="text-gray-300 font-mono text-xs truncate max-w-[300px]">
-                          {item.path}
+                        <p className="text-gray-300 font-mono text-xs">
+                          {item.expectedDoc}
                         </p>
                         <p className="text-gray-500 text-xs">{item.suggestion}</p>
                       </div>

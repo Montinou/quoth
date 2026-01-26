@@ -1,8 +1,86 @@
 import { createHash } from "crypto";
+import matter from "gray-matter";
 import { supabase, type Document } from "./supabase";
 import { generateEmbedding } from "./ai";
 
 import { astChunker, type CodeChunk } from "./quoth/chunking";
+
+/**
+ * Valid document types for coverage calculation
+ * Maps to Genesis phases and Quoth documentation categories
+ */
+export type DocType = 'testing-pattern' | 'architecture' | 'contract' | 'meta' | 'template';
+
+/**
+ * Extract document type from content frontmatter or file path
+ * Priority: frontmatter type > path-based inference
+ */
+export function extractDocType(filePath: string, content: string): DocType | null {
+  // 1. Try to extract from YAML frontmatter
+  try {
+    const { data } = matter(content);
+    if (data.type && isValidDocType(data.type)) {
+      return data.type as DocType;
+    }
+  } catch {
+    // Frontmatter parsing failed, fall back to path inference
+  }
+
+  // 2. Infer from file path patterns
+  const lowerPath = filePath.toLowerCase();
+
+  // Architecture documents (Genesis Phase 1-2)
+  if (
+    lowerPath.includes('project-overview') ||
+    lowerPath.includes('tech-stack') ||
+    lowerPath.includes('repo-structure') ||
+    lowerPath.includes('/architecture/') ||
+    lowerPath.startsWith('architecture/')
+  ) {
+    return 'architecture';
+  }
+
+  // Testing patterns (Genesis Phase 3)
+  if (
+    lowerPath.includes('testing-pattern') ||
+    lowerPath.includes('coding-conventions') ||
+    lowerPath.includes('/patterns/') ||
+    lowerPath.startsWith('patterns/')
+  ) {
+    return 'testing-pattern';
+  }
+
+  // Contracts (Genesis Phase 4)
+  if (
+    lowerPath.includes('api-schemas') ||
+    lowerPath.includes('database-models') ||
+    lowerPath.includes('shared-types') ||
+    lowerPath.includes('/contracts/') ||
+    lowerPath.startsWith('contracts/')
+  ) {
+    return 'contract';
+  }
+
+  // Meta documents
+  if (
+    lowerPath.includes('/meta/') ||
+    lowerPath.startsWith('meta/') ||
+    lowerPath.includes('validation-log')
+  ) {
+    return 'meta';
+  }
+
+  // Templates
+  if (lowerPath.includes('/templates/') || lowerPath.startsWith('templates/')) {
+    return 'template';
+  }
+
+  return null;
+}
+
+function isValidDocType(type: string): boolean {
+  return ['testing-pattern', 'architecture', 'contract', 'meta', 'template'].includes(type);
+}
 
 /**
  * Calculate MD5 checksum for content
@@ -50,7 +128,10 @@ export async function syncDocument(
     };
   }
 
-  // 2. Upsert document (trigger handles versioning)
+  // 2. Extract document type from frontmatter or path
+  const docType = extractDocType(filePath, content);
+
+  // 3. Upsert document (trigger handles versioning)
   const { data: doc, error: docError } = await supabase
     .from("documents")
     .upsert({
@@ -59,6 +140,7 @@ export async function syncDocument(
       title,
       content,
       checksum,
+      doc_type: docType,
       last_updated: new Date().toISOString(),
     }, { onConflict: "project_id, file_path" })
     .select()
@@ -66,10 +148,10 @@ export async function syncDocument(
 
   if (docError) throw new Error(`Failed to upsert: ${docError.message}`);
 
-  // 3. Chunk content
+  // 4. Chunk content
   const chunks = await chunkContent(filePath, content);
-  
-  // 4. Calculate hashes
+
+  // 5. Calculate hashes
   const chunkData = chunks.map((chunk, index) => ({
     content: chunk.content,
     hash: calculateChecksum(chunk.content),
@@ -77,7 +159,7 @@ export async function syncDocument(
     metadata: chunk.metadata
   }));
 
-  // 5. Get existing embeddings
+  // 6. Get existing embeddings
   const { data: existingEmbeddings } = await supabase
     .from("document_embeddings")
     .select("id, chunk_hash")
@@ -86,20 +168,20 @@ export async function syncDocument(
   const existingHashes = new Set((existingEmbeddings || []).map(e => e.chunk_hash));
   const newHashes = new Set(chunkData.map(c => c.hash));
 
-  // 6. Find chunks to embed (changed/new)
+  // 7. Find chunks to embed (changed/new)
   const chunksToEmbed = chunkData.filter(c => !existingHashes.has(c.hash));
-  
-  // 7. Find orphaned embeddings (removed sections)
+
+  // 8. Find orphaned embeddings (removed sections)
   const orphanedIds = (existingEmbeddings || [])
     .filter(e => !newHashes.has(e.chunk_hash))
     .map(e => e.id);
 
-  // 8. Delete orphaned
+  // 9. Delete orphaned
   if (orphanedIds.length > 0) {
     await supabase.from("document_embeddings").delete().in("id", orphanedIds);
   }
 
-  // 9. Generate embeddings for new/changed only
+  // 10. Generate embeddings for new/changed only
   let indexedCount = 0;
   for (const chunk of chunksToEmbed) {
     try {

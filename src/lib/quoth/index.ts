@@ -36,6 +36,7 @@ export {
   saveCoverageSnapshot,
   getLatestCoverage,
   type CoverageResult,
+  type DocType,
 } from './coverage';
 
 // Drift Detection
