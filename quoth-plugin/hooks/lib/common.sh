@@ -15,15 +15,11 @@ QUOTH_MCP_NAME="quoth"
 # MCP DETECTION
 # ============================================================================
 
-# Check if Quoth MCP is installed
-# Returns: 0 if installed, 1 if not
+# Check if Quoth MCP is likely available
+# Returns: 0 (always) - if this hook is running, the plugin is installed
+# Note: We skip the slow `claude mcp list` check (~3.6s) for instant execution
 quoth_mcp_installed() {
-    if command -v claude &> /dev/null; then
-        if claude mcp list 2>/dev/null | grep -q "$QUOTH_MCP_NAME"; then
-            return 0
-        fi
-    fi
-    return 1
+    return 0
 }
 
 # ============================================================================
