@@ -1,6 +1,6 @@
 {
   "name": "quoth",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints that guide Claude to use quoth_guidelines when relevant.",
   "author": {
     "name": "Montinou",
