@@ -7,18 +7,18 @@
  * Features:
  * - OAuth 2.1 authentication via MCP API keys or OAuth tokens
  * - Proper WWW-Authenticate headers for OAuth discovery
- * - 3 Tools: quoth_search_index, quoth_read_doc, quoth_propose_update
- * - 3 Prompts: quoth_architect, quoth_auditor, quoth_documenter
+ * - 9 Tools: search, read, propose, guidelines, templates, chunks, accounts
  *
  * Authentication:
  * - Requires Bearer token in Authorization header
  * - Token can be MCP API key or OAuth-issued token
  * - Returns 401 with resource_metadata URL for OAuth discovery
+ *
+ * Note: Prompts have been removed in favor of plugin hooks (SessionStart, PreToolUse, Stop)
  */
 
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { registerQuothTools } from '@/lib/quoth/tools';
-import { getArchitectPrompt, getAuditorPrompt, getDocumenterPrompt } from '@/lib/quoth/prompts';
 import { verifyMcpApiKey, type AuthContext } from '@/lib/auth/mcp-auth';
 import { sessionManager } from '@/lib/auth/session-manager';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
@@ -85,7 +85,7 @@ function getAuthContextFromRequest(req: Request): AuthContext {
 }
 
 /**
- * Register tools and prompts on the MCP server
+ * Register tools on the MCP server
  */
 function setupServer(server: McpServer, authContext: AuthContext) {
   // Initialize or update session if connection ID is available
@@ -109,40 +109,9 @@ function setupServer(server: McpServer, authContext: AuthContext) {
   // Register all Quoth tools with authentication context
   registerQuothTools(server, authContext);
 
-  // Register Prompts (Personas)
-  // IMPORTANT: Prompts are activated with /prompt command in Claude Code, NOT by calling them like tools
-  server.registerPrompt(
-    'quoth_architect',
-    {
-      description:
-        "🏗️ Code Generation Persona - Activate with '/prompt quoth_architect' in Claude Code. " +
-        "Enforces 'Single Source of Truth' rules by searching Quoth before generating any code. " +
-        "Use BEFORE writing code/tests to ensure patterns follow documented standards.",
-    },
-    async () => getArchitectPrompt()
-  );
-
-  server.registerPrompt(
-    'quoth_auditor',
-    {
-      description:
-        "🔍 Code Review Persona - Activate with '/prompt quoth_auditor' in Claude Code. " +
-        "Reviews existing code against documented standards. Distinguishes VIOLATIONS (code breaking rules) " +
-        "from UPDATES_NEEDED (new patterns to document). Use DURING code review.",
-    },
-    async () => getAuditorPrompt()
-  );
-
-  server.registerPrompt(
-    'quoth_documenter',
-    {
-      description:
-        "📝 Incremental Documentation Persona - Activate with '/prompt quoth_documenter' in Claude Code. " +
-        "Documents new code immediately after implementation. Fetches templates, follows structure, " +
-        "and submits proposals. Use WHILE building features. Say 'document this [code]' after activation.",
-    },
-    async () => getDocumenterPrompt()
-  );
+  // Note: MCP prompts (quoth_architect, quoth_auditor, quoth_documenter) have been removed.
+  // The Quoth plugin now uses hooks (SessionStart, PreToolUse, Stop) to guide Claude toward
+  // documentation patterns. See .claude/plugins/quoth/hooks.json for hook configuration.
 }
 
 /**
