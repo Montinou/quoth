@@ -350,10 +350,10 @@ const CallToAction = () => (
         className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-6"
         style={{ fontFamily: "var(--font-cinzel), serif" }}
       >
-        Ready to enforce truth in your codebase?
+        Ready to give Claude real memory?
       </h2>
       <p className="animate-fade-in-scale text-gray-400 mb-10 text-sm sm:text-base" style={{ animationDelay: "0.1s" }}>
-        Join the movement. Let Quoth be your silent guardian against documentation drift.
+        Transform from session amnesia to persistent knowledge. Start capturing learnings today.
       </p>
       <div
         className="animate-fade-in-scale flex flex-col sm:flex-row items-center justify-center gap-4"
