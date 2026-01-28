@@ -1,7 +1,7 @@
 {
   "name": "quoth",
-  "version": "1.0.6",
-  "description": "Smart documentation-as-truth plugin. Category-aware hints (once per file type), intent detection, and conditional badge. ~80 tokens max overhead.",
+  "version": "2.0.0",
+  "description": "AI Memory plugin with local-first storage, configurable strictness, and quoth-memory subagent for context summarization. Transforms documentation from 'search and read' to 'automatic memory'.",
   "author": {
     "name": "Montinou",
     "url": "https://github.com/Montinou"
@@ -9,7 +9,8 @@
   "homepage": "https://quoth.ai-innovation.site",
   "repository": "https://github.com/Montinou/quoth-mcp",
   "license": "MIT",
-  "keywords": ["documentation", "mcp", "ai", "claude-code", "source-of-truth", "patterns", "quoth"],
+  "keywords": ["documentation", "mcp", "ai", "claude-code", "memory", "patterns", "quoth", "ai-memory"],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "agents": "./agents/"
 }
