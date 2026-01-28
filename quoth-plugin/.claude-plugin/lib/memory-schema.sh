@@ -166,7 +166,7 @@ append_to_type_file() {
 
 $content
 
-_Source: Session $source_session_
+_Source: Session ${source_session}_
 
 ---
 
