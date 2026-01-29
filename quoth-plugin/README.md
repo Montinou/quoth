@@ -1,17 +1,18 @@
-# Quoth Plugin for Claude Code
+# Quoth Plugin v2.0 - AI Memory for Claude Code
 
-Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints that guide Claude to use `quoth_guidelines` when relevant.
+AI Memory plugin with local-first storage, configurable strictness, and quoth-memory subagent. Transforms documentation from "search and read" to "automatic memory".
 
-## Features
+## What's New in v2.0
 
-- **~60 tokens per session** - Down from ~750 tokens (92% reduction)
-- **One adaptive tool** - `quoth_guidelines(mode)` with `code`, `review`, `document` modes
-- **🪶 Quoth Badge** - Transparent reporting when Quoth patterns are applied
-- **Strongly suggest, not force** - Claude decides when to use Quoth
+- **Local-first storage** - `.quoth/` folder persists knowledge across sessions
+- **quoth-memory subagent** - Sonnet-powered memory interface for context queries
+- **Configurable strictness** - `blocking`, `reminder`, or `off` modes
+- **Session logging** - All actions captured to `.quoth/sessions/`
+- **Knowledge promotion** - User-approved transfer to local/remote storage
 
 ## Quick Install
 
-### Option 1: From Marketplace (Recommended)
+### From Marketplace (Recommended)
 
 ```bash
 # Add the Quoth marketplace (one time)
@@ -21,114 +22,184 @@ Lightweight documentation-as-truth plugin. ~60 tokens overhead with gentle hints
 /plugin install quoth@quoth-marketplace
 ```
 
-This installs everything:
-- **Quoth MCP Server** - All tools (`quoth_guidelines`, `quoth_search_index`, etc.)
-- **Lightweight Hooks** - Gentle hints (~60 tokens)
-- **Skills** - `/quoth-genesis` for bootstrapping
+This installs:
+- **MCP Server** - All tools (search, read, propose, genesis)
+- **Hooks** - Session management, gate enforcement, logging
+- **Skills** - `/quoth-init`, `/quoth-genesis`
+- **Agents** - `quoth-memory` subagent
 
-### Option 2: MCP Only (No Hooks)
-
-If you only want the MCP server without hooks:
+### MCP Only (No Local Memory)
 
 ```bash
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
 ```
 
-### With API Key
+## Getting Started
 
-For authenticated access:
+### 1. Initialize AI Memory
 
 ```bash
-# Get a token from https://quoth.ai-innovation.site/dashboard/api-keys
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"
+/quoth-init
 ```
 
-## What You Get
+This creates your local memory structure:
 
-### MCP Tools (via server)
+```
+.quoth/
+├── config.json         # Strictness, types, gates
+├── decisions.md        # Architecture choices
+├── patterns.md         # Code patterns
+├── errors.md           # Failures and fixes
+├── knowledge.md        # General context
+└── sessions/           # Session logs (gitignored)
+```
+
+### 2. Choose Strictness
+
+During init, choose how strictly to enforce documentation:
+
+| Mode | Behavior |
+|------|----------|
+| **blocking** | Cannot edit code until reasoning documented |
+| **reminder** | Gentle prompts, not blocking |
+| **off** | Manual capture only |
+
+### 3. Work Normally
+
+The plugin automatically:
+1. Injects relevant context at session start
+2. Logs your actions to session folder
+3. Prompts for knowledge promotion at session end
+
+## Components
+
+### MCP Tools
 
 | Tool | Purpose |
 |------|---------|
-| `quoth_guidelines` | Adaptive guidelines for code/review/document modes |
 | `quoth_search_index` | Semantic search across documentation |
 | `quoth_read_doc` | Read full document content |
 | `quoth_propose_update` | Submit documentation updates |
 | `quoth_genesis` | Bootstrap project documentation |
+| `quoth_guidelines` | Adaptive guidelines (code/review/document modes) |
 
-### Hooks (automatic)
+### Hooks
 
-| Hook | Purpose | Tokens |
-|------|---------|--------|
-| SessionStart | Hint to use `quoth_guidelines('code')` | ~25 |
-| PreToolUse (Edit/Write) | Reminder that Quoth patterns available | ~15 |
-| Stop | Badge enforcement if Quoth was used | ~20 |
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `session-start.sh` | SessionStart | Initialize session, inject context |
+| `pre-tool-gate.sh` | PreToolUse | Gate Edit/Write (if blocking mode) |
+| `post-tool-log.sh` | PostToolUse | Log actions to session |
+| `subagent-start.sh` | SubagentStart | Context injection (excludes quoth-memory) |
+| `subagent-stop.sh` | SubagentStop | Documentation prompts (excludes quoth-memory) |
+| `stop.sh` | Stop | Knowledge promotion prompt |
 
-## How It Works
+### quoth-memory Subagent
 
-1. **Session starts**: Claude sees hint about `quoth_guidelines`
-2. **Before code**: Claude may call `quoth_guidelines('code')`
-3. **Search**: Claude may call `quoth_search_index` for patterns
-4. **Response ends**: If Quoth was used, badge shows which patterns applied
+A Sonnet-powered memory interface that:
+- Summarizes relevant context (~500 tokens)
+- Answers questions without bloating main context
+- Prepares knowledge promotion proposals
+- **Exempt from all hooks** (prevents infinite loops)
 
+Query it directly:
 ```
-┌─────────────────────────────────────────────────┐
-│ 🪶 Quoth                                        │
-│   ✓ patterns/testing-pattern.md (vitest mocks) │
-└─────────────────────────────────────────────────┘
+"Ask quoth-memory: What's our error handling pattern?"
 ```
+
+### Skills
+
+- `/quoth-init` - Initialize AI Memory with configuration wizard
+- `/quoth-genesis` - Bootstrap documentation (minimal/standard/comprehensive)
 
 ## Configuration
 
-### Plugin Settings
-
-Create `~/.claude/plugins/quoth.local.md`:
-
-```yaml
----
-showBadge: true
----
-```
-
-### Project Configuration
-
-Create `.quoth/config.json` or `quoth.config.json` in your project:
+### .quoth/config.json
 
 ```json
 {
-  "project_id": "your-project-id"
+  "version": "2.0",
+  "project_id": "uuid-or-empty",
+  "project_slug": "my-project",
+  "strictness": "reminder",
+  "types": ["decisions", "patterns", "errors", "knowledge"],
+  "gates": {
+    "require_reasoning_before_edit": true,
+    "require_quoth_search": true,
+    "require_error_documentation": false
+  }
 }
 ```
 
-## Skills
+### Strictness Modes
 
-- `/quoth-genesis` - Bootstrap documentation for a new project
+**blocking** (Recommended for teams)
+- Cannot edit code until reasoning is documented
+- Must search Quoth before generating patterns
+- Gates enforced via `pre-tool-gate.sh`
+
+**reminder** (Default)
+- Gentle prompts when editing code
+- Not blocking, Claude decides when to document
+- Good balance for solo development
+
+**off**
+- No enforcement, manual capture only
+- Use for quick prototyping
 
 ## Plugin Structure
 
 ```
 quoth-plugin/
-  plugin.json           # Plugin manifest
-  hooks/
-    hooks.json          # Hook definitions
-    session-start.sh    # SessionStart - gentle hint (~25 tokens)
-    pre-edit-write.sh   # PreToolUse - pattern reminder (~15 tokens)
-    stop.sh             # Stop - badge enforcement (~20 tokens)
-  skills/
-    genesis.md          # Genesis skill
+├── .claude-plugin/
+│   ├── plugin.json           # v2.0.0 manifest
+│   ├── hooks/
+│   │   ├── hooks.json        # Hook definitions
+│   │   ├── lib/
+│   │   │   └── common.sh     # Shared utilities
+│   │   ├── session-start.sh  # SessionStart hook
+│   │   ├── pre-tool-gate.sh  # PreToolUse gate
+│   │   ├── post-tool-log.sh  # PostToolUse logging
+│   │   ├── subagent-start.sh # SubagentStart context
+│   │   ├── subagent-stop.sh  # SubagentStop prompts
+│   │   └── stop.sh           # Stop promotion
+│   ├── lib/
+│   │   ├── memory-schema.sh  # Local folder operations
+│   │   └── config-schema.sh  # Config file operations
+│   ├── agents/
+│   │   └── quoth-memory.md   # Memory subagent definition
+│   └── skills/
+│       ├── quoth-init/       # Init skill
+│       └── genesis/          # Genesis skill
+├── .mcp.json                 # MCP server config
+└── README.md
 ```
 
-## Development
+## Knowledge Flow
 
-### Testing Hooks
-
-```bash
-./hooks/session-start.sh | jq .
-./hooks/stop.sh | jq .
+```
+Session Start
+    ↓
+Context injected from .quoth/*.md
+    ↓
+Work happens (edit, write, bash)
+    ↓
+Actions logged to .quoth/sessions/{id}/log.md
+    ↓
+Session End
+    ↓
+quoth-memory reviews logs
+    ↓
+User prompted to promote learnings:
+├─ "Update local" → Merge into .quoth/*.md
+├─ "Upload to Quoth" → quoth_propose_update()
+├─ "Both" → Local + Remote
+└─ "Skip" → Keep in session folder
 ```
 
 ## Links
 
-- [Quoth Documentation](https://quoth.ai-innovation.site)
-- [Quoth MCP Server](https://github.com/Montinou/quoth-mcp)
-- [Blog: Introducing the Quoth Plugin](https://quoth.ai-innovation.site/blog/quoth-plugin-launch)
+- [Quoth Website](https://quoth.ai-innovation.site)
+- [Documentation](https://quoth.ai-innovation.site/docs)
+- [Changelog](https://quoth.ai-innovation.site/changelog)
+- [GitHub](https://github.com/Montinou/quoth-mcp)

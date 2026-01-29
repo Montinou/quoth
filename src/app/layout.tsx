@@ -32,11 +32,11 @@ const cormorantGaramond = Cormorant_Garamond({
 export const metadata: Metadata = {
   metadataBase: new URL('https://quoth.ai-innovation.site'),
   title: {
-    default: 'Quoth | The Living Source of Truth',
+    default: 'Quoth | AI Memory for Claude',
     template: '%s | Quoth',
   },
-  description: 'Quoth is an AI-driven MCP server that enforces consistency between your codebase and documentation. Stop hallucinations. Enforce your architecture. Wisdom over Guesswork.',
-  keywords: ['MCP', 'Model Context Protocol', 'AI Documentation', 'RAG', 'Code Auditor', 'Single Source of Truth', 'Vitest', 'Playwright', 'Claude Code', 'GEO'],
+  description: 'Quoth v2.0 gives Claude persistent memory across sessions. Local-first storage, bidirectional learning, and knowledge promotion. Transform from session amnesia to AI Memory.',
+  keywords: ['MCP', 'Model Context Protocol', 'AI Memory', 'Claude Code', 'RAG', 'Knowledge Management', 'Persistent Memory', 'Session Logging', 'AI Documentation', 'GEO'],
   authors: [{ name: 'Quoth Labs', url: 'https://quoth.ai-innovation.site' }],
   creator: 'Quoth Labs',
   publisher: 'Quoth Labs',

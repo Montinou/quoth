@@ -45,14 +45,14 @@ const features = [
     access: "authenticated",
   },
   {
-    name: "quoth_architect prompt",
-    description: "Code generation with pattern enforcement",
-    access: "public",
+    name: "quoth-memory subagent",
+    description: "AI Memory interface for context queries",
+    access: "plugin",
   },
   {
-    name: "quoth_auditor prompt",
-    description: "Code review with violation detection",
-    access: "public",
+    name: "/quoth-init skill",
+    description: "Initialize local AI Memory folder",
+    access: "plugin",
   },
 ];
 
@@ -63,8 +63,8 @@ export default function GuidePage() {
 
       <PageHeader
         badge="Getting Started"
-        title="Deploy Quoth Server"
-        subtitle="Set up Quoth in your AI development workflow in under 2 minutes."
+        title="Deploy Quoth v2.0"
+        subtitle="Set up AI Memory for Claude in under 2 minutes. Local-first storage with bidirectional learning."
       />
 
       <section className="py-16 px-6">
@@ -87,7 +87,7 @@ export default function GuidePage() {
             </div>
 
             <p className="text-gray-400 mb-6">
-              Install the complete Quoth plugin with marketplace integration. This bundles the MCP server, lightweight hooks, and the <code className="text-violet-spectral">/quoth-genesis</code> skill.
+              Install the complete Quoth v2.0 plugin with AI Memory features. This bundles the MCP server, session hooks, <code className="text-violet-spectral">/quoth-init</code> skill, and the <code className="text-violet-spectral">quoth-memory</code> subagent.
             </p>
 
             <CodeBlock filename="terminal">

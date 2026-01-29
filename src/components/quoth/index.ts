@@ -6,3 +6,4 @@ export { GlassCard } from "./GlassCard";
 export { CodeBlock, CodeLine, CodeKeyword, CodeSuggestion } from "./CodeBlock";
 export { CodeDemo } from "./CodeDemo";
 export { PricingCard } from "./PricingCard";
+export { FlowchartShowcase } from "./FlowchartShowcase";

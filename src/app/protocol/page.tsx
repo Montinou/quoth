@@ -95,9 +95,9 @@ export default function ProtocolPage() {
       <Navbar />
 
       <PageHeader
-        badge="MCP Server"
+        badge="MCP Server v2.0"
         title="The Protocol"
-        subtitle="Technical documentation for integrating Quoth into your AI agent workflow."
+        subtitle="Technical documentation for integrating Quoth AI Memory into your workflow."
       />
 
       <section className="py-16 px-6">

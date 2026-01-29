@@ -18,6 +18,9 @@ import {
   Scale,
   RefreshCw,
   Eye,
+  Brain,
+  Bot,
+  GitBranch,
 } from "lucide-react";
 
 /**
@@ -32,6 +35,9 @@ const ICON_MAP = {
   scale: Scale,
   "refresh-cw": RefreshCw,
   eye: Eye,
+  brain: Brain,
+  bot: Bot,
+  "git-branch": GitBranch,
 } as const;
 
 export type GlassCardIconName = keyof typeof ICON_MAP;

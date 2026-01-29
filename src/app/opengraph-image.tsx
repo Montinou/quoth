@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'Quoth - Nevermore Guess. Always Know.';
+export const alt = 'Quoth v2.0 - AI Memory for Claude';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -127,7 +127,7 @@ export default async function Image() {
             </span>
           </div>
 
-          {/* Main Title - "Nevermore Guess." */}
+          {/* Main Title - "AI Memory." */}
           <div
             style={{
               fontSize: '72px',
@@ -139,10 +139,10 @@ export default async function Image() {
               textAlign: 'center',
             }}
           >
-            Nevermore Guess.
+            AI Memory.
           </div>
 
-          {/* Second line - "Always Know." with gradient */}
+          {/* Second line - "Not Just Search." with gradient */}
           <div
             style={{
               fontSize: '72px',
@@ -157,7 +157,7 @@ export default async function Image() {
               color: 'transparent',
             }}
           >
-            Always Know.
+            Not Just Search.
           </div>
 
           {/* Subtitle */}
@@ -172,7 +172,7 @@ export default async function Image() {
               fontWeight: 300,
             }}
           >
-            The AI-driven auditor that aligns your codebase with your documentation.
+            Give Claude persistent memory that learns as you work.
           </div>
 
           {/* Secondary tagline */}
@@ -185,7 +185,7 @@ export default async function Image() {
               fontWeight: 300,
             }}
           >
-            Stop hallucinations. Enforce your architecture.
+            Local-first storage. Bidirectional learning. Session logging.
           </div>
         </div>
 

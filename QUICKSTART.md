@@ -1,91 +1,148 @@
-# Quoth Phase 1 - Quick Start Guide
+# Quoth v2.0 - Quick Start Guide
 
-Get the Shadow Proposal System running in 15 minutes.
+Get AI Memory running in 5 minutes.
 
 ## Prerequisites
 
-- Supabase account with existing Quoth project
-- GitHub fine-grained token (Contents: Read/Write)
-- Resend account with verified domain
-- Google Gemini API key
+- Claude Code installed
+- Internet connection (for Quoth MCP server)
 
-## 1. Run Database Migration (2 min)
+## 1. Install Plugin (1 min)
 
 ```bash
-# In Supabase SQL Editor, execute:
-supabase/migrations/002_proposal_system.sql
+# In Claude Code
+
+# Add marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install plugin
+/plugin install quoth@quoth-marketplace
 ```
 
-## 2. Configure Environment (5 min)
+## 2. Initialize AI Memory (2 min)
+
+In your project directory:
 
 ```bash
-# Copy template
-cp .env.example .env.local
-
-# Edit .env.local with your credentials:
-# - NEXT_PUBLIC_SUPABASE_URL
-# - SUPABASE_SERVICE_ROLE_KEY
-# - GEMINIAI_API_KEY
-# - GITHUB_TOKEN
-# - GITHUB_WEBHOOK_SECRET (generate with: openssl rand -hex 32)
-# - RESEND_API_KEY
-# - RESEND_FROM_EMAIL
-# - EMAIL_RECIPIENTS
-# - NEXT_PUBLIC_APP_URL
+/quoth-init
 ```
 
-## 3. Install & Run (3 min)
+Choose your settings:
+1. **Strictness**: `blocking` (teams), `reminder` (default), or `off`
+2. **Types**: decisions, patterns, errors, knowledge (+ custom)
+3. **Gates**: require_reasoning, require_search (if blocking)
 
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-## 4. Test It Out (5 min)
-
-### A. View Dashboard
-
-Navigate to: http://localhost:3000/proposals
-
-### B. Create Test Proposal (via Claude Code)
+This creates:
 
 ```
-Use quoth_propose_update to create a proposal for "backend-unit-vitest"
-with new_content "Test content", evidence_snippet "console.log('test')",
-and reasoning "Testing the new proposal system"
+.quoth/
+├── config.json         # Your configuration
+├── decisions.md        # Architecture choices
+├── patterns.md         # Code patterns
+├── errors.md           # Failures and fixes
+├── knowledge.md        # General context
+└── sessions/           # Session logs
 ```
 
-### C. Review & Approve
+## 3. Bootstrap Documentation (optional, ~5 min)
 
-1. Refresh dashboard - see your proposal
-2. Click proposal to view details
-3. Click "Approve & Commit"
-4. Enter your email
-5. Confirm approval
-6. Check GitHub for new commit
-7. Check your email for notification
+If you want to generate initial documentation:
 
-## That's It!
+```
+Run Genesis on this project with standard depth
+```
 
-You now have a working Quoth Shadow Proposal System.
+Genesis will:
+- Analyze your codebase
+- Generate 5 documents (standard depth)
+- Upload to Quoth server
+- Populate local `.quoth/*.md` files
 
-## Next Steps
+## 4. Start Working
 
-- **Production Deployment**: See [docs/implementation/05-DEPLOYMENT.md](./docs/implementation/05-DEPLOYMENT.md)
-- **Full Documentation**: See [docs/implementation/README.md](./docs/implementation/README.md)
-- **Architecture Deep Dive**: See [docs/implementation/02-ARCHITECTURE.md](./docs/implementation/02-ARCHITECTURE.md)
+That's it! Quoth now automatically:
+
+1. **Session start** - Injects relevant context
+2. **During work** - Logs actions to session folder
+3. **Session end** - Prompts to promote learnings
+
+### Example Flow
+
+```
+You: Create a test for the auth service
+
+Claude: [Searches .quoth/patterns.md for test patterns]
+Claude: [Creates test following documented conventions]
+Claude: [Logs action to .quoth/sessions/{id}/log.md]
+
+--- Later ---
+
+You: /exit (or end session)
+
+Quoth: Session complete. I captured these learnings:
+
+**Patterns:**
+- Used beforeEach for test isolation
+
+Update local files? Upload to Quoth? Both? Skip?
+
+You: Update local
+
+Quoth: [Appends to .quoth/patterns.md]
+```
+
+## Query Memory Directly
+
+Ask the quoth-memory subagent:
+
+```
+Ask quoth-memory: What's our error handling pattern?
+```
+
+It returns concise answers without bloating your context.
+
+## Configuration Reference
+
+### Strictness Levels
+
+| Mode | Effect |
+|------|--------|
+| `blocking` | Cannot edit until reasoning documented |
+| `reminder` | Gentle prompts, not blocking |
+| `off` | No enforcement |
+
+### Gates (blocking mode only)
+
+| Gate | Effect |
+|------|--------|
+| `require_reasoning_before_edit` | Must document reasoning first |
+| `require_quoth_search` | Must search Quoth before generating |
+| `require_error_documentation` | Must document errors encountered |
 
 ## Troubleshooting
 
-**Dashboard shows error**: Check environment variables in `.env.local`
+**Plugin not working?**
+```bash
+/plugin list  # Verify quoth is installed
+/mcp          # Check MCP server connection
+```
 
-**Proposal not appearing**: Check Supabase migration ran successfully
+**Context not injecting?**
+- Ensure `.quoth/config.json` exists
+- Run `/quoth-init` if missing
 
-**Approval fails**: Verify GitHub token has Contents: Read/Write permission
+**Gates too strict?**
+- Edit `.quoth/config.json`
+- Change `strictness` to `"reminder"` or `"off"`
 
-**Email not sending**: Check Resend domain is verified and API key is valid
+## Next Steps
 
-For more help: [docs/implementation/06-TROUBLESHOOTING.md](./docs/implementation/06-TROUBLESHOOTING.md)
+- **Customize types**: Add project-specific `.quoth/{type}.md` files
+- **Team sharing**: Upload learnings to remote Quoth
+- **Genesis depth**: Try `comprehensive` for detailed documentation
+
+## Links
+
+- [Full Documentation](https://quoth.ai-innovation.site/docs)
+- [Changelog](https://quoth.ai-innovation.site/changelog)
+- [GitHub](https://github.com/Montinou/quoth-mcp)

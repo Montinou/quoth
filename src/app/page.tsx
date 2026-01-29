@@ -10,7 +10,7 @@
 
 import { Sparkles } from "lucide-react";
 import Link from "next/link";
-import { Navbar, Footer, GlassCard } from "@/components/quoth";
+import { Navbar, Footer, GlassCard, FlowchartShowcase } from "@/components/quoth";
 import { Button } from "@/components/ui/button";
 import { CodeDemo } from "@/components/quoth/CodeDemo";
 
@@ -69,9 +69,12 @@ const Hero = () => (
           animationDelay: "0.1s",
         }}
       >
-        Nevermore Guess.
+        Nevermore Forget.
         <br />
-        <span className="text-gradient-animate">Always Know.</span>
+        <span className="text-gradient-animate font-serif" style={{ fontFamily: "var(--font-cinzel), serif" }}>
+          Quoth
+        </span>{" "}
+        <span className="text-white">The Memories.</span>
       </h1>
 
       {/* Subtitle */}
@@ -79,9 +82,9 @@ const Hero = () => (
         className="animate-fade-in-scale font-light text-base sm:text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-12 leading-relaxed"
         style={{ animationDelay: "0.3s" }}
       >
-        The AI-driven auditor that aligns your codebase with your documentation.
+        Knowledge that outlives the session.
         <span className="block mt-2 text-gray-500">
-          Stop hallucinations. Enforce your architecture.
+          Wisdom that grows with every conversation.
         </span>
       </p>
 
@@ -140,14 +143,14 @@ const GenesisDemo = () => {
             className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
             style={{ fontFamily: "var(--font-cinzel), serif" }}
           >
-            Document Your Codebase in Minutes
+            Memory That Learns With You
           </h2>
           <p
             className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto"
             style={{ animationDelay: "0.1s" }}
           >
-            Genesis auto-documents your entire project. One command connects Quoth.
-            One question generates comprehensive documentation.
+            Initialize AI Memory in seconds. Every session captures knowledge.
+            End-of-session prompts let you promote learnings to persistent storage.
           </p>
         </div>
 
@@ -184,76 +187,68 @@ const GenesisDemo = () => {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">/plugin marketplace add Montinou/quoth-mcp</span>
-                </div>
-                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
-                  <span className="text-green-400">&#10003;</span> Marketplace &apos;quoth-marketplace&apos; added
-                </div>
-              </div>
-
-              {/* Step 2: Install Plugin */}
-              <div className="space-y-1 mt-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-green-400">$</span>
                   <span className="text-white">/plugin install quoth@quoth-marketplace</span>
                 </div>
                 <div className="pl-4 text-gray-500 text-xs sm:text-sm">
-                  <span className="text-green-400">&#10003;</span> Plugin &apos;quoth&apos; installed (MCP + hooks + skills)
+                  <span className="text-green-400">&#10003;</span> Plugin &apos;quoth&apos; v2.0 installed (MCP + hooks + agents)
                 </div>
               </div>
 
-              {/* Step 3: Run Genesis */}
+              {/* Step 2: Initialize Memory */}
+              <div className="space-y-1 mt-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-green-400">$</span>
+                  <span className="text-white">/quoth-init</span>
+                </div>
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
+                  <span className="text-green-400">&#10003;</span> Created .quoth/ folder structure
+                </div>
+              </div>
+
+              {/* Step 3: Session Flow */}
               <div className="space-y-2 mt-6">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">Ask Claude:</span>
-                  <span className="text-violet-ghost">&quot;Run Genesis on this project&quot;</span>
+                  <span className="text-white">Work session:</span>
+                  <span className="text-violet-ghost">&quot;Create auth service tests&quot;</span>
                 </div>
 
-                {/* Genesis Output Animation */}
+                {/* Session Flow Animation */}
                 <div className="pl-4 space-y-2 border-l-2 border-violet-spectral/30 ml-1">
-                  {/* Phase 1 */}
+                  {/* Context injection */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
                     <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Analyzing repository structure...</span>
-                    <span className="text-green-400 ml-auto">done</span>
+                    <span className="text-gray-400">Context injected from .quoth/*.md</span>
+                    <span className="text-green-400 ml-auto">~500 tokens</span>
                   </div>
 
-                  {/* Phase 2 */}
+                  {/* Pattern search */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
                     <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Detecting tech stack: Next.js, TypeScript, Prisma</span>
-                    <span className="text-green-400 ml-auto">done</span>
+                    <span className="text-gray-400">Searching patterns.md for test conventions</span>
+                    <span className="text-green-400 ml-auto">found</span>
                   </div>
 
-                  {/* Phase 3 */}
+                  {/* Work logged */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
                     <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Generating project-overview.md</span>
-                    <span className="text-green-400 ml-auto">done</span>
+                    <span className="text-gray-400">Actions logged to .quoth/sessions/abc123/</span>
+                    <span className="text-green-400 ml-auto">3 entries</span>
                   </div>
 
-                  {/* Phase 4 */}
+                  {/* Session end */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
                     <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Generating tech-stack.md</span>
-                    <span className="text-green-400 ml-auto">done</span>
-                  </div>
-
-                  {/* Phase 5 */}
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Generating repo-structure.md</span>
-                    <span className="text-green-400 ml-auto">done</span>
+                    <span className="text-gray-400">Session end: reviewing learnings...</span>
+                    <span className="text-green-400 ml-auto">2 patterns</span>
                   </div>
                 </div>
 
                 {/* Completion */}
-                <div className="mt-4 p-3 bg-gradient-to-r from-green-500/10 to-green-500/5 border-l-2 border-green-400 rounded-r-lg">
+                <div className="mt-4 p-3 bg-gradient-to-r from-violet-500/10 to-violet-500/5 border-l-2 border-violet-spectral rounded-r-lg">
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-green-400 text-lg">&#10003;</span>
-                    <span className="text-white font-medium">Genesis complete!</span>
-                    <span className="text-gray-400 ml-2 text-xs sm:text-sm">5 documents generated in 3m 42s</span>
+                    <span className="text-violet-ghost text-lg">&#9733;</span>
+                    <span className="text-white font-medium">Learnings promoted to .quoth/patterns.md</span>
                   </div>
                 </div>
               </div>
@@ -301,31 +296,31 @@ const Features = () => (
           className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
           style={{ fontFamily: "var(--font-cinzel), serif" }}
         >
-          The Digital Scriptorium
+          The Memory Architecture
         </h2>
         <p className="animate-fade-in-scale text-gray-500 font-light text-sm sm:text-base" style={{ animationDelay: "0.1s" }}>
-          Architecture as Code. Documentation as Law.
+          Knowledge as Code. Context as Law.
         </p>
       </div>
 
       {/* Feature Cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
         <GlassCard
-          iconName="database"
-          title="Semantic Indexing"
-          description="Quoth creates a semantic map of your contracts and patterns. It doesn't just read files; it understands architectural intent."
+          iconName="brain"
+          title="Local-First Memory"
+          description="Knowledge persists in .quoth/ folder across sessions. Decisions, patterns, errors, and learnings survive context compaction."
           className="animate-fade-in-delay-1"
         />
         <GlassCard
-          iconName="shield-alert"
-          title="Active Auditor"
-          description="The 'Auditor Persona' actively monitors PRs. It detects when new code deviates from established patterns like 'backend-unit-vitest'."
+          iconName="bot"
+          title="quoth-memory Subagent"
+          description="A Sonnet-powered memory interface summarizes context (~500 tokens) and answers queries without bloating your main conversation."
           className="animate-fade-in-delay-2"
         />
         <GlassCard
-          iconName="history"
-          title="Drift Prevention"
-          description="Documentation usually dies the day it's written. Quoth forces a 'Read-Contrast-Update' loop to keep it alive forever."
+          iconName="git-branch"
+          title="Knowledge Promotion"
+          description="Session learnings are captured automatically. At session end, choose to promote to local files, remote Quoth, or both."
           className="animate-fade-in-delay-3 sm:col-span-2 lg:col-span-1"
         />
       </div>
@@ -341,10 +336,10 @@ const Stats = () => (
     <div className="max-w-5xl mx-auto relative z-10">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
         {[
-          { value: "512d", label: "Vector Embeddings" },
-          { value: "RAG", label: "Pipeline Architecture" },
-          { value: "MCP", label: "Protocol Native" },
-          { value: "∞", label: "Documentation Sync" },
+          { value: "v2.0", label: "AI Memory" },
+          { value: "~500", label: "Token Context" },
+          { value: "6", label: "Hooks Active" },
+          { value: "∞", label: "Sessions Captured" },
         ].map((stat, index) => (
           <div
             key={stat.label}
@@ -377,10 +372,10 @@ const CallToAction = () => (
         className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-6"
         style={{ fontFamily: "var(--font-cinzel), serif" }}
       >
-        Ready to enforce truth in your codebase?
+        Ready to Never Forget?
       </h2>
       <p className="animate-fade-in-scale text-gray-400 mb-10 text-sm sm:text-base" style={{ animationDelay: "0.1s" }}>
-        Join the movement. Let Quoth be your silent guardian against documentation drift.
+        Knowledge that persists. Patterns that compound.
       </p>
       <div
         className="animate-fade-in-scale flex flex-col sm:flex-row items-center justify-center gap-4"
@@ -420,6 +415,7 @@ export default function Home() {
       <Navbar />
       <main>
         <Hero />
+        <FlowchartShowcase />
         <GenesisDemo />
         <Features />
         <Stats />

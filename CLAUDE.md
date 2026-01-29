@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Quoth is an MCP (Model Context Protocol) server that acts as a "Single Source of Truth" auditor for codebases. It enforces consistency between code and documentation by providing AI agents with tools to search, read, and propose updates to a knowledge base.
+Quoth v2.0 is an **AI Memory** system that gives Claude persistent memory across sessions. Unlike traditional documentation tools, Quoth creates a bidirectional learning loop: it both retrieves AND stores knowledge, mediated by an intelligent `quoth-memory` subagent.
+
+**Key v2.0 Features:**
+- **Local-first storage** - `.quoth/` folder persists knowledge across sessions
+- **quoth-memory subagent** - Sonnet-powered memory interface (~500 token summaries)
+- **Configurable strictness** - `blocking`, `reminder`, or `off` modes
+- **Session logging** - All actions captured to `.quoth/sessions/`
+- **Knowledge promotion** - User-approved transfer to local/remote storage
 
 **Production URL**: https://quoth.ai-innovation.site
 
@@ -43,8 +50,9 @@ Install the complete Quoth plugin via Claude Code marketplace:
 
 This bundles:
 - MCP server with all tools
-- Lightweight session hooks (~60 tokens overhead)
-- `/quoth-genesis` skill for documentation bootstrapping
+- Session hooks for memory management
+- `/quoth-init` and `/quoth-genesis` skills
+- `quoth-memory` subagent for context queries
 
 **What you get:**
 
@@ -63,7 +71,18 @@ This bundles:
 - `/prompt quoth_documenter` - Activate incremental documentation persona (document code as you build)
 
 **Skills:**
-- `/quoth-genesis` - Run Genesis documentation bootstrapping
+- `/quoth-init` - Initialize AI Memory for a project (creates `.quoth/` folder)
+- `/quoth-genesis` - Bootstrap project documentation (minimal/standard/comprehensive)
+
+**Agents:**
+- `quoth-memory` - Sonnet-powered memory interface for context queries
+
+**Hooks:**
+- `SessionStart` - Initialize session, inject context from `.quoth/*.md`
+- `PreToolUse` - Gate enforcement for Edit/Write (if blocking mode)
+- `PostToolUse` - Log actions to `.quoth/sessions/{id}/`
+- `SubagentStart/Stop` - Context injection (excludes quoth-memory)
+- `Stop` - Knowledge promotion prompt at session end
 
 ### Alternative: MCP Server Only (No Hooks)
 

@@ -5,6 +5,59 @@ description: "All notable changes to Quoth"
 
 ## January 2026
 
+### 2026-01-28
+
+**Quoth v2.0: AI Memory Architecture** - Transform from Agentic RAG to AI Memory
+
+This release fundamentally transforms Quoth from a documentation auditor into a true AI Memory system with bidirectional learning.
+
+**Core Architecture Changes**
+
+- **Local-first storage** - `.quoth/` folder structure persists knowledge across sessions
+- **quoth-memory subagent** - Sonnet-powered memory interface for context queries (~500 token summaries)
+- **Session logging** - All actions logged to `.quoth/sessions/{id}/` for knowledge capture
+- **Knowledge promotion** - User-approved transfer: session → local → remote Quoth
+
+**New Skills**
+
+- `/quoth-init` - Initialize AI Memory for a project with configuration wizard
+- Genesis v3.0 - Added Phase 0 configuration for strictness and knowledge types
+
+**Configurable Strictness Levels**
+
+| Mode | Behavior |
+|------|----------|
+| `blocking` | Cannot edit code until reasoning documented |
+| `reminder` | Gentle prompts, not blocking |
+| `off` | Manual capture only |
+
+**New Hooks**
+
+- `PreToolUse (Edit/Write)` - Gate enforcement with configurable strictness
+- `PostToolUse (Edit/Write/Bash)` - Log actions to session folder
+- `SubagentStart/Stop` - Context injection for other subagents (excludes quoth-memory)
+- Updated `Stop` hook - Knowledge promotion prompt at session end
+
+**Local Folder Structure**
+
+```
+.quoth/
+├── config.json         # Strictness, types, gates
+├── decisions.md        # Architecture choices
+├── patterns.md         # Code patterns
+├── errors.md           # Failures and fixes
+├── knowledge.md        # General context
+└── sessions/{id}/      # Session-scoped logs
+```
+
+**Breaking Changes**
+
+- Plugin version bumped to 2.0.0
+- New folder structure requires `/quoth-init` for existing projects
+- Hook token overhead increased slightly for enhanced features
+
+---
+
 ### 2026-01-23
 
 **Quoth Plugin for Claude Code** - Lightweight hooks and adaptive guidelines

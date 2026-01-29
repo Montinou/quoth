@@ -1,259 +1,223 @@
-# Quoth MCP Server
+# Quoth v2.0 - AI Memory
 
-> AI-Driven Technical Documentation MCP Server - A "Living Source of Truth" for AI Agents
+> Transform your AI from "search and read" to "automatic memory" - Local-first knowledge capture with bidirectional learning
 
-Quoth is a Model Context Protocol (MCP) server designed to prevent AI hallucinations by enforcing a "Read-Contrast-Update" workflow. AI agents never blindly generate code patterns but instead verify against documented standards.
+Quoth is an **AI Memory** system that gives Claude persistent memory across sessions. Unlike traditional documentation tools, Quoth creates a learning loop: it both retrieves AND stores knowledge, mediated by an intelligent `quoth-memory` subagent.
 
-## Features
+```
+RAG (Basic)           → Query → Vectors → Context → LLM
+Agentic RAG (v1)      → Query → LLM → Tools → Context → LLM
+AI Memory (v2)        → Query → LLM → Memory ⟷ Tools → Context → LLM
+                                        ↑___↓
+                                    Bidirectional
+```
 
-### 🔧 Tools
+## Key Features
+
+### 🧠 AI Memory Architecture
+
+| Feature | Description |
+|---------|-------------|
+| **Local-first storage** | `.quoth/` folder persists knowledge across sessions |
+| **Session logging** | Every action logged to `.quoth/sessions/{id}/` |
+| **Knowledge promotion** | User-approved transfer from session → local → remote |
+| **Configurable strictness** | `blocking`, `reminder`, or `off` modes |
+
+### 🤖 quoth-memory Subagent
+
+A Sonnet-powered memory interface that:
+- Summarizes relevant context at session start (~500 tokens)
+- Answers questions without bloating main context
+- Prepares knowledge promotion proposals
+- Exempt from all hooks (prevents loops)
+
+### 🔧 MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `quoth_search_index` | Search the documentation index for patterns, architecture notes, and contracts |
-| `quoth_read_doc` | Retrieve full document content by ID with parsed YAML frontmatter |
-| `quoth_propose_update` | Submit documentation updates with evidence and reasoning for review |
-| `quoth_genesis` | Inject Genesis Architect persona for codebase analysis and bootstrapping |
+| `quoth_search_index` | Semantic search with Jina embeddings + Cohere reranking |
+| `quoth_read_doc` | Retrieve full document content by ID |
+| `quoth_propose_update` | Submit documentation updates with evidence |
+| `quoth_genesis` | Bootstrap project documentation (minimal/standard/comprehensive) |
+| `quoth_guidelines` | Adaptive guidelines for code/review/document modes |
 
-### 🎭 Prompts (Personas)
+### 🪝 Hook-Enforced Documentation
 
-**How to trigger prompts in Claude Code:**
-```bash
-/prompt quoth_architect    # Activate code generation persona
-/prompt quoth_auditor      # Activate documentation review persona
-/prompt quoth_documenter   # Activate incremental documentation persona
-```
-
-| Prompt | When to Use | Description |
-|--------|-------------|-------------|
-| `quoth_architect` | Before writing code/tests | Enforces "Single Source of Truth" rules - searches Quoth before generating code |
-| `quoth_auditor` | During code review | Distinguishes between new features vs technical debt - identifies violations |
-| `quoth_documenter` | While building features | Documents new code immediately - creates searchable, well-structured docs |
-
-**Note:** Prompts are NOT tools. They configure Claude's behavior for the conversation. Use `/prompt <name>` in Claude Code to activate them.
-
-### 👥 Team Collaboration
-
-- **Multi-user projects** - Share knowledge bases with team members
-- **Role-based access** - Admin, Editor, and Viewer roles with granular permissions
-- **Email invitations** - Invite collaborators via email with secure 7-day tokens
-- **Team management** - Add, remove, and manage member roles through dashboard
-- **Secure isolation** - Row-level security ensures projects remain private
+| Hook | Purpose |
+|------|---------|
+| `SessionStart` | Initialize `.quoth/sessions/`, inject context |
+| `PreToolUse` | Gate Edit/Write until reasoning documented (if blocking) |
+| `PostToolUse` | Log actions to session folder |
+| `SubagentStart/Stop` | Context injection and documentation prompts |
+| `Stop` | Propose knowledge promotion to user |
 
 ## Installation
 
-### Recommended: Plugin Install (MCP + Hooks + Skills)
-
-Install the complete Quoth plugin via Claude Code marketplace:
+### Recommended: Plugin Install (Full AI Memory)
 
 ```bash
-# 1. Add marketplace (one time)
+# Add marketplace (one time)
 /plugin marketplace add Montinou/quoth-mcp
 
-# 2. Install plugin
+# Install plugin (MCP + hooks + skills + agents)
 /plugin install quoth@quoth-marketplace
 ```
 
 This bundles:
-- MCP server with all tools
-- Lightweight session hooks (~60 tokens)
-- `/quoth-genesis` skill for documentation bootstrapping
+- **MCP Server** - All tools for search, read, propose
+- **Hooks** - Automatic knowledge capture and enforcement
+- **Skills** - `/quoth-init` and `/quoth-genesis`
+- **Agents** - `quoth-memory` subagent for context queries
 
-### Alternative: MCP Server Only (No Hooks)
+### Alternative: MCP Server Only
 
-If you prefer just the MCP server without hooks or want to integrate with other clients:
+For just the MCP tools without local memory:
 
 ```bash
-# Claude Code with OAuth
 claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
-
-# Public demo (read-only, no auth)
-claude mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
 ```
 
-### For Developers: Local Setup
+## Quick Start
 
-Clone and run the Next.js server locally:
+### 1. Initialize AI Memory
 
 ```bash
-cd quoth-mcp
-npm install
-npm run dev
+# Run in your project
+/quoth-init
 ```
 
-The MCP server will be available at `http://localhost:3000/api/mcp`
-
-## Connecting Other Clients
-
-### Claude Desktop / Cursor / Windsurf
-
-If your client supports Streamable HTTP, add to your MCP configuration:
-
-```json
-{
-  "quoth": {
-    "url": "https://quoth.ai-innovation.site/api/mcp",
-    "headers": {
-      "Authorization": "Bearer YOUR_TOKEN"
-    }
-  }
-}
-```
-
-For stdio-only clients, use mcp-remote:
-
-```json
-{
-  "quoth": {
-    "command": "npx",
-    "args": ["-y", "mcp-remote", "https://quoth.ai-innovation.site/api/mcp"]
-  }
-}
-```
-
-## Knowledge Base Structure
+This creates your `.quoth/` folder:
 
 ```
-quoth-knowledge-base/
-├── contracts/           # API schemas, DTOs, database models
-│   ├── api-schemas.md
-│   ├── database-models.md
-│   └── shared-types.md
-├── patterns/            # Testing patterns and code recipes
-│   ├── backend-unit-vitest.md
-│   ├── frontend-e2e-playwright.md
-│   └── backend-integration.md
-├── architecture/        # Folder structure and ADRs
-│   ├── backend-repo-structure.md
-│   ├── frontend-repo-structure.md
-│   └── decision-records.md
-└── meta/                # System health and validation
-    └── validation-log.md
+.quoth/
+├── config.json         # Strictness, types, gates
+├── decisions.md        # Architecture choices
+├── patterns.md         # Code patterns
+├── errors.md           # Failures and fixes
+├── knowledge.md        # General context
+└── sessions/           # Session logs (gitignored)
 ```
 
-### Document Format
+### 2. Configure Strictness
 
-All documentation files use YAML frontmatter for AI consumption:
+Choose how strictly Quoth enforces documentation:
 
-```yaml
----
-id: pattern-backend-unit
-type: testing-pattern
-related_stack: [vitest, node]
-last_verified_commit: "a1b2c3d"
-last_updated_date: "2026-01-10"
-status: active
----
+| Mode | Behavior |
+|------|----------|
+| **blocking** | Claude cannot edit code until reasoning is documented |
+| **reminder** | Gentle prompts to document, not blocking |
+| **off** | Manual capture only, no enforcement |
 
-# Pattern Title
+### 3. Work Normally
 
-## The Golden Rule
-1. Rule one
-2. Rule two
+With Quoth active:
 
-## Code Example (Canonical)
-...
+1. **Session starts** → Context injected from `.quoth/*.md`
+2. **Before edits** → Gate checks reasoning documented (if blocking)
+3. **After actions** → Logged to `.quoth/sessions/{id}/log.md`
+4. **Session ends** → Prompted to promote learnings
 
-## Anti-Patterns (Do NOT do this)
-...
+### 4. Promote Knowledge
+
+At session end, Quoth summarizes learnings:
+
+```
+Session complete. I captured these learnings:
+
+**Decisions:**
+- Chose retry-with-backoff over circuit-breaker for token refresh
+
+**Patterns:**
+- Token refresh uses mutex to prevent race conditions
+
+**Errors:**
+- Auth header missing on redirect (fixed by preserving headers)
+
+Update local files? Upload to Quoth? Both? Skip?
 ```
 
-## Workflow
+## Local Folder Structure
 
-### Using the Architect Persona
-
-**Trigger with:** `/prompt quoth_architect` in Claude Code
-
-**What happens:**
-1. You give Claude a coding task (e.g., "Create a test for Feature X")
-2. Claude automatically calls `quoth_search_index` to find relevant patterns
-3. Claude calls `quoth_read_doc` to get exact syntax and rules
-4. Claude generates code following documented patterns strictly
-5. If code contradicts docs, Claude prioritizes documentation (docs = intended design)
-
-**Example:**
 ```
-You: /prompt quoth_architect
-Claude: [Architect persona activated]
-You: Create a Vitest unit test for the authentication service
-Claude: [Searches Quoth for "vitest authentication test patterns"]
-Claude: [Reads the testing-patterns.md document]
-Claude: [Generates test following canonical examples]
+.quoth/
+├── config.json              # Project configuration
+│
+├── decisions.md             # PERSISTENT: Architecture choices
+├── patterns.md              # PERSISTENT: Code patterns
+├── errors.md                # PERSISTENT: Failures and fixes
+├── knowledge.md             # PERSISTENT: General context
+├── [custom].md              # PERSISTENT: Project-specific types
+│
+└── sessions/
+    └── {session-id}/        # EPHEMERAL: Current session only
+        ├── context.md       # Injected context at start
+        ├── log.md           # Actions taken this session
+        └── pending.md       # Learnings awaiting promotion
 ```
 
-### Using the Auditor Persona
+### Persistence Rules
 
-**Trigger with:** `/prompt quoth_auditor` in Claude Code
+| Type | Survives Session | Survives Compaction | Synced to Quoth |
+|------|------------------|---------------------|-----------------|
+| Config | ✓ | ✓ | ✗ (local only) |
+| Type files | ✓ | ✓ | On promotion |
+| Session logs | Current only | ✓ | On promotion |
 
-**What happens:**
-1. You ask Claude to review existing code
-2. Claude compares code against documented standards
-3. Claude reports **VIOLATIONS** (code that breaks documented rules)
-4. Claude reports **UPDATES_NEEDED** (new patterns that should be documented)
-5. Claude uses `quoth_propose_update` for legitimate new patterns
+## Using quoth-memory
 
-**Example:**
+Query the memory subagent directly:
+
 ```
-You: /prompt quoth_auditor
-Claude: [Auditor persona activated]
-You: Review the src/services/auth.ts file
-Claude: [Searches Quoth for authentication patterns]
-Claude: [Compares code vs documentation]
-Claude: VIOLATIONS: Using localStorage instead of cookies (violates security-patterns.md)
-Claude: UPDATES_NEEDED: New OAuth provider integration pattern found
+"Ask quoth-memory: What's our error handling pattern?"
 ```
 
-### Using the Documenter Persona
+The subagent:
+1. Searches Quoth and local `.quoth/*.md` files
+2. Returns a concise answer (not raw documents)
+3. Keeps main context clean
 
-**Trigger with:** `/prompt quoth_documenter` in Claude Code
+## Genesis v3.0
 
-**What happens:**
-1. You say "document this [code/feature]"
-2. Claude analyzes the code and determines the correct document type
-3. Claude searches for existing documentation with `quoth_search_index`
-4. Claude fetches the appropriate template with `quoth_get_template`
-5. Claude creates or updates documentation following the template structure
-6. Claude submits via `quoth_propose_update`
+Bootstrap documentation with configurable depth:
 
-**Example:**
-```
-You: /prompt quoth_documenter
-Claude: [Documenter persona activated]
-You: Document this new API endpoint [paste code]
-Claude: [Analyzes code → determines it's an API schema]
-Claude: [Searches for existing api-schemas.md]
-Claude: [Fetches api-schemas template]
-Claude: [Creates documentation with proper structure]
-Claude: [Submits proposal with code as evidence]
+```bash
+# In Claude Code
+"Run Genesis on this project"
 ```
 
-## Deployment
+| Depth | Documents | Time | Use Case |
+|-------|-----------|------|----------|
+| `minimal` | 3 | ~3 min | Quick overview |
+| `standard` | 5 | ~7 min | Team onboarding |
+| `comprehensive` | 11 | ~20 min | Enterprise audit |
 
-### Vercel
+Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types before generating docs.
 
-1. Push to GitHub
-2. Connect to Vercel
-3. Deploy
+## Team Collaboration
 
-The MCP endpoint will be available at `https://your-app.vercel.app/api/mcp`
+- **Multi-user projects** - Share knowledge bases with team members
+- **Role-based access** - Admin, Editor, and Viewer roles
+- **Email invitations** - Invite collaborators via secure tokens
+- **Approval workflows** - Proposals require admin review (optional)
 
-### Environment Variables
+## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
-| `GEMINIAI_API_KEY` | Google Gemini API key for embeddings | Yes |
-| `JWT_SECRET` | Secret for MCP token generation | Yes |
-| `RESEND_API_KEY` | Resend API key for email delivery | Optional (for notifications) |
-| `RESEND_FROM_EMAIL` | Sender email address | Optional (for notifications) |
-| `NEXT_PUBLIC_APP_URL` | Production app URL | Yes |
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+| `JINA_API_KEY` | Jina embeddings (512d vectors) |
+| `COHERE_API_KEY` | Cohere reranking (optional) |
+| `JWT_SECRET` | MCP token generation |
+| `RESEND_API_KEY` | Email delivery (optional) |
+
+## Links
+
+- **Website**: https://quoth.ai-innovation.site
+- **Documentation**: https://quoth.ai-innovation.site/docs
+- **Changelog**: https://quoth.ai-innovation.site/changelog
+- **GitHub**: https://github.com/Montinou/quoth-mcp
 
 ## License
 
 MIT
-
-## Based On
-
-This implementation follows the [Quoth Whitepaper](../WHITEPAPER.md) specifications.

@@ -4,6 +4,16 @@
 
 set -e
 
+# Source memory v2 libraries
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(dirname "$(dirname "$COMMON_SCRIPT_DIR")")/lib"
+if [ -f "$LIB_DIR/memory-schema.sh" ]; then
+    source "$LIB_DIR/memory-schema.sh"
+fi
+if [ -f "$LIB_DIR/config-schema.sh" ]; then
+    source "$LIB_DIR/config-schema.sh"
+fi
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
