@@ -111,14 +111,14 @@ export function FlowchartShowcase() {
       {/* Desktop: Side by side with sticky image */}
       <div className="hidden md:block relative">
         <div className="max-w-7xl mx-auto flex">
-          {/* Sticky Image Container */}
-          <div className="w-1/2 relative">
+          {/* Sticky Image Container - full edge-to-edge */}
+          <div className="w-3/5 relative">
             <div className="sticky top-20 h-[80vh] flex items-center justify-center pointer-events-none">
               <div className="relative w-full h-full">
                 {slides.map((slide, i) => (
                   <div
                     key={i}
-                    className={`absolute inset-0 flex items-center justify-center p-8 transition-all duration-700 ease-out
+                    className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out
                       ${activeIndex === i
                         ? "opacity-100 scale-100"
                         : "opacity-0 scale-95"
@@ -130,7 +130,7 @@ export function FlowchartShowcase() {
                         alt={slide.title}
                         fill
                         className="object-contain bg-charcoal/50"
-                        sizes="(max-width: 768px) 100vw, 50vw"
+                        sizes="(max-width: 768px) 100vw, 60vw"
                         priority={i === 0}
                       />
                     </div>
@@ -140,27 +140,27 @@ export function FlowchartShowcase() {
             </div>
           </div>
 
-          {/* Scrollable Text - Normal flow, right side */}
-          <div className="w-1/2 px-8">
+          {/* Scrollable Text - Compact cards, right side */}
+          <div className="w-2/5 px-6">
             {slides.map((slide, i) => (
               <div
                 key={i}
                 ref={(el) => {
                   sectionRefs.current[i] = el;
                 }}
-                className="min-h-screen flex items-center py-20"
+                className="min-h-screen flex items-center py-16"
               >
                 <div
-                  className={`w-full p-8 rounded-xl border transition-all duration-500
+                  className={`w-full p-6 rounded-xl border transition-all duration-500
                     ${activeIndex === i
                       ? "bg-charcoal/80 border-violet-spectral/30 shadow-lg shadow-violet-spectral/10"
-                      : "bg-charcoal/40 border-white/5"
+                      : "bg-charcoal/[0.32] border-white/5"
                     }`}
                 >
                   {/* Slide number */}
-                  <div className="flex items-center gap-3 mb-4">
+                  <div className="flex items-center gap-2.5 mb-3">
                     <span
-                      className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors duration-300
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors duration-300
                         ${activeIndex === i
                           ? "bg-violet-spectral text-white"
                           : "bg-white/10 text-gray-500"
@@ -173,20 +173,20 @@ export function FlowchartShowcase() {
 
                   {/* Title */}
                   <h3
-                    className="text-xl sm:text-2xl text-white font-serif mb-6"
+                    className="text-lg sm:text-xl text-white font-serif mb-4"
                     style={{ fontFamily: "var(--font-cinzel), serif" }}
                   >
                     {slide.title}
                   </h3>
 
                   {/* Bullets */}
-                  <ul className="space-y-4">
+                  <ul className="space-y-3">
                     {slide.bullets.map((bullet, j) => (
                       <li
                         key={j}
-                        className="text-gray-400 flex items-start gap-3 leading-relaxed"
+                        className="text-gray-400 text-sm flex items-start gap-2.5 leading-relaxed"
                       >
-                        <span className="text-violet-spectral mt-1.5 text-xs">&#9670;</span>
+                        <span className="text-violet-spectral mt-1 text-xs">&#9670;</span>
                         <span>{bullet}</span>
                       </li>
                     ))}
