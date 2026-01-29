@@ -108,93 +108,109 @@ export function FlowchartShowcase() {
         </p>
       </div>
 
-      {/* Desktop: Side by side with sticky image */}
+      {/* Desktop: Full-width image with cards scrolling over it */}
       <div className="hidden md:block relative">
-        <div className="max-w-7xl mx-auto flex">
-          {/* Sticky Image Container - full edge-to-edge */}
-          <div className="w-3/5 relative">
-            <div className="sticky top-20 h-[80vh] flex items-center justify-center pointer-events-none">
-              <div className="relative w-full h-full">
-                {slides.map((slide, i) => (
-                  <div
-                    key={i}
-                    className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out
-                      ${activeIndex === i
-                        ? "opacity-100 scale-100"
-                        : "opacity-0 scale-95"
-                      }`}
-                  >
-                    <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl shadow-violet-spectral/20 border border-violet-spectral/20">
-                      <Image
-                        src={slide.image}
-                        alt={slide.title}
-                        fill
-                        className="object-contain bg-charcoal/50"
-                        sizes="(max-width: 768px) 100vw, 60vw"
-                        priority={i === 0}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Scrollable Text - Compact cards, right side */}
-          <div className="w-2/5 px-6">
+        {/* Sticky Image Layer - pinned behind everything */}
+        <div className="sticky top-0 h-screen flex items-center justify-center pointer-events-none z-0">
+          <div className="relative w-[75%] h-[80vh]">
             {slides.map((slide, i) => (
               <div
                 key={i}
-                ref={(el) => {
-                  sectionRefs.current[i] = el;
-                }}
-                className="min-h-screen flex items-center py-16"
+                className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out
+                  ${activeIndex === i
+                    ? "opacity-100 scale-100"
+                    : "opacity-0 scale-95"
+                  }`}
               >
-                <div
-                  className={`w-full p-6 rounded-xl border transition-all duration-500
-                    ${activeIndex === i
-                      ? "bg-charcoal/80 border-violet-spectral/30 shadow-lg shadow-violet-spectral/10"
-                      : "bg-charcoal/[0.32] border-white/5"
-                    }`}
-                >
-                  {/* Slide number */}
-                  <div className="flex items-center gap-2.5 mb-3">
-                    <span
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors duration-300
-                        ${activeIndex === i
-                          ? "bg-violet-spectral text-white"
-                          : "bg-white/10 text-gray-500"
-                        }`}
-                    >
-                      {i + 1}
-                    </span>
-                    <div className="h-px flex-1 bg-gradient-to-r from-violet-spectral/50 to-transparent" />
+                <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl shadow-violet-spectral/20 border border-violet-spectral/20">
+                  <Image
+                    src={slide.image}
+                    alt={slide.title}
+                    fill
+                    className="object-contain bg-charcoal/50"
+                    sizes="75vw"
+                    priority={i === 0}
+                  />
+                  {/* Quoth logo watermark - covers Gemini logo */}
+                  <div className="absolute bottom-[0.5%] right-[-2%] z-[5] flex items-center justify-center w-32 h-32">
+                    <div className="absolute inset-0 bg-violet-spectral/40 rounded-full blur-md" />
+                    <Image
+                      src="/logos/quoth-logo.png"
+                      alt="Quoth"
+                      width={112}
+                      height={112}
+                      className="relative drop-shadow-[0_0_12px_rgba(139,92,246,0.7)]"
+                    />
                   </div>
-
-                  {/* Title */}
-                  <h3
-                    className="text-lg sm:text-xl text-white font-serif mb-4"
-                    style={{ fontFamily: "var(--font-cinzel), serif" }}
-                  >
-                    {slide.title}
-                  </h3>
-
-                  {/* Bullets */}
-                  <ul className="space-y-3">
-                    {slide.bullets.map((bullet, j) => (
-                      <li
-                        key={j}
-                        className="text-gray-400 text-sm flex items-start gap-2.5 leading-relaxed"
-                      >
-                        <span className="text-violet-spectral mt-1 text-xs">&#9670;</span>
-                        <span>{bullet}</span>
-                      </li>
-                    ))}
-                  </ul>
                 </div>
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Scrollable Cards - float over the image on the right */}
+        <div className="relative z-10 -mt-screen">
+          {slides.map((slide, i) => (
+            <div
+              key={i}
+              ref={(el) => {
+                sectionRefs.current[i] = el;
+              }}
+              className="min-h-screen flex items-center justify-end py-16 px-[5%]"
+            >
+              <div
+                className={`max-w-xs w-full p-5 rounded-xl border backdrop-blur-[3px] transition-all duration-500
+                  ${activeIndex === i
+                    ? "bg-charcoal/50 border-violet-spectral/30 shadow-lg shadow-violet-spectral/10"
+                    : "bg-charcoal/50 border-white/5"
+                  }`}
+              >
+                {/* Slide number */}
+                <div className="flex items-center gap-2.5 mb-3">
+                  <span
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors duration-300
+                      ${activeIndex === i
+                        ? "bg-violet-spectral text-white"
+                        : "bg-white/10 text-gray-500"
+                      }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="h-px flex-1 relative overflow-hidden">
+                    <div className={`absolute inset-0 transition-opacity duration-300 ${activeIndex === i ? "opacity-100" : "opacity-30"} bg-gradient-to-r from-violet-spectral/50 to-transparent`} />
+                    {activeIndex === i && (
+                      <div
+                        key={`glow-${i}-${activeIndex}`}
+                        className="absolute inset-0 h-full w-1/3 bg-gradient-to-r from-transparent via-violet-glow via-50% to-transparent animate-line-glow"
+                        style={{ filter: "blur(1px)" }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Title */}
+                <h3
+                  className="text-lg sm:text-xl text-white font-serif mb-4"
+                  style={{ fontFamily: "var(--font-cinzel), serif" }}
+                >
+                  {slide.title}
+                </h3>
+
+                {/* Bullets */}
+                <ul className="space-y-3">
+                  {slide.bullets.map((bullet, j) => (
+                    <li
+                      key={j}
+                      className="text-gray-400 text-sm flex items-start gap-2.5 leading-relaxed"
+                    >
+                      <span className="text-violet-spectral mt-1 text-xs">&#9670;</span>
+                      <span>{bullet}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

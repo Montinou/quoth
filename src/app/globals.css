@@ -251,6 +251,19 @@ html {
   }
 }
 
+@keyframes line-glow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.animate-line-glow {
+  animation: line-glow 1s ease-out forwards;
+}
+
 @keyframes fade-in-scale {
   from {
     opacity: 0;
