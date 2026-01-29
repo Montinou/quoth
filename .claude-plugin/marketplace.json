@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "quoth-marketplace",
+  "description": "Quoth AI Memory — persistent memory for Claude across sessions with local-first storage, configurable strictness, and knowledge promotion",
+  "owner": {
+    "name": "Montinou",
+    "email": "montinou@ai-innovation.site"
+  },
+  "plugins": [
+    {
+      "name": "quoth",
+      "source": "./quoth-plugin",
+      "description": "AI Memory plugin with local-first storage, configurable strictness, and quoth-memory subagent for context summarization. Transforms documentation from 'search and read' to 'automatic memory'.",
+      "version": "2.0.0",
+      "author": {
+        "name": "Montinou"
+      },
+      "homepage": "https://quoth.ai-innovation.site",
+      "repository": "https://github.com/Montinou/quoth-mcp",
+      "license": "MIT",
+      "keywords": ["memory", "mcp", "documentation", "knowledge", "rag", "ai-memory", "quoth"],
+      "category": "memory"
+    }
+  ]
+}
