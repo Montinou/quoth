@@ -110,36 +110,38 @@ export function FlowchartShowcase() {
 
       {/* Desktop: Side by side with sticky image */}
       <div className="hidden md:block relative">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto flex">
           {/* Sticky Image Container */}
-          <div className="sticky top-20 left-0 w-1/2 h-[80vh] flex items-center justify-center pointer-events-none">
-            <div className="relative w-full h-full">
-              {slides.map((slide, i) => (
-                <div
-                  key={i}
-                  className={`absolute inset-0 flex items-center justify-center p-8 transition-all duration-700 ease-out
-                    ${activeIndex === i
-                      ? "opacity-100 scale-100"
-                      : "opacity-0 scale-95"
-                    }`}
-                >
-                  <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl shadow-violet-spectral/20 border border-violet-spectral/20">
-                    <Image
-                      src={slide.image}
-                      alt={slide.title}
-                      fill
-                      className="object-contain bg-charcoal/50"
-                      sizes="(max-width: 768px) 100vw, 50vw"
-                      priority={i === 0}
-                    />
+          <div className="w-1/2 relative">
+            <div className="sticky top-20 h-[80vh] flex items-center justify-center pointer-events-none">
+              <div className="relative w-full h-full">
+                {slides.map((slide, i) => (
+                  <div
+                    key={i}
+                    className={`absolute inset-0 flex items-center justify-center p-8 transition-all duration-700 ease-out
+                      ${activeIndex === i
+                        ? "opacity-100 scale-100"
+                        : "opacity-0 scale-95"
+                      }`}
+                  >
+                    <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl shadow-violet-spectral/20 border border-violet-spectral/20">
+                      <Image
+                        src={slide.image}
+                        alt={slide.title}
+                        fill
+                        className="object-contain bg-charcoal/50"
+                        sizes="(max-width: 768px) 100vw, 50vw"
+                        priority={i === 0}
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Scrollable Text - Positioned to the right */}
-          <div className="absolute top-0 right-0 w-1/2 px-8">
+          {/* Scrollable Text - Normal flow, right side */}
+          <div className="w-1/2 px-8">
             {slides.map((slide, i) => (
               <div
                 key={i}
