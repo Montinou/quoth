@@ -24,6 +24,14 @@ main() {
         exit 0
     fi
 
+    # Skip promotion in off mode
+    local strictness=$(get_strictness)
+    if [ "$strictness" = "off" ]; then
+        cleanup_session
+        output_empty
+        exit 0
+    fi
+
     # Check if session folder exists and has content
     local session_dir=$(get_session_folder "$SESSION_ID")
     local log_file="$session_dir/log.md"
@@ -31,10 +39,18 @@ main() {
 
     local has_learnings=false
 
-    # Check if log has entries (more than just header)
+    # Check if log has entries (more than just header — header is 6 lines)
     if [ -f "$log_file" ]; then
         local line_count=$(wc -l < "$log_file" | tr -d ' ')
-        if [ "$line_count" -gt 10 ]; then
+        if [ "$line_count" -gt 7 ]; then
+            has_learnings=true
+        fi
+    fi
+
+    # Fallback: check total operations counter
+    if [ "$has_learnings" = false ]; then
+        local total_ops=$(get_total_operations)
+        if [ "$total_ops" -gt 5 ] 2>/dev/null; then
             has_learnings=true
         fi
     fi
@@ -49,8 +65,10 @@ main() {
 
 Session log: \`.quoth/sessions/$SESSION_ID/log.md\`
 
-Would you like me to:
-1. **Update local files** - Merge learnings into .quoth/*.md
+Invoke the **quoth-memory** subagent to review session learnings and promote knowledge.
+
+Options:
+1. **Update local files** - Merge learnings into .quoth/*.md via quoth-memory
 2. **Upload to Quoth** - Share with team via quoth_propose_update
 3. **Both** - Local + Remote
 4. **Skip** - Keep in session folder for later

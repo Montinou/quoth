@@ -95,7 +95,10 @@ init_session() {
     "read_chunks": 0,
     "propose_update": 0
   },
-  "detected_intent": null
+  "detected_intent": null,
+  "memory_agent_invoked": false,
+  "total_operations": 0,
+  "memory_nudge_count": 0
 }
 EOF
 }
@@ -348,4 +351,47 @@ EOF
 # Output empty response (hook has nothing to add)
 output_empty() {
     echo '{}'
+}
+
+# ============================================================================
+# MEMORY AGENT TRACKING
+# ============================================================================
+
+# Mark that quoth-memory subagent was invoked in this session
+mark_memory_agent_invoked() {
+    local session_file=$(get_session_file)
+    if [ -f "$session_file" ]; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' 's/"memory_agent_invoked"[[:space:]]*:[[:space:]]*false/"memory_agent_invoked": true/' "$session_file"
+        else
+            sed -i 's/"memory_agent_invoked"[[:space:]]*:[[:space:]]*false/"memory_agent_invoked": true/' "$session_file"
+        fi
+    fi
+}
+
+# Check if quoth-memory agent was invoked
+# Returns: 0 if invoked, 1 if not
+memory_agent_was_invoked() {
+    local session_file=$(get_session_file)
+    if [ -f "$session_file" ]; then
+        if grep -q '"memory_agent_invoked"[[:space:]]*:[[:space:]]*true' "$session_file" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Get total operations count
+get_total_operations() {
+    get_session_counter "total_operations"
+}
+
+# Get memory nudge count
+get_memory_nudge_count() {
+    get_session_counter "memory_nudge_count"
+}
+
+# Increment memory nudge count
+increment_memory_nudge() {
+    increment_session_counter "memory_nudge_count"
 }

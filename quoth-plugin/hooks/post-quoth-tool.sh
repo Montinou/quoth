@@ -51,6 +51,31 @@ main() {
     # Increment counter
     increment_tool_counter "$counter_key"
 
+    # Write to pending.md for relevant tools
+    local session_id="${CLAUDE_SESSION_ID:-}"
+    if [ -n "$session_id" ] && session_folder_exists "$session_id"; then
+        case "$counter_key" in
+            search_index)
+                local query=$(echo "$input" | grep -o '"query"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || echo "")
+                if [ -n "$query" ]; then
+                    add_pending_learning "$session_id" "Search: $counter_key" "Query: $query"
+                fi
+                ;;
+            read_doc|read_chunks)
+                local doc_id=$(echo "$input" | grep -o '"doc_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || echo "")
+                if [ -n "$doc_id" ]; then
+                    add_pending_learning "$session_id" "Read: $counter_key" "Document: $doc_id"
+                fi
+                ;;
+            propose_update)
+                local doc_id=$(echo "$input" | grep -o '"doc_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || echo "")
+                if [ -n "$doc_id" ]; then
+                    add_pending_learning "$session_id" "Proposal: $counter_key" "Document: $doc_id"
+                fi
+                ;;
+        esac
+    fi
+
     # Output empty - tracking only, no hint
     output_empty
 }

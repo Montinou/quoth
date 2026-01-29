@@ -47,4 +47,5 @@ supabase/.temp/
 
 # Agent
 .agent/
+.quoth/sessions/
 .claude

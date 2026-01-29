@@ -19,7 +19,7 @@ create_default_config() {
 
     cat > "$QUOTH_CONFIG_FILE" << EOF
 {
-  "version": "2.0",
+  "version": "2.1",
   "project_id": "$project_id",
   "project_slug": "$project_slug",
   "strictness": "$strictness",
@@ -32,7 +32,8 @@ create_default_config() {
   "gates": {
     "require_reasoning_before_edit": true,
     "require_quoth_search": true,
-    "require_error_documentation": false
+    "require_error_documentation": false,
+    "require_memory_context": true
   },
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

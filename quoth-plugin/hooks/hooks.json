@@ -35,7 +35,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|Bash",
+        "matcher": "Edit|Write|Bash|Read|Glob|Grep|Task",
         "hooks": [
           {
             "type": "command",
@@ -65,6 +65,15 @@
       }
     ],
     "SubagentStart": [
+      {
+        "matcher": "quoth-memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-agent-track.sh"
+          }
+        ]
+      },
       {
         "matcher": "!quoth-memory",
         "hooks": [

@@ -84,18 +84,45 @@ main() {
     # Detect intent
     local intent=$(detect_intent "$prompt_lower")
 
-    if [ -z "$intent" ]; then
-        output_empty
-        exit 0
+    # Update session with detected intent (if any)
+    if [ -n "$intent" ]; then
+        update_session_intent "$intent"
     fi
 
-    # Update session with detected intent
-    update_session_intent "$intent"
+    # Get intent-specific hint
+    local hint=""
+    if [ -n "$intent" ]; then
+        hint=$(get_intent_hint "$intent")
+    fi
 
-    # Get and output intent-specific hint
-    local hint=$(get_intent_hint "$intent")
-    if [ -n "$hint" ]; then
-        output_context "$hint"
+    # Check if we should nudge about quoth-memory (only if config exists)
+    local memory_nudge=""
+    if config_exists && ! memory_agent_was_invoked; then
+        local nudge_count=$(get_memory_nudge_count)
+        if [ "$nudge_count" -lt 2 ] 2>/dev/null; then
+            # Check strictness for nudge style
+            local strictness=$(get_strictness)
+            case "$strictness" in
+                blocking)
+                    memory_nudge=" [Quoth REQUIRED] Invoke quoth-memory agent before proceeding with code edits."
+                    increment_memory_nudge
+                    ;;
+                reminder)
+                    memory_nudge=" [Quoth] Consider invoking quoth-memory agent for project context."
+                    increment_memory_nudge
+                    ;;
+                off)
+                    # No nudge in off mode
+                    ;;
+            esac
+        fi
+    fi
+
+    # Combine hint + memory nudge
+    local full_msg="${hint}${memory_nudge}"
+
+    if [ -n "$full_msg" ]; then
+        output_context "$full_msg"
     else
         output_empty
     fi

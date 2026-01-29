@@ -63,6 +63,18 @@ quoth_search_performed() {
     return 1
 }
 
+# Check if memory context gate should trigger
+# Returns: 0 if gate should block (memory not loaded after threshold), 1 if ok
+memory_context_missing() {
+    local ops=$(get_total_operations)
+    if [ "$ops" -gt 3 ] 2>/dev/null; then
+        if ! memory_agent_was_invoked; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # ============================================================================
 # BLOCKING MODE - GATE ENFORCEMENT
 # ============================================================================
@@ -90,6 +102,13 @@ check_gates() {
         fi
     fi
 
+    # Gate 3: require_memory_context
+    if gate_enabled "require_memory_context"; then
+        if memory_context_missing; then
+            failures="${failures}Gate 3 FAILED: Memory context not loaded after 3+ operations. Invoke the quoth-memory subagent to load project context before editing.\n"
+        fi
+    fi
+
     echo -e "$failures"
 }
 
@@ -112,6 +131,10 @@ get_reminder_message() {
 
     if gate_enabled "require_reasoning_before_edit" && ! reasoning_documented; then
         msg="${msg}- Document reasoning in session log\n"
+    fi
+
+    if gate_enabled "require_memory_context" && memory_context_missing; then
+        msg="${msg}- Invoke quoth-memory subagent to load project context\n"
     fi
 
     echo -e "$msg"
@@ -194,6 +217,9 @@ main() {
                 needs_reminder=true
             fi
             if gate_enabled "require_reasoning_before_edit" && ! reasoning_documented; then
+                needs_reminder=true
+            fi
+            if gate_enabled "require_memory_context" && memory_context_missing; then
                 needs_reminder=true
             fi
 
