@@ -2,7 +2,7 @@
 
 /**
  * Knowledge Base Search Page
- * Semantic search UI with AI-powered answers using Gemini 2.0 Flash
+ * Semantic search UI with AI-powered answers using Mistral Small 3.1 (via Cloudflare Workers AI)
  * Enhanced with smooth animations and intuitive interactions
  */
 
@@ -145,7 +145,7 @@ export default function KnowledgeBasePage() {
             Knowledge Base
           </h1>
           <p className="text-gray-400 text-lg max-w-2xl">
-            Ask questions about your documentation — powered by AI semantic search and Gemini 2.0 Flash.
+            Ask questions about your documentation — powered by AI semantic search and intelligent summarization.
           </p>
         </div>
 
@@ -263,7 +263,7 @@ export default function KnowledgeBasePage() {
               </div>
               <div>
                 <h2 className="font-semibold text-white">AI Answer</h2>
-                <p className="text-xs text-gray-500">Powered by Gemini 2.0 Flash</p>
+                <p className="text-xs text-gray-500">Powered by Mistral Small 3.1</p>
               </div>
             </div>
 

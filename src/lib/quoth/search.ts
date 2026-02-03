@@ -203,7 +203,7 @@ export async function searchDocumentsWithMeta(
 
 function transformMatchToDocRef(match: MatchResult, score?: number): DocumentReference {
   return {
-    id: match.title,
+    id: match.document_id,
     title: match.title,
     type: inferDocumentType(match.file_path),
     path: match.file_path,
@@ -552,7 +552,7 @@ function transformKeywordResultToDocRef(row: Record<string, unknown>): DocumentR
   const metadata = (row.metadata || {}) as ChunkMetadata;
 
   return {
-    id: title,
+    id: (row.document_id as string) || (row.id as string),
     title,
     type: inferDocumentType(filePath),
     path: filePath,
@@ -595,7 +595,7 @@ function transformToQuothDocument(row: Record<string, unknown>): QuothDocument {
   const title = row.title as string;
 
   return {
-    id: title,
+    id: (row.id as string) || title,
     title,
     type: inferDocumentType(filePath),
     path: filePath,
