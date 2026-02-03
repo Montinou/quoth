@@ -36,7 +36,7 @@ const flashModel = genAI?.getGenerativeModel({
   }
 });
 
-// Cloudflare Workers AI endpoint (primary RAG answer generator)
+// Cloudflare Workers AI endpoint (primary RAG answer generator — Mistral Small 3.1 24B)
 const CF_RAG_WORKER_URL = process.env.CF_RAG_WORKER_URL;
 const CF_RAG_API_KEY = process.env.CF_RAG_API_KEY;
 

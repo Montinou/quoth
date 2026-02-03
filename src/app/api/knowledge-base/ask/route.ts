@@ -2,7 +2,7 @@
  * Knowledge Base AI Ask API
  * POST /api/knowledge-base/ask
  *
- * Performs RAG: vector search -> retrieve context -> Gemini 2.0 Flash answer
+ * Performs RAG: vector search -> retrieve context -> Mistral Small 3.1 answer (CF Workers AI)
  */
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
