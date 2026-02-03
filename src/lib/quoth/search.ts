@@ -7,6 +7,14 @@
 import { supabase, isSupabaseConfigured, type MatchResult, type ChunkByIdResult } from '../supabase';
 // AI module imported dynamically in search functions
 import type { DocumentReference, QuothDocument, ChunkReference, ChunkData, ChunkMetadata } from './types';
+import {
+  checkUsageLimit,
+  incrementUsage,
+  getTierForProject,
+  shouldRerank,
+  formatUsageFooter,
+  type UsageCheckResult,
+} from './tier';
 
 import { CohereClient } from "cohere-ai";
 
@@ -24,6 +32,23 @@ const cohere = process.env.COHERE_API_KEY
   ? new CohereClient({ token: process.env.COHERE_API_KEY }) 
   : null;
 
+/**
+ * Optional context for search operations (tier gating, genesis mode, etc.)
+ */
+export interface SearchContext {
+  isGenesis?: boolean;
+}
+
+/**
+ * Extended search result with tier metadata
+ */
+export interface SearchResultWithMeta {
+  results: DocumentReference[];
+  tierMessage?: string;       // Upgrade/limit message (shown once in footer)
+  usageInfo?: UsageCheckResult;
+  usedFallback?: boolean;     // True if keyword fallback was used
+}
+
 // Default search configuration
 const SEARCH_CONFIG = {
   initialFetchCount: 50,    // Fetch more for reranking
@@ -36,11 +61,27 @@ const SEARCH_CONFIG = {
 
 /**
  * Search documents using vector similarity + Cohere Rerank
+ * Respects tier limits: free tier falls back to keyword search when limit reached,
+ * and skips reranking unless in genesis mode.
  */
 export async function searchDocuments(
   query: string,
-  projectId: string
+  projectId: string,
+  context: SearchContext = {}
 ): Promise<DocumentReference[]> {
+  const meta = await searchDocumentsWithMeta(query, projectId, context);
+  return meta.results;
+}
+
+/**
+ * Search documents with tier metadata (usage info, fallback status, messages).
+ * Used by tools that want to show usage footers.
+ */
+export async function searchDocumentsWithMeta(
+  query: string,
+  projectId: string,
+  context: SearchContext = {}
+): Promise<SearchResultWithMeta> {
   debugLog('Starting search - Query:', query.slice(0, 100), 'ProjectID:', projectId);
 
   // Validate configuration
@@ -48,16 +89,34 @@ export async function searchDocuments(
     throw new Error('Supabase not configured.');
   }
 
+  // Check tier usage limit for semantic search
+  const usageCheck = await checkUsageLimit(projectId, 'semantic_search');
+
+  if (!usageCheck.allowed) {
+    debugLog('Semantic search limit reached, falling back to keyword search');
+    const fallbackResults = await keywordFallbackSearch(query, projectId);
+    return {
+      results: fallbackResults,
+      tierMessage: `🔒 Daily semantic search limit reached (${usageCheck.limit}/${usageCheck.limit}). Upgrade to Pro for unlimited searches. Using keyword fallback...`,
+      usageInfo: usageCheck,
+      usedFallback: true,
+    };
+  }
+
+  // Increment usage counter (semantic search is about to be used)
+  incrementUsage(projectId, 'semantic_search');
+
+  // Re-check for accurate remaining count after increment
+  const updatedUsage = await checkUsageLimit(projectId, 'semantic_search');
+
   // Generate embedding (now uses Jina or Gemini based on ai.ts config)
-  // Logic in ai.ts handles generating the right dimension (512 for Jina)
-  // Note: search_query task_type is handled inside generateQueryEmbedding if using Jina
   const queryEmbedding = await import('../ai').then(m => m.generateQueryEmbedding ? m.generateQueryEmbedding(query) : m.generateEmbedding(query));
   debugLog('Embedding generated:', queryEmbedding ? `${queryEmbedding.length} dimensions` : 'FAILED');
 
   // 1. Initial Retrieval (Vector Search)
   const { data: candidates, error } = await supabase.rpc('match_documents', {
     query_embedding: queryEmbedding,
-    match_threshold: 0.1, // Low threshold to get maximum recall for reranker
+    match_threshold: 0.1,
     match_count: SEARCH_CONFIG.initialFetchCount,
     filter_project_id: projectId,
   });
@@ -67,22 +126,31 @@ export async function searchDocuments(
   if (error) throw new Error(`Search failed: ${error.message}`);
   if (!candidates || candidates.length === 0) {
     debugLog('No candidates found - returning empty results');
-    return [];
+    return { results: [], usageInfo: updatedUsage };
   }
 
-  // If Cohere is not configured, return vector results directly (fallback)
-  if (!cohere) {
-    debugLog('Cohere API key not found. Skipping rerank step.');
-    return (candidates as MatchResult[])
-      .slice(0, 10)
-      .map(match => transformMatchToDocRef(match));
+  // Check if reranking should be used (tier + genesis context)
+  const useRerank = await shouldRerank(projectId, context.isGenesis);
+
+  // If Cohere is not configured or reranking is disabled for this tier, return vector results
+  if (!cohere || !useRerank) {
+    debugLog(
+      !cohere
+        ? 'Cohere API key not found. Skipping rerank step.'
+        : 'Reranking disabled for this tier. Returning vector results.'
+    );
+    return {
+      results: (candidates as MatchResult[])
+        .slice(0, 10)
+        .map(match => transformMatchToDocRef(match)),
+      usageInfo: updatedUsage,
+    };
   }
 
   // 2. Reranking using Cohere
   const docsForRerank = (candidates as MatchResult[]).map(doc => ({
-    id: doc.id.toString(), // assuming id is unique per chunk or record
+    id: doc.id.toString(),
     text: doc.content_chunk || "",
-    // Pass metadata to preserve context if needed
   }));
 
   debugLog('Reranking', candidates.length, 'candidates with Cohere (model: rerank-english-v3.0)');
@@ -92,7 +160,7 @@ export async function searchDocuments(
       model: "rerank-english-v3.0",
       query: query,
       documents: docsForRerank,
-      topN: SEARCH_CONFIG.maxMatchCount, // Fetch up to max, then filter dynamically
+      topN: SEARCH_CONFIG.maxMatchCount,
     });
 
     debugLog('Cohere rerank returned', rerankResponse.results.length, 'results');
@@ -109,7 +177,6 @@ export async function searchDocuments(
       const originalDoc = candidates[result.index];
       rerankedResults.push(transformMatchToDocRef(originalDoc, result.relevanceScore));
 
-      // Dynamic cutoff: stop after minMatchCount if relevance drops below threshold
       if (rerankedResults.length >= SEARCH_CONFIG.minMatchCount &&
           result.relevanceScore < SEARCH_CONFIG.highRelevanceThreshold) {
         debugLog('Dynamic cutoff reached at', rerankedResults.length, 'results (score:', result.relevanceScore, ')');
@@ -118,13 +185,19 @@ export async function searchDocuments(
     }
 
     debugLog('Returning', rerankedResults.length, 'reranked results');
-    return rerankedResults;
+    return {
+      results: rerankedResults,
+      usageInfo: updatedUsage,
+    };
 
   } catch (err) {
     console.error("[SEARCH] Reranking failed, falling back to vector results:", err);
-    return (candidates as MatchResult[])
-      .slice(0, 10)
-      .map(match => transformMatchToDocRef(match));
+    return {
+      results: (candidates as MatchResult[])
+        .slice(0, 10)
+        .map(match => transformMatchToDocRef(match)),
+      usageInfo: updatedUsage,
+    };
   }
 }
 
@@ -247,17 +320,32 @@ export async function buildSearchIndex(projectId: string) {
 /**
  * Search for chunks with IDs and truncated previews
  * Allows AI to decide which chunks to fetch fully
+ * Respects tier limits (same as searchDocuments).
  *
  * @param query - Search query
  * @param projectId - UUID of the project (enforces multi-tenant isolation)
+ * @param context - Optional search context (genesis mode, etc.)
  */
 export async function searchChunks(
   query: string,
-  projectId: string
+  projectId: string,
+  context: SearchContext = {}
 ): Promise<ChunkReference[]> {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured.');
   }
+
+  // Check tier usage limit for semantic search
+  const usageCheck = await checkUsageLimit(projectId, 'semantic_search');
+  if (!usageCheck.allowed) {
+    debugLog('Semantic search limit reached for chunk search, returning empty (keyword fallback not supported for chunks)');
+    // For chunk search, we can't easily do keyword fallback (different return type),
+    // so return empty with a log. The document-level search handles fallback.
+    return [];
+  }
+
+  // Increment usage
+  incrementUsage(projectId, 'semantic_search');
 
   // Generate embedding
   const queryEmbedding = await import('../ai').then(m =>
@@ -275,8 +363,10 @@ export async function searchChunks(
   if (error) throw new Error(`Search failed: ${error.message}`);
   if (!candidates || candidates.length === 0) return [];
 
-  // If Cohere is not configured, return vector results directly
-  if (!cohere) {
+  // Check if reranking should be used
+  const useRerank = await shouldRerank(projectId, context.isGenesis);
+
+  if (!cohere || !useRerank) {
     return (candidates as MatchResult[])
       .slice(0, 15)
       .map(match => transformMatchToChunkRef(match));
@@ -304,7 +394,6 @@ export async function searchChunks(
       const originalDoc = candidates[result.index];
       rerankedResults.push(transformMatchToChunkRef(originalDoc, result.relevanceScore));
 
-      // Dynamic cutoff: stop after minMatchCount if relevance drops below threshold
       if (rerankedResults.length >= SEARCH_CONFIG.minMatchCount &&
           result.relevanceScore < SEARCH_CONFIG.highRelevanceThreshold) {
         break;
@@ -392,6 +481,86 @@ export async function readChunks(
     total_chunks: row.total_chunks,
     metadata: row.metadata as ChunkMetadata,
   }));
+}
+
+// ============================================
+// Keyword Fallback Search (Free Tier)
+// ============================================
+
+/**
+ * Simple keyword-based search without embeddings or reranking.
+ * Used as fallback when semantic search limit is reached on free tier.
+ */
+async function keywordFallbackSearch(
+  query: string,
+  projectId: string
+): Promise<DocumentReference[]> {
+  debugLog('Keyword fallback search for:', query);
+
+  const terms = query
+    .split(/\s+/)
+    .filter(t => t.length > 2)
+    .map(t => t.replace(/[^a-zA-Z0-9]/g, '')); // strip special chars for tsquery
+
+  if (terms.length === 0) return [];
+
+  try {
+    // Use Postgres full-text search on content_chunk
+    const tsQuery = terms.join(' & ');
+    const { data, error } = await supabase
+      .from('document_chunks')
+      .select('id, document_id, title, file_path, content_chunk, metadata')
+      .eq('project_id', projectId)
+      .textSearch('content_chunk', tsQuery)
+      .limit(10);
+
+    if (error) {
+      debugLog('Full-text search failed, trying ilike fallback:', error.message);
+      // Fallback to ilike if textSearch isn't available
+      const { data: ilikeData } = await supabase
+        .from('document_chunks')
+        .select('id, document_id, title, file_path, content_chunk, metadata')
+        .eq('project_id', projectId)
+        .ilike('content_chunk', `%${terms[0]}%`)
+        .limit(10);
+
+      if (!ilikeData || ilikeData.length === 0) return [];
+
+      return ilikeData.map((row: Record<string, unknown>) =>
+        transformKeywordResultToDocRef(row)
+      );
+    }
+
+    if (!data || data.length === 0) return [];
+
+    return data.map((row: Record<string, unknown>) =>
+      transformKeywordResultToDocRef(row)
+    );
+  } catch (err) {
+    console.error('[SEARCH] Keyword fallback search failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Transform a keyword search result row to DocumentReference
+ */
+function transformKeywordResultToDocRef(row: Record<string, unknown>): DocumentReference {
+  const filePath = (row.file_path as string) || '';
+  const title = (row.title as string) || '';
+  const content = (row.content_chunk as string) || '';
+  const metadata = (row.metadata || {}) as ChunkMetadata;
+
+  return {
+    id: title,
+    title,
+    type: inferDocumentType(filePath),
+    path: filePath,
+    relevance: 0.5, // Fixed relevance for keyword results (no real score)
+    snippet: truncateSnippet(content, 400),
+    chunk_id: row.id as string,
+    chunk_index: metadata.chunk_index ?? 0,
+  };
 }
 
 // ============================================

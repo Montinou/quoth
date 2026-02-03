@@ -248,12 +248,33 @@ ${contextDocs}
 }
 
 /**
- * Generate an AI answer using Gemini 2.0 Flash based on retrieved context
+ * Generate an AI answer using Gemini 2.0 Flash based on retrieved context.
+ * Respects tier limits when projectId is provided.
+ *
+ * @param query - User's question
+ * @param contexts - Retrieved document contexts
+ * @param projectId - Optional project ID for tier limit checking
  */
 export async function generateRAGAnswer(
   query: string,
-  contexts: RAGContext[]
+  contexts: RAGContext[],
+  projectId?: string
 ): Promise<RAGAnswer> {
+  // Check tier limit if projectId is provided
+  if (projectId) {
+    const { checkUsageLimit, incrementUsage } = await import('./quoth/tier');
+    const usageCheck = await checkUsageLimit(projectId, 'rag_answer');
+
+    if (!usageCheck.allowed) {
+      return {
+        answer: `🔒 Daily AI answer limit reached (${usageCheck.limit}/${usageCheck.limit}). Upgrade to Pro for unlimited AI answers at triqual.dev/pro.\n\nHere are the raw search results instead — review the documents directly for your answer.`,
+        sources: contexts.slice(0, 5).map(ctx => ({ title: ctx.title, path: ctx.path })),
+        relatedQuestions: [],
+      };
+    }
+
+    incrementUsage(projectId, 'rag_answer');
+  }
   if (!flashModel) {
     throw new Error("Gemini API not configured. Set GEMINIAI_API_KEY or GOOGLE_API_KEY");
   }

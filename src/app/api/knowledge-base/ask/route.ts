@@ -100,7 +100,7 @@ export async function POST(request: Request) {
 
     // 4. Generate AI answer using Gemini 2.0 Flash
     console.log('[ASK API] Generating RAG answer with', contexts.length, 'contexts');
-    const ragAnswer = await generateRAGAnswer(query, contexts);
+    const ragAnswer = await generateRAGAnswer(query, contexts, membership.project_id);
     console.log('[ASK API] RAG answer generated successfully');
 
     return Response.json({

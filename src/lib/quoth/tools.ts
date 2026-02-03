@@ -10,10 +10,16 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AuthContext } from '../auth/mcp-auth';
 import {
   searchDocuments,
+  searchDocumentsWithMeta,
   readDocument,
   buildSearchIndex,
   readChunks,
 } from './search';
+import {
+  getTierForProject,
+  checkUsageLimit,
+  formatUsageFooter,
+} from './tier';
 import { supabase } from '../supabase';
 import { registerGenesisTools } from './genesis';
 import { syncDocument } from '../sync';
@@ -59,8 +65,13 @@ export function registerQuothTools(
       });
 
       try {
-        // Use authContext.project_id for multi-tenant isolation
-        const results = await searchDocuments(query, authContext.project_id);
+        // Use searchDocumentsWithMeta for tier-aware search
+        const searchMeta = await searchDocumentsWithMeta(query, authContext.project_id);
+        const results = searchMeta.results;
+
+        // Get tier info for usage footer
+        const tier = await getTierForProject(authContext.project_id);
+        const usageInfo = searchMeta.usageInfo;
 
         // Log activity (non-blocking)
         const avgRelevance = results.length > 0
@@ -122,11 +133,21 @@ export function registerQuothTools(
           patternsMatched: results.map(r => r.id),
         });
 
+        // Build usage footer for free tier
+        const usageFooter = usageInfo
+          ? formatUsageFooter(tier, usageInfo)
+          : '';
+
+        // Build fallback notice if keyword search was used
+        const fallbackNotice = searchMeta.tierMessage
+          ? `\n\n⚠️ ${searchMeta.tierMessage}`
+          : '';
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: `<search_results query="${query}" count="${results.length}">
+              text: `<search_results query="${query}" count="${results.length}"${searchMeta.usedFallback ? ' mode="keyword-fallback"' : ''}>
 ${formattedResults}
 </search_results>
 
@@ -137,7 +158,7 @@ Instructions:
 
 **Access Options:**
 - \`quoth_read_chunks\` with chunk_id(s) → fetch specific chunks (token-efficient)
-- \`quoth_read_doc\` with document path → fetch full document`,
+- \`quoth_read_doc\` with document path → fetch full document${fallbackNotice}${usageFooter}`,
             },
           ],
         };
