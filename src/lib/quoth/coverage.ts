@@ -1,117 +1,54 @@
 /**
  * Coverage Calculation Service
- * Document-type-based documentation coverage analysis
+ * Shows actual document distribution by type and categorization coverage.
  *
- * This calculates coverage based on actual document types stored in the database,
- * aligned with Genesis phases:
- * - Phase 1-2: Architecture (project-overview, tech-stack, repo-structure)
- * - Phase 3: Patterns (coding-conventions, testing-patterns)
- * - Phase 4: Contracts (api-schemas, database-models, shared-types)
+ * Coverage = percentage of documents that have a doc_type assigned.
+ * Uncategorized documents (doc_type = null) represent gaps.
  */
 
 import { supabase } from '../supabase';
 
 /**
- * Document types aligned with Genesis phases
+ * Document types stored in the database
  */
 export type DocType = 'architecture' | 'testing-pattern' | 'contract' | 'meta' | 'template';
 
 /**
- * Coverage per category - documented vs expected
+ * Count per document type category
  */
-interface CategoryCoverage {
-  documented: number;
-  expected: number;
+interface CategoryCount {
+  count: number;
 }
 
 /**
  * Coverage breakdown by document type
- * Aligned with actual doc_type column values
  */
 interface CoverageBreakdown {
-  architecture: CategoryCoverage;
-  testing_pattern: CategoryCoverage;
-  contract: CategoryCoverage;
-}
-
-interface UndocumentedItem {
-  category: keyof CoverageBreakdown;
-  suggestion: string;
-  expectedDoc: string;
+  architecture: CategoryCount;
+  testing_pattern: CategoryCount;
+  contract: CategoryCount;
+  meta: CategoryCount;
+  uncategorized: CategoryCount;
 }
 
 export interface CoverageResult {
   projectId: string;
-  totalDocumentable: number;
-  totalDocumented: number;
+  totalDocuments: number;
+  categorizedDocuments: number;
   coveragePercentage: number;
   breakdown: CoverageBreakdown;
-  undocumentedItems: UndocumentedItem[];
-  genesisDepth: 'minimal' | 'standard' | 'comprehensive' | 'unknown';
+  /** Kept for backward compat with coverage_snapshot table */
+  totalDocumentable: number;
+  totalDocumented: number;
 }
 
 /**
- * Expected documents per Genesis depth level
- * Based on Genesis v2.0 phases
- */
-const GENESIS_EXPECTATIONS = {
-  minimal: {
-    architecture: 3, // project-overview, tech-stack, repo-structure
-    testing_pattern: 0,
-    contract: 0,
-  },
-  standard: {
-    architecture: 3, // project-overview, tech-stack, repo-structure
-    testing_pattern: 2, // coding-conventions, testing-patterns
-    contract: 0,
-  },
-  comprehensive: {
-    architecture: 3, // project-overview, tech-stack, repo-structure
-    testing_pattern: 4, // coding-conventions, testing-patterns, error-handling, security-patterns
-    contract: 3, // api-schemas, database-models, shared-types
-  },
-} as const;
-
-/**
- * Expected document names per category (for undocumented suggestions)
- */
-const EXPECTED_DOCS: Record<keyof CoverageBreakdown, string[]> = {
-  architecture: ['project-overview.md', 'tech-stack.md', 'repo-structure.md'],
-  testing_pattern: ['coding-conventions.md', 'testing-patterns.md', 'error-handling.md', 'security-patterns.md'],
-  contract: ['api-schemas.md', 'database-models.md', 'shared-types.md'],
-};
-
-/**
- * Infer Genesis depth from existing document counts
- */
-function inferGenesisDepth(
-  architectureCount: number,
-  patternCount: number,
-  contractCount: number
-): 'minimal' | 'standard' | 'comprehensive' | 'unknown' {
-  // Comprehensive: has contracts
-  if (contractCount > 0) {
-    return 'comprehensive';
-  }
-  // Standard: has patterns but no contracts
-  if (patternCount > 0) {
-    return 'standard';
-  }
-  // Minimal: only architecture
-  if (architectureCount > 0) {
-    return 'minimal';
-  }
-  // Unknown: no documents
-  return 'unknown';
-}
-
-/**
- * Calculate documentation coverage for a project
- * Uses doc_type column for fast, accurate categorization
+ * Calculate documentation coverage for a project.
+ * Coverage = categorized documents / total documents.
  */
 export async function calculateCoverage(projectId: string): Promise<CoverageResult> {
   // Query documents grouped by doc_type for this project
-  const { data: typeCounts, error } = await supabase
+  const { data: docs, error } = await supabase
     .from('documents')
     .select('doc_type')
     .eq('project_id', projectId);
@@ -126,109 +63,41 @@ export async function calculateCoverage(projectId: string): Promise<CoverageResu
     testing_pattern: 0,
     contract: 0,
     meta: 0,
-    template: 0,
-    unknown: 0,
+    uncategorized: 0,
   };
 
-  for (const doc of typeCounts || []) {
+  for (const doc of docs || []) {
     const docType = doc.doc_type;
     if (docType === 'architecture') counts.architecture++;
     else if (docType === 'testing-pattern') counts.testing_pattern++;
     else if (docType === 'contract') counts.contract++;
     else if (docType === 'meta') counts.meta++;
-    else if (docType === 'template') counts.template++;
-    else counts.unknown++;
+    else counts.uncategorized++;
   }
 
-  // Infer Genesis depth based on what's documented
-  const genesisDepth = inferGenesisDepth(
-    counts.architecture,
-    counts.testing_pattern,
-    counts.contract
-  );
-
-  // Get expected counts for this depth (default to standard if unknown)
-  const expectedDepth = genesisDepth === 'unknown' ? 'standard' : genesisDepth;
-  const expectations = GENESIS_EXPECTATIONS[expectedDepth];
-
-  // Build breakdown
-  const breakdown: CoverageBreakdown = {
-    architecture: {
-      documented: counts.architecture,
-      expected: expectations.architecture,
-    },
-    testing_pattern: {
-      documented: counts.testing_pattern,
-      expected: expectations.testing_pattern,
-    },
-    contract: {
-      documented: counts.contract,
-      expected: expectations.contract,
-    },
-  };
-
-  // Calculate totals (only count categories with expected > 0)
-  const totalDocumentable = Object.values(breakdown).reduce(
-    (sum, cat) => sum + cat.expected,
-    0
-  );
-  const totalDocumented = Object.values(breakdown).reduce(
-    (sum, cat) => sum + Math.min(cat.documented, cat.expected),
-    0
-  );
+  const totalDocuments = docs?.length || 0;
+  const categorizedDocuments = totalDocuments - counts.uncategorized;
   const coveragePercentage =
-    totalDocumentable > 0 ? Math.round((totalDocumented / totalDocumentable) * 100) : 0;
+    totalDocuments > 0 ? Math.round((categorizedDocuments / totalDocuments) * 100) : 0;
 
-  // Generate undocumented suggestions
-  const undocumentedItems = generateUndocumentedSuggestions(breakdown);
+  const breakdown: CoverageBreakdown = {
+    architecture: { count: counts.architecture },
+    testing_pattern: { count: counts.testing_pattern },
+    contract: { count: counts.contract },
+    meta: { count: counts.meta },
+    uncategorized: { count: counts.uncategorized },
+  };
 
   return {
     projectId,
-    totalDocumentable,
-    totalDocumented,
+    totalDocuments,
+    categorizedDocuments,
     coveragePercentage,
     breakdown,
-    undocumentedItems,
-    genesisDepth,
+    // backward compat fields for snapshot table
+    totalDocumentable: totalDocuments,
+    totalDocumented: categorizedDocuments,
   };
-}
-
-/**
- * Generate suggestions for missing documentation
- */
-function generateUndocumentedSuggestions(
-  breakdown: CoverageBreakdown
-): UndocumentedItem[] {
-  const suggestions: UndocumentedItem[] = [];
-
-  for (const [category, coverage] of Object.entries(breakdown)) {
-    const categoryKey = category as keyof CoverageBreakdown;
-    const missing = coverage.expected - coverage.documented;
-
-    if (missing > 0) {
-      const expectedDocs = EXPECTED_DOCS[categoryKey];
-      const missingDocs = expectedDocs.slice(coverage.documented, coverage.expected);
-
-      for (const doc of missingDocs) {
-        suggestions.push({
-          category: categoryKey,
-          suggestion: getSuggestion(categoryKey),
-          expectedDoc: doc,
-        });
-      }
-    }
-  }
-
-  return suggestions.slice(0, 10); // Limit to top 10
-}
-
-function getSuggestion(category: keyof CoverageBreakdown): string {
-  const suggestions: Record<keyof CoverageBreakdown, string> = {
-    architecture: 'Document project structure and technology choices',
-    testing_pattern: 'Add testing and coding convention patterns',
-    contract: 'Create API and data model documentation',
-  };
-  return suggestions[category];
 }
 
 /**
@@ -242,8 +111,9 @@ export async function saveCoverageSnapshot(
     project_id: coverage.projectId,
     total_documentable: coverage.totalDocumentable,
     total_documented: coverage.totalDocumented,
+    coverage_percentage: coverage.coveragePercentage,
     breakdown: coverage.breakdown,
-    undocumented_items: coverage.undocumentedItems,
+    undocumented_items: [],
     scan_type: scanType,
   });
 
@@ -268,13 +138,23 @@ export async function getLatestCoverage(projectId: string): Promise<CoverageResu
     return null;
   }
 
+  // Handle both old-format (with documented/expected) and new-format (with count) snapshots
+  const breakdown = data.breakdown as Record<string, { count?: number; documented?: number; expected?: number }>;
+  const normalizedBreakdown: CoverageBreakdown = {
+    architecture: { count: breakdown.architecture?.count ?? breakdown.architecture?.documented ?? 0 },
+    testing_pattern: { count: breakdown.testing_pattern?.count ?? breakdown.testing_pattern?.documented ?? 0 },
+    contract: { count: breakdown.contract?.count ?? breakdown.contract?.documented ?? 0 },
+    meta: { count: breakdown.meta?.count ?? 0 },
+    uncategorized: { count: breakdown.uncategorized?.count ?? 0 },
+  };
+
   return {
     projectId: data.project_id,
+    totalDocuments: data.total_documentable ?? 0,
+    categorizedDocuments: data.total_documented ?? 0,
+    coveragePercentage: data.coverage_percentage ?? 0,
+    breakdown: normalizedBreakdown,
     totalDocumentable: data.total_documentable,
     totalDocumented: data.total_documented,
-    coveragePercentage: data.coverage_percentage,
-    breakdown: data.breakdown as CoverageBreakdown,
-    undocumentedItems: data.undocumented_items as UndocumentedItem[],
-    genesisDepth: 'unknown', // Not stored in snapshot, would need schema change
   };
 }

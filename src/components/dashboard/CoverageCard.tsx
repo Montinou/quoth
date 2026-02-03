@@ -2,45 +2,39 @@
 
 /**
  * Coverage Card Component
- * Displays documentation coverage metrics with visual breakdown
- * Aligned with Genesis phases and document types
+ * Displays actual document distribution by type and categorization coverage.
+ * Coverage = percentage of documents that have a doc_type assigned.
  */
 
 import { useState } from 'react';
 import {
   PieChart,
-  FileText,
-  AlertCircle,
   RefreshCw,
-  ChevronDown,
-  ChevronUp,
+  FileText,
   Layers,
+  Code2,
+  ShieldCheck,
+  BookOpen,
+  HelpCircle,
 } from 'lucide-react';
 
-interface CategoryCoverage {
-  documented: number;
-  expected: number;
+interface CategoryCount {
+  count: number;
 }
 
 interface CoverageBreakdown {
-  architecture: CategoryCoverage;
-  testing_pattern: CategoryCoverage;
-  contract: CategoryCoverage;
-}
-
-interface UndocumentedItem {
-  category: keyof CoverageBreakdown;
-  suggestion: string;
-  expectedDoc: string;
+  architecture: CategoryCount;
+  testing_pattern: CategoryCount;
+  contract: CategoryCount;
+  meta: CategoryCount;
+  uncategorized: CategoryCount;
 }
 
 interface CoverageData {
   coveragePercentage: number;
-  totalDocumentable: number;
-  totalDocumented: number;
+  totalDocuments: number;
+  categorizedDocuments: number;
   breakdown: CoverageBreakdown;
-  undocumentedItems: UndocumentedItem[];
-  genesisDepth?: 'minimal' | 'standard' | 'comprehensive' | 'unknown';
 }
 
 interface CoverageCardProps {
@@ -48,23 +42,45 @@ interface CoverageCardProps {
   initialCoverage?: CoverageData | null;
 }
 
-const CATEGORY_LABELS: Record<keyof CoverageBreakdown, string> = {
-  architecture: 'Architecture',
-  testing_pattern: 'Testing Patterns',
-  contract: 'Contracts',
-};
-
-const GENESIS_DEPTH_LABELS: Record<string, { label: string; color: string }> = {
-  minimal: { label: 'Minimal', color: 'text-gray-400' },
-  standard: { label: 'Standard', color: 'text-violet-ghost' },
-  comprehensive: { label: 'Comprehensive', color: 'text-emerald-muted' },
-  unknown: { label: 'Unknown', color: 'text-gray-500' },
+const CATEGORY_CONFIG: Record<
+  keyof CoverageBreakdown,
+  { label: string; icon: typeof FileText; color: string; barColor: string }
+> = {
+  architecture: {
+    label: 'Architecture',
+    icon: Layers,
+    color: 'text-violet-spectral',
+    barColor: 'bg-violet-spectral',
+  },
+  testing_pattern: {
+    label: 'Testing Patterns',
+    icon: Code2,
+    color: 'text-blue-400',
+    barColor: 'bg-blue-400',
+  },
+  contract: {
+    label: 'Contracts',
+    icon: ShieldCheck,
+    color: 'text-emerald-muted',
+    barColor: 'bg-emerald-muted',
+  },
+  meta: {
+    label: 'Meta',
+    icon: BookOpen,
+    color: 'text-amber-warning',
+    barColor: 'bg-amber-warning',
+  },
+  uncategorized: {
+    label: 'Uncategorized',
+    icon: HelpCircle,
+    color: 'text-gray-500',
+    barColor: 'bg-gray-500',
+  },
 };
 
 export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) {
   const [coverage, setCoverage] = useState<CoverageData | null>(initialCoverage || null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showUndocumented, setShowUndocumented] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleScan = async () => {
@@ -96,9 +112,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
     return 'bg-red-500';
   };
 
-  const getCategoryPercentage = (cat: CategoryCoverage): number => {
-    return cat.expected > 0 ? Math.round((cat.documented / cat.expected) * 100) : 0;
-  };
+  const totalDocs = coverage?.totalDocuments ?? 0;
 
   return (
     <div className="glass-panel rounded-2xl p-6">
@@ -110,7 +124,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
           </div>
           <div>
             <h3 className="text-lg font-bold text-white">Documentation Coverage</h3>
-            <p className="text-sm text-gray-500">Genesis-aligned analysis</p>
+            <p className="text-sm text-gray-500">Document categorization overview</p>
           </div>
         </div>
         <button
@@ -121,7 +135,6 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
             border border-violet-spectral/30 transition-all duration-300
             disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {/* Wrap SVG in div for hardware-accelerated animation */}
           <div className={isLoading ? 'animate-spin' : ''}>
             <RefreshCw className="w-4 h-4" />
           </div>
@@ -137,17 +150,6 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
 
       {coverage ? (
         <>
-          {/* Genesis Depth Indicator */}
-          {coverage.genesisDepth && coverage.genesisDepth !== 'unknown' && (
-            <div className="mb-4 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-gray-500" />
-              <span className="text-sm text-gray-500">Genesis Depth:</span>
-              <span className={`text-sm font-medium ${GENESIS_DEPTH_LABELS[coverage.genesisDepth]?.color || 'text-gray-400'}`}>
-                {GENESIS_DEPTH_LABELS[coverage.genesisDepth]?.label || 'Unknown'}
-              </span>
-            </div>
-          )}
-
           {/* Overall Coverage */}
           <div className="mb-6">
             <div className="flex items-end justify-between mb-2">
@@ -155,7 +157,7 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
                 {coverage.coveragePercentage}%
               </span>
               <span className="text-sm text-gray-500">
-                {coverage.totalDocumented}/{coverage.totalDocumentable} documented
+                {coverage.categorizedDocuments} of {coverage.totalDocuments} categorized
               </span>
             </div>
             <div className="h-2 rounded-full bg-charcoal overflow-hidden">
@@ -164,70 +166,42 @@ export function CoverageCard({ projectId, initialCoverage }: CoverageCardProps) 
                 style={{ width: `${coverage.coveragePercentage}%` }}
               />
             </div>
+            {coverage.breakdown.uncategorized.count > 0 && (
+              <p className="text-xs text-gray-500 mt-2">
+                {coverage.breakdown.uncategorized.count} document{coverage.breakdown.uncategorized.count !== 1 ? 's' : ''} without a doc_type — consider categorizing them
+              </p>
+            )}
           </div>
 
           {/* Category Breakdown */}
-          <div className="space-y-3 mb-6">
-            {Object.entries(coverage.breakdown).map(([key, value]) => {
-              const categoryKey = key as keyof CoverageBreakdown;
-              const percentage = getCategoryPercentage(value);
-              // Skip categories with 0 expected (not applicable for this depth)
-              if (value.expected === 0) return null;
-              return (
-                <div key={key} className="flex items-center gap-3">
-                  <span className="text-sm text-gray-400 w-32 truncate">
-                    {CATEGORY_LABELS[categoryKey]}
-                  </span>
-                  <div className="flex-1 h-1.5 rounded-full bg-charcoal overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${getProgressColor(percentage)}`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 w-16 text-right">
-                    {value.documented}/{value.expected}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          <div className="space-y-3">
+            {(Object.entries(coverage.breakdown) as [keyof CoverageBreakdown, CategoryCount][]).map(
+              ([key, value]) => {
+                if (value.count === 0) return null;
+                const config = CATEGORY_CONFIG[key];
+                const Icon = config.icon;
+                const percentage = totalDocs > 0 ? (value.count / totalDocs) * 100 : 0;
 
-          {/* Undocumented Items */}
-          {coverage.undocumentedItems.length > 0 && (
-            <div>
-              <button
-                onClick={() => setShowUndocumented(!showUndocumented)}
-                className="flex items-center gap-2 text-sm text-amber-warning hover:text-amber-warning/80 transition-colors"
-              >
-                <AlertCircle className="w-4 h-4" />
-                {coverage.undocumentedItems.length} missing document{coverage.undocumentedItems.length !== 1 ? 's' : ''}
-                {showUndocumented ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </button>
-
-              {showUndocumented && (
-                <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
-                  {coverage.undocumentedItems.map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-2 p-2 rounded-lg bg-charcoal/50 text-sm"
-                    >
-                      <FileText className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-gray-300 font-mono text-xs">
-                          {item.expectedDoc}
-                        </p>
-                        <p className="text-gray-500 text-xs">{item.suggestion}</p>
-                      </div>
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <Icon className={`w-4 h-4 ${config.color} shrink-0`} />
+                    <span className="text-sm text-gray-400 w-36 truncate">
+                      {config.label}
+                    </span>
+                    <div className="flex-1 h-1.5 rounded-full bg-charcoal overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${config.barColor}`}
+                        style={{ width: `${percentage}%` }}
+                      />
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                    <span className="text-xs text-gray-500 w-8 text-right font-mono">
+                      {value.count}
+                    </span>
+                  </div>
+                );
+              }
+            )}
+          </div>
         </>
       ) : (
         <div className="text-center py-8">

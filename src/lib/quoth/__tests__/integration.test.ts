@@ -112,11 +112,19 @@ describe('Phase 3 Insights Exports', () => {
     it('supports CoverageResult type', () => {
       // Type-safe variable assignment
       const result: CoverageResult = {
+        projectId: 'test-project',
         totalDocuments: 10,
-        documentedPatterns: 8,
+        categorizedDocuments: 8,
         coveragePercentage: 80,
-        missingAreas: ['api-contracts'],
-        recommendations: ['Add API documentation'],
+        breakdown: {
+          architecture: { count: 3 },
+          testing_pattern: { count: 2 },
+          contract: { count: 2 },
+          meta: { count: 1 },
+          uncategorized: { count: 2 },
+        },
+        totalDocumentable: 10,
+        totalDocumented: 8,
       };
       expect(result.coveragePercentage).toBe(80);
     });
