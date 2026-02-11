@@ -2,11 +2,13 @@
  * Quoth v3.0 Agent CRUD MCP Tools
  * Register, update, remove, list agents in an organization
  * Assign/unassign agents to projects
+ * Agent-to-agent messaging and task management
  *
  * Organization is derived from the authenticated project's organization_id
  */
 
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AuthContext } from '../auth/mcp-auth';
 import { supabase } from '../supabase';
@@ -555,6 +557,533 @@ The agent can now work on this project while retaining org-wide access.`,
 **Project:** ${project_id}
 
 The agent still has access to org-wide knowledge and messaging.`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ─── Tool 7: quoth_agent_message ────────────────────────────
+  server.registerTool(
+    'quoth_agent_message',
+    {
+      title: 'Send Message to Agent',
+      description:
+        'Send a targeted message to a specific agent in your organization',
+      inputSchema: {
+        to: z
+          .string()
+          .describe('Target agent name or UUID'),
+        message: z
+          .string()
+          .describe('Message content'),
+        type: z
+          .enum(['message', 'task', 'result', 'alert', 'knowledge', 'curator'])
+          .default('message')
+          .describe('Message type'),
+        priority: z
+          .enum(['low', 'normal', 'high', 'urgent'])
+          .default('normal')
+          .describe('Message priority'),
+        channel: z
+          .string()
+          .optional()
+          .describe('Optional channel/topic'),
+        reply_to: z
+          .string()
+          .uuid()
+          .optional()
+          .describe('Message ID to reply to'),
+      },
+    },
+    async (args) => {
+      const organizationId = await getOrganizationId(authContext.project_id);
+      const { to, message, type, priority, channel, reply_to } = args;
+
+      // Get current agent (from user_id in auth context or lookup by project)
+      // Assuming user_id maps to an agent, or fallback to a "human" agent
+      let fromAgentId: string;
+
+      // Try to find agent by user_id or create a default sender
+      const { data: fromAgent, error: fromError } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .or(
+          `metadata->>user_id.eq.${authContext.user_id},agent_name.eq.human`
+        )
+        .limit(1)
+        .single();
+
+      if (fromError || !fromAgent) {
+        // Fallback: use first active agent in org (or create human agent)
+        const { data: fallback } = await supabase
+          .from('agents')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('status', 'active')
+          .limit(1)
+          .single();
+
+        if (!fallback) {
+          throw new Error(
+            'No sender agent found. Register an agent first.'
+          );
+        }
+        fromAgentId = fallback.id;
+      } else {
+        fromAgentId = fromAgent.id;
+      }
+
+      // Lookup target agent (by name or UUID)
+      let toAgentId: string;
+
+      if (to.match(/^[0-9a-f-]{36}$/i)) {
+        // Already a UUID
+        toAgentId = to;
+      } else {
+        // Lookup by name
+        const { data: toAgent, error: toError } = await supabase
+          .from('agents')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('agent_name', to)
+          .eq('status', 'active')
+          .single();
+
+        if (toError) {
+          throw new Error(`Agent "${to}" not found or inactive`);
+        }
+        toAgentId = toAgent.id;
+      }
+
+      // Generate HMAC signature
+      const now = new Date().toISOString();
+      const signingSecret =
+        process.env.BUS_SIGNING_SECRET || 'default-secret';
+      const sigInput = `${fromAgentId}:${toAgentId}:${now}:${signingSecret}`;
+      const signature = createHash('sha256')
+        .update(sigInput)
+        .digest('hex')
+        .slice(0, 16);
+
+      // Insert message
+      const { data, error } = await supabase
+        .from('agent_messages')
+        .insert({
+          organization_id: organizationId,
+          from_agent_id: fromAgentId,
+          to_agent_id: toAgentId,
+          type: type || 'message',
+          payload: { message },
+          priority: priority || 'normal',
+          channel,
+          reply_to,
+          signature,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to send message: ${error.message}`);
+      }
+
+      await logActivity({
+        projectId: authContext.project_id,
+        userId: authContext.user_id,
+        eventType: 'agent_message_sent',
+        query: to,
+        toolName: 'quoth_agent_message',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `✅ Message sent to ${to}!
+
+**Message ID:** ${data.id}
+**Type:** ${type || 'message'}
+**Priority:** ${priority || 'normal'}
+${channel ? `**Channel:** ${channel}\n` : ''}**Status:** Pending delivery
+
+The recipient agent will receive this via Realtime push.`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ─── Tool 8: quoth_agent_inbox ──────────────────────────────
+  server.registerTool(
+    'quoth_agent_inbox',
+    {
+      title: 'Read Agent Inbox',
+      description:
+        'Retrieve messages sent to agents in your organization',
+      inputSchema: {
+        agent_id: z
+          .string()
+          .uuid()
+          .optional()
+          .describe('Agent UUID (or use agent_name)'),
+        agent_name: z
+          .string()
+          .optional()
+          .describe('Or specify by name'),
+        limit: z
+          .number()
+          .default(10)
+          .describe('Max messages to retrieve'),
+        status: z
+          .enum(['pending', 'delivered', 'read', 'failed', 'all'])
+          .default('pending')
+          .describe('Filter by message status'),
+        mark_read: z
+          .boolean()
+          .default(false)
+          .describe('Mark retrieved messages as read'),
+      },
+    },
+    async (args) => {
+      const organizationId = await getOrganizationId(authContext.project_id);
+      const { agent_id, agent_name, limit, status, mark_read } = args;
+
+      if (!agent_id && !agent_name) {
+        throw new Error('Must provide agent_id or agent_name');
+      }
+
+      // Lookup target agent
+      let targetAgentId = agent_id;
+      if (!targetAgentId) {
+        const { data: agent, error } = await supabase
+          .from('agents')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('agent_name', agent_name!)
+          .single();
+
+        if (error) {
+          throw new Error(`Agent "${agent_name}" not found`);
+        }
+        targetAgentId = agent.id;
+      }
+
+      // Query messages
+      let query = supabase
+        .from('agent_messages')
+        .select(
+          `
+          *,
+          from_agent:agents!from_agent_id(agent_name, display_name, instance)
+        `
+        )
+        .eq('to_agent_id', targetAgentId)
+        .order('created_at', { ascending: false })
+        .limit(limit || 10);
+
+      if (status !== 'all') {
+        query = query.eq('status', status);
+      }
+
+      const { data: messages, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to retrieve inbox: ${error.message}`);
+      }
+
+      if (!messages || messages.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `📭 Inbox is empty (status: ${status || 'all'})`,
+            },
+          ],
+        };
+      }
+
+      // Optionally mark as read
+      if (mark_read) {
+        const messageIds = messages.map((m) => m.id);
+        await supabase
+          .from('agent_messages')
+          .update({
+            status: 'read',
+            read_at: new Date().toISOString(),
+          })
+          .in('id', messageIds);
+      }
+
+      await logActivity({
+        projectId: authContext.project_id,
+        userId: authContext.user_id,
+        eventType: 'agent_inbox_read',
+        query: agent_name || agent_id || '',
+        toolName: 'quoth_agent_inbox',
+      });
+
+      // Format messages
+      const formatted = messages
+        .map((m: any) => {
+          const from =
+            m.from_agent?.display_name ||
+            m.from_agent?.agent_name ||
+            'unknown';
+          const instance = m.from_agent?.instance || '';
+          const msg = m.payload?.message || JSON.stringify(m.payload);
+
+          return `---
+**From:** ${from}${instance ? ` @ ${instance}` : ''}
+**Type:** ${m.type} | **Priority:** ${m.priority}
+**Status:** ${m.status}
+**Created:** ${m.created_at}
+${m.channel ? `**Channel:** ${m.channel}\n` : ''}
+**Message:**
+${msg}
+
+*ID: ${m.id}*`;
+        })
+        .join('\n\n');
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `📬 Inbox for ${agent_name || targetAgentId}
+
+**Total:** ${messages.length} message${messages.length !== 1 ? 's' : ''}
+${mark_read ? '✅ Marked as read\n' : ''}
+${formatted}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ─── Tool 9: quoth_task_create ──────────────────────────────
+  server.registerTool(
+    'quoth_task_create',
+    {
+      title: 'Create Agent Task',
+      description:
+        'Create a structured task for an agent in your organization',
+      inputSchema: {
+        assigned_to: z
+          .string()
+          .describe('Agent name or UUID to assign task to'),
+        title: z
+          .string()
+          .describe('Task title'),
+        description: z
+          .string()
+          .optional()
+          .describe('Detailed task description'),
+        priority: z
+          .number()
+          .default(5)
+          .describe('Priority (1=highest, 10=lowest). Default 5.'),
+        deadline: z
+          .string()
+          .optional()
+          .describe('Deadline (ISO 8601 timestamp)'),
+        payload: z
+          .record(z.any())
+          .optional()
+          .describe('Additional task data as JSON'),
+      },
+    },
+    async (args) => {
+      const organizationId = await getOrganizationId(authContext.project_id);
+      const { assigned_to, title, description, priority, deadline, payload } =
+        args;
+
+      // Get creator agent (same logic as message sender)
+      const { data: fromAgent } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .or(
+          `metadata->>user_id.eq.${authContext.user_id},agent_name.eq.human`
+        )
+        .limit(1)
+        .single();
+
+      const createdBy =
+        fromAgent?.id ||
+        (
+          await supabase
+            .from('agents')
+            .select('id')
+            .eq('organization_id', organizationId)
+            .eq('status', 'active')
+            .limit(1)
+            .single()
+        ).data?.id;
+
+      if (!createdBy) {
+        throw new Error('No creator agent found');
+      }
+
+      // Lookup assigned agent
+      let assignedToId: string;
+
+      if (assigned_to.match(/^[0-9a-f-]{36}$/i)) {
+        assignedToId = assigned_to;
+      } else {
+        const { data: agent, error } = await supabase
+          .from('agents')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('agent_name', assigned_to)
+          .eq('status', 'active')
+          .single();
+
+        if (error) {
+          throw new Error(`Agent "${assigned_to}" not found or inactive`);
+        }
+        assignedToId = agent.id;
+      }
+
+      // Insert task
+      const { data, error } = await supabase
+        .from('agent_tasks')
+        .insert({
+          organization_id: organizationId,
+          assigned_to: assignedToId,
+          created_by: createdBy,
+          title,
+          description,
+          priority: priority || 5,
+          deadline: deadline || null,
+          payload,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to create task: ${error.message}`);
+      }
+
+      await logActivity({
+        projectId: authContext.project_id,
+        userId: authContext.user_id,
+        eventType: 'agent_task_created',
+        query: assigned_to,
+        toolName: 'quoth_task_create',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `✅ Task created!
+
+**Task ID:** ${data.id}
+**Assigned to:** ${assigned_to}
+**Title:** ${title}
+**Priority:** ${priority || 5}
+${deadline ? `**Deadline:** ${deadline}\n` : ''}**Status:** pending
+
+The assigned agent can view this task in their task queue.`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ─── Tool 10: quoth_task_update ─────────────────────────────
+  server.registerTool(
+    'quoth_task_update',
+    {
+      title: 'Update Agent Task',
+      description:
+        'Update task status, result, or other fields',
+      inputSchema: {
+        task_id: z
+          .string()
+          .uuid()
+          .describe('Task UUID'),
+        status: z
+          .enum(['pending', 'in_progress', 'done', 'failed', 'cancelled'])
+          .optional()
+          .describe('New status'),
+        result: z
+          .record(z.any())
+          .optional()
+          .describe('Task result data (JSON)'),
+        priority: z
+          .number()
+          .optional()
+          .describe('Update priority'),
+        deadline: z
+          .string()
+          .optional()
+          .describe('Update deadline'),
+      },
+    },
+    async (args) => {
+      const organizationId = await getOrganizationId(authContext.project_id);
+      const { task_id, status, result, priority, deadline } = args;
+
+      const updates: any = {};
+
+      if (status) {
+        updates.status = status;
+
+        // Auto-set timestamps based on status
+        if (status === 'in_progress' && !updates.started_at) {
+          updates.started_at = new Date().toISOString();
+        }
+        if (
+          (status === 'done' || status === 'failed' || status === 'cancelled') &&
+          !updates.completed_at
+        ) {
+          updates.completed_at = new Date().toISOString();
+        }
+      }
+
+      if (result !== undefined) updates.result = result;
+      if (priority !== undefined) updates.priority = priority;
+      if (deadline !== undefined) updates.deadline = deadline;
+
+      if (Object.keys(updates).length === 0) {
+        throw new Error('No updates provided');
+      }
+
+      const { data, error } = await supabase
+        .from('agent_tasks')
+        .update(updates)
+        .eq('id', task_id)
+        .eq('organization_id', organizationId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to update task: ${error.message}`);
+      }
+
+      await logActivity({
+        projectId: authContext.project_id,
+        userId: authContext.user_id,
+        eventType: 'agent_task_updated',
+        query: task_id,
+        toolName: 'quoth_task_update',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `✅ Task updated!
+
+**Task ID:** ${task_id}
+**New Status:** ${data.status}
+**Updated fields:** ${Object.keys(updates).join(', ')}
+
+${data.completed_at ? `✅ Completed at: ${data.completed_at}` : ''}`,
           },
         ],
       };
