@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     title: 'Quoth Guide | Getting Started',
     description: 'Step-by-step guide to integrate Quoth with Claude Code, Claude Desktop, and MCP clients. OAuth authentication and API key setup.',
   },
-  alternates: { canonical: 'https://quoth.ai-innovation.site/guide' },
+  alternates: { canonical: 'https://quoth.triqual.dev/guide' },
 };
 
 export default function GuideLayout({ children }: { children: React.ReactNode }) {

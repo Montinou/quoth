@@ -22,7 +22,7 @@ import type { NextRequest } from 'next/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AuthContext } from '@/lib/auth/mcp-auth';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
 
 /**
  * Setup MCP server with tools and prompts

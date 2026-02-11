@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     title: 'Quoth Pricing | Plans for Every Team',
     description: 'Choose your Quoth plan. Free for individuals, Pro for teams, Enterprise for organizations requiring full control.',
   },
-  alternates: { canonical: 'https://quoth.ai-innovation.site/pricing' },
+  alternates: { canonical: 'https://quoth.triqual.dev/pricing' },
 };
 
 export default function PricingLayout({ children }: { children: React.ReactNode }) {

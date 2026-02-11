@@ -64,15 +64,15 @@ export function QuothEmailLayout({ preview, children }: QuothEmailLayoutProps) {
               Quoth - AI-Powered Knowledge Base Auditor
             </Text>
             <Text style={footerLinks}>
-              <Link href="https://quoth.ai-innovation.site" style={footerLink}>
+              <Link href="https://quoth.triqual.dev" style={footerLink}>
                 Website
               </Link>
               {' | '}
-              <Link href="https://quoth.ai-innovation.site/guide" style={footerLink}>
+              <Link href="https://quoth.triqual.dev/guide" style={footerLink}>
                 Documentation
               </Link>
               {' | '}
-              <Link href="mailto:support@ai-innovation.site" style={footerLink}>
+              <Link href="mailto:support@triqual.dev" style={footerLink}>
                 Support
               </Link>
             </Text>

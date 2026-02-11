@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     title: 'The Quoth Manifesto | Philosophy of Truth',
     description: 'Documentation-driven development philosophy. Why your docs should be the arbiter of truth between code and architecture.',
   },
-  alternates: { canonical: 'https://quoth.ai-innovation.site/manifesto' },
+  alternates: { canonical: 'https://quoth.triqual.dev/manifesto' },
 };
 
 export default function ManifestoLayout({ children }: { children: React.ReactNode }) {

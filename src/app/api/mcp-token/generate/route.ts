@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
       label: label.trim(),
     })
       .setProtectedHeader({ alg: 'HS256' })
-      .setIssuer(process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site')
+      .setIssuer(process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev')
       .setSubject(profile.default_project_id)
       .setAudience('mcp-server')
       .setIssuedAt(now)

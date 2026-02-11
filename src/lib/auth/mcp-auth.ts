@@ -158,7 +158,7 @@ async function verifyCustomJwt(token: string): Promise<AuthContext | null> {
   try {
     const secret = new TextEncoder().encode(jwtSecret);
     const { payload } = await jwtVerify(token, secret, {
-      issuer: process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site',
+      issuer: process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev',
       audience: 'mcp-server',
     });
 
@@ -227,7 +227,7 @@ export async function verifyMcpApiKey(token: string): Promise<AuthContext | null
     const decoded = decodeJwt(token);
 
     // Check if it's a custom JWT (has our specific issuer/audience)
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
     if (decoded.iss === appUrl && decoded.aud === 'mcp-server') {
       return verifyCustomJwt(token);
     }

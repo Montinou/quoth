@@ -329,7 +329,7 @@ export default function ProtocolPage() {
               </CodeLine>
               <CodeLine indent={3}>
                 <CodeKeyword type="string">"url"</CodeKeyword>:{" "}
-                <CodeKeyword type="string">"https://quoth.ai-innovation.site/api/mcp"</CodeKeyword>
+                <CodeKeyword type="string">"https://quoth.triqual.dev/api/mcp"</CodeKeyword>
               </CodeLine>
               <CodeLine indent={2}>{`}`}</CodeLine>
               <CodeLine indent={1}>{`}`}</CodeLine>

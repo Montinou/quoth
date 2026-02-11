@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     title: 'Quoth | The Living Source of Truth',
     description: 'The arbiter of truth between your code and its documentation. Stoic. Precise. Unyielding. Wisdom over Guesswork.',
   },
-  alternates: { canonical: 'https://quoth.ai-innovation.site/landing' },
+  alternates: { canonical: 'https://quoth.triqual.dev/landing' },
 };
 
 export default function LandingLayout({ children }: { children: React.ReactNode }) {

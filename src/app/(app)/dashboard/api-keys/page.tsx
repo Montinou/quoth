@@ -171,7 +171,7 @@ export default function ApiKeysPage() {
 {`{
   "mcpServers": {
     "quoth": {
-      "url": "${process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site'}/api/mcp",
+      "url": "${process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev'}/api/mcp",
       "headers": {
         "Authorization": "Bearer ${token}"
       }
@@ -183,7 +183,7 @@ export default function ApiKeysPage() {
                   onClick={() => copyToClipboard(`{
   "mcpServers": {
     "quoth": {
-      "url": "${process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site'}/api/mcp",
+      "url": "${process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev'}/api/mcp",
       "headers": {
         "Authorization": "Bearer ${token}"
       }

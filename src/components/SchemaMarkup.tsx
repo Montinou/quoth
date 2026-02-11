@@ -5,12 +5,12 @@ export function OrganizationSchema() {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'Quoth Labs',
-    url: 'https://quoth.ai-innovation.site',
-    logo: 'https://quoth.ai-innovation.site/icon.svg',
+    url: 'https://quoth.triqual.dev',
+    logo: 'https://quoth.triqual.dev/icon.svg',
     description: 'AI-driven documentation auditor and MCP server for documentation-driven development.',
     contactPoint: {
       '@type': 'ContactPoint',
-      email: 'hello@quoth.ai-innovation.site',
+      email: 'hello@quoth.triqual.dev',
       contactType: 'customer service',
     },
   };
@@ -32,7 +32,7 @@ export function SoftwareApplicationSchema() {
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Cross-platform',
     description: 'MCP server that enforces consistency between codebases and documentation. Stop AI hallucinations.',
-    url: 'https://quoth.ai-innovation.site',
+    url: 'https://quoth.triqual.dev',
     author: {
       '@type': 'Organization',
       name: 'Quoth Labs',

@@ -25,7 +25,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { randomUUID } from 'crypto';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
 
 /**
  * Token verification: handles both MCP API keys and OAuth tokens

@@ -10,7 +10,7 @@ import { WeeklyHealthReportEmail } from '@/emails/WeeklyHealthReportEmail';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Quoth Guardian <quoth@ai-innovation.site>';
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Quoth Guardian <quoth@triqual.dev>';
 const RECIPIENTS = (process.env.EMAIL_RECIPIENTS || '').split(',').filter(Boolean);
 
 export interface CommitResult {
@@ -326,7 +326,7 @@ export async function sendTeamInvitationEmail(params: TeamInvitationParams): Pro
     return;
   }
 
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
   const acceptUrl = `${APP_URL}/invitations/accept?token=${params.token}`;
 
   try {
@@ -392,7 +392,7 @@ export async function sendWeeklyHealthReport(params: WeeklyReportParams): Promis
     return;
   }
 
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
   const dashboardUrl = `${APP_URL}/dashboard/${params.projectSlug}`;
 
   try {

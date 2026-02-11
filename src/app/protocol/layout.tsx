@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     title: 'Quoth Protocol | MCP Tools & AI Personas',
     description: 'Complete reference for Quoth MCP tools and AI personas. Semantic search, document retrieval, and documentation proposals.',
   },
-  alternates: { canonical: 'https://quoth.ai-innovation.site/protocol' },
+  alternates: { canonical: 'https://quoth.triqual.dev/protocol' },
 };
 
 export default function ProtocolLayout({ children }: { children: React.ReactNode }) {

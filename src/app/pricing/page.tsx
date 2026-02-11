@@ -61,7 +61,7 @@ const tiers = [
       { text: "SLA guarantee", included: true },
     ],
     cta: "Contact Sales",
-    ctaHref: "mailto:hello@quoth.ai-innovation.site",
+    ctaHref: "mailto:hello@quoth.triqual.dev",
     highlighted: false,
   },
 ];
@@ -80,7 +80,7 @@ const faqs = [
   {
     question: "Can I self-host Quoth?",
     answer:
-      "Yes! Quoth is open source and can be self-hosted. The pricing tiers apply to our hosted service at quoth.ai-innovation.site. Self-hosting is free but requires your own infrastructure.",
+      "Yes! Quoth is open source and can be self-hosted. The pricing tiers apply to our hosted service at quoth.triqual.dev. Self-hosting is free but requires your own infrastructure.",
   },
   {
     question: "What's included in custom personas?",

@@ -90,7 +90,7 @@ ${formattedResults}
 
 **Public Demo Mode**
 - Results limited to 10 matches
-- Sign up at https://quoth.ai-innovation.site for full access`,
+- Sign up at https://quoth.triqual.dev for full access`,
             },
           ],
         };

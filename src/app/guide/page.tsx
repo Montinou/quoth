@@ -152,7 +152,7 @@ export default function GuidePage() {
                 <span className="text-gray-500"># Add to Claude Code with OAuth</span>
               </CodeLine>
               <CodeLine>
-                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
               </CodeLine>
               <br />
               <CodeLine>
@@ -191,7 +191,7 @@ export default function GuidePage() {
                 <span className="text-gray-500"># Add public demo endpoint</span>
               </CodeLine>
               <CodeLine>
-                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
+                <CodeKeyword>claude</CodeKeyword> mcp add --transport http quoth-public https://quoth.triqual.dev/api/mcp/public
               </CodeLine>
             </CodeBlock>
 
@@ -262,7 +262,7 @@ export default function GuidePage() {
               </CodeLine>
               <CodeLine indent={3}>
                 <CodeKeyword type="string">"url"</CodeKeyword>:{" "}
-                <CodeKeyword type="string">"https://quoth.ai-innovation.site/api/mcp"</CodeKeyword>,
+                <CodeKeyword type="string">"https://quoth.triqual.dev/api/mcp"</CodeKeyword>,
               </CodeLine>
               <CodeLine indent={3}>
                 <CodeKeyword type="string">"headers"</CodeKeyword>: {`{`}

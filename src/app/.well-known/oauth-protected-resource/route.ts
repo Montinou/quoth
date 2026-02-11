@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
 // Force Edge runtime for consistent behavior (serverless has issues in Next.js 16)
 export const runtime = 'edge';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

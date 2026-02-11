@@ -8,12 +8,12 @@ const openApiSpec = {
     description: 'Model Context Protocol server for documentation-driven development. Enforces consistency between codebases and documentation.',
     contact: {
       name: 'Quoth Labs',
-      url: 'https://quoth.ai-innovation.site',
-      email: 'hello@quoth.ai-innovation.site',
+      url: 'https://quoth.triqual.dev',
+      email: 'hello@quoth.triqual.dev',
     },
     license: { name: 'MIT' },
   },
-  servers: [{ url: 'https://quoth.ai-innovation.site', description: 'Production' }],
+  servers: [{ url: 'https://quoth.triqual.dev', description: 'Production' }],
   paths: {
     '/api/mcp': {
       post: {
