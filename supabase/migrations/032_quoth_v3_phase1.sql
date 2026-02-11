@@ -189,7 +189,7 @@ COMMENT ON TABLE curator_log IS
 
 -- 8a. Create organization for each existing project that doesn't have one
 INSERT INTO organizations (slug, name, owner_user_id)
-SELECT DISTINCT
+SELECT DISTINCT ON (p.slug)
   p.slug || '-org' AS slug,
   p.slug || ' Organization' AS name,
   pm.user_id AS owner_user_id
@@ -197,7 +197,7 @@ FROM projects p
 LEFT JOIN project_members pm ON p.id = pm.project_id AND pm.role = 'admin'
 WHERE p.organization_id IS NULL
   AND NOT EXISTS (SELECT 1 FROM organizations WHERE slug = p.slug || '-org')
-ORDER BY p.created_at;
+ORDER BY p.slug, p.created_at;
 
 -- 8b. Link projects to their organizations
 UPDATE projects p
