@@ -14,7 +14,13 @@ export type ActivityEventType =
   | 'pattern_match'
   | 'pattern_inject'
   | 'drift_detected'
-  | 'coverage_scan';
+  | 'coverage_scan'
+  // Agent management events (v3.0)
+  | 'agent_register'
+  | 'agent_update'
+  | 'agent_remove'
+  | 'agent_assign_project'
+  | 'agent_unassign_project';
 
 export interface ActivityLogParams {
   projectId: string;
