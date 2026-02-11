@@ -75,11 +75,11 @@ async function verifyWebhookSignature(
   try {
     // Extract the raw key from the svix secret format
     // Secret is: "v1,whsec_<base64>" — we need to base64-decode the part after "whsec_"
-    let secretBytes: Uint8Array;
+    let secretBytes: BufferSource;
     const whsecMatch = webhookSecret.match(/whsec_([A-Za-z0-9+/=]+)/);
     if (whsecMatch) {
       // Svix format: base64-decode the key part
-      secretBytes = new Uint8Array(Buffer.from(whsecMatch[1], 'base64'));
+      secretBytes = Buffer.from(whsecMatch[1], 'base64');
     } else {
       // Fallback: use raw string as key
       secretBytes = new TextEncoder().encode(webhookSecret);
