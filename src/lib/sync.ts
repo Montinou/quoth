@@ -104,7 +104,10 @@ export async function syncDocument(
   projectId: string,
   filePath: string,
   title: string,
-  content: string
+  content: string,
+  agentId?: string,
+  visibility?: 'project' | 'shared',
+  tags?: string[]
 ): Promise<{ 
   document: Document & { version?: number }; 
   chunksIndexed: number; 
@@ -142,6 +145,8 @@ export async function syncDocument(
       checksum,
       doc_type: docType,
       last_updated: new Date().toISOString(),
+      ...(visibility && { visibility }),
+      ...(agentId && { agent_id: agentId }),
     }, { onConflict: "project_id, file_path" })
     .select()
     .single();

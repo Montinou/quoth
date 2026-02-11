@@ -333,9 +333,12 @@ Instructions:
         new_content: z.string().max(500000).describe('The proposed new content (full Markdown with frontmatter, max 500KB)'),
         evidence_snippet: z.string().max(10000).describe('Code snippet or commit reference as evidence for the change (max 10KB)'),
         reasoning: z.string().max(5000).describe('Explanation of why this update is needed (max 5000 chars)'),
+        agent_id: z.string().max(200).optional().describe('Optional agent ID that created this update'),
+        source_instance: z.string().max(200).optional().describe('Optional source instance identifier'),
+        visibility: z.enum(['project', 'shared']).optional().describe('Optional visibility scope (project-local or org-shared)'),
       },
     },
-    async ({ doc_id, new_content, evidence_snippet, reasoning }) => {
+    async ({ doc_id, new_content, evidence_snippet, reasoning, agent_id, source_instance, visibility }) => {
       try {
         // 1. Check role-based access control
         if (authContext.role === 'viewer') {
@@ -376,7 +379,10 @@ Instructions:
               authContext.project_id,
               docPath,
               docTitle,
-              new_content
+              new_content,
+              agent_id,
+              visibility,
+              undefined // tags
             );
 
             return {
@@ -414,7 +420,9 @@ ${evidence_snippet.slice(0, 200)}${evidence_snippet.length > 200 ? '...' : ''}
               proposed_content: new_content,
               reasoning: `[NEW DOCUMENT] ${reasoning}`,
               evidence_snippet,
-              status: 'pending'
+              status: 'pending',
+              ...(agent_id && { agent_id }),
+              ...(source_instance && { source_instance }),
             })
             .select()
             .single();
@@ -453,7 +461,10 @@ ${reasoning}
             authContext.project_id,
             existingDoc.path,
             existingDoc.title,
-            new_content
+            new_content,
+            agent_id,
+            visibility,
+            undefined // tags
           );
 
           return {
@@ -487,7 +498,9 @@ ${reasoning}
             proposed_content: new_content,
             reasoning,
             evidence_snippet,
-            status: 'pending'
+            status: 'pending',
+            ...(agent_id && { agent_id }),
+            ...(source_instance && { source_instance }),
           })
           .select()
           .single();
