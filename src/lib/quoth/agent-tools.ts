@@ -110,6 +110,11 @@ export function registerAgentTools(
           .record(z.any())
           .optional()
           .describe('Additional metadata'),
+        project_slug: z
+          .string()
+          .regex(/^[a-z0-9-]+$/)
+          .optional()
+          .describe('Optional project slug. If provided and does not exist, will auto-create the project and assign agent as owner.'),
       },
     },
     async (args) => {
@@ -122,6 +127,7 @@ export function registerAgentTools(
         role,
         capabilities,
         metadata,
+        project_slug,
       } = args;
 
       const { data, error } = await supabase
@@ -144,6 +150,62 @@ export function registerAgentTools(
         throw new Error(`Failed to register agent: ${error.message}`);
       }
 
+      let projectInfo = '';
+
+      // Auto-create and assign project if project_slug provided
+      if (project_slug) {
+        // Check if project exists
+        const { data: existingProject } = await supabase
+          .from('projects')
+          .select('id, slug')
+          .eq('organization_id', organizationId)
+          .eq('slug', project_slug)
+          .single();
+
+        let projectId: string;
+
+        if (existingProject) {
+          // Project exists, just assign
+          projectId = existingProject.id;
+          projectInfo = `\n**Project:** Assigned to existing project \`${project_slug}\``;
+        } else {
+          // Project doesn't exist, create it
+          const { data: newProject, error: projectError } = await supabase
+            .from('projects')
+            .insert({
+              slug: project_slug,
+              github_repo: '',
+              is_public: false,
+              organization_id: organizationId,
+              owner_id: authContext.user_id,
+              created_by: authContext.user_id,
+            })
+            .select()
+            .single();
+
+          if (projectError) {
+            throw new Error(`Failed to create project: ${projectError.message}`);
+          }
+
+          projectId = newProject.id;
+          projectInfo = `\n**Project:** Auto-created and assigned to new project \`${project_slug}\` ✨`;
+        }
+
+        // Assign agent to project as owner
+        const { error: assignError } = await supabase
+          .from('agent_projects')
+          .insert({
+            agent_id: data.id,
+            project_id: projectId,
+            role: 'owner',
+            assigned_by: authContext.user_id,
+          });
+
+        if (assignError) {
+          throw new Error(`Failed to assign agent to project: ${assignError.message}`);
+        }
+      }
+
       await logActivity({
         projectId: authContext.project_id,
         userId: authContext.user_id,
@@ -162,7 +224,7 @@ export function registerAgentTools(
 **Name:** ${agent_name}
 **Display Name:** ${display_name || agent_name}
 **Instance:** ${instance}
-**Role:** ${role || 'unspecified'}
+**Role:** ${role || 'unspecified'}${projectInfo}
 
 This agent can now send/receive messages and create shared knowledge.`,
           },
