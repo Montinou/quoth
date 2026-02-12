@@ -27,12 +27,14 @@ interface Agent {
   display_name: string | null;
   instance: string;
   status: string;
+  [key: string]: unknown;
 }
 
 interface Project {
   id: string;
   slug: string;
   is_public: boolean;
+  [key: string]: unknown;
 }
 
 interface Assignment {

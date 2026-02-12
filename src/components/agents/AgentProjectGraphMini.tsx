@@ -19,11 +19,13 @@ interface Agent {
   id: string;
   agent_name: string;
   display_name: string | null;
+  [key: string]: unknown;
 }
 
 interface Project {
   id: string;
   slug: string;
+  [key: string]: unknown;
 }
 
 interface Assignment {
