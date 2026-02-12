@@ -20,6 +20,7 @@ import {
   Sparkles,
   PieChart,
   Bot,
+  Globe,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { signOutAction } from "@/app/auth/actions";
@@ -60,6 +61,12 @@ const mainNavItems = [
     href: "/knowledge-base",
     icon: BookOpen,
     description: "Search documentation",
+  },
+  {
+    title: "Shared Knowledge",
+    href: "/shared",
+    icon: Globe,
+    description: "Org-wide docs",
   },
   {
     title: "Proposals",
