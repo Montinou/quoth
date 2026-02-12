@@ -15,17 +15,6 @@ import {
 import '@xyflow/react/dist/style.css';
 import { Bot, FolderOpen } from 'lucide-react';
 
-type Agent = Record<string, unknown> & {
-  id: string;
-  agent_name: string;
-  display_name: string | null;
-};
-
-type Project = Record<string, unknown> & {
-  id: string;
-  slug: string;
-};
-
 interface Assignment {
   agent_id: string;
   project_id: string;
@@ -33,8 +22,8 @@ interface Assignment {
 }
 
 interface Props {
-  agents: Agent[];
-  projects: Project[];
+  agents: any[];
+  projects: any[];
   assignments: Assignment[];
 }
 
