@@ -74,7 +74,7 @@ export function AgentProjectGraphMini({ agents, projects, assignments }: Props) 
       id: `agent-${agent.id}`,
       type: 'agent',
       position: { x: 50, y: index * 60 + 50 },
-      data: agent,
+      data: { ...agent } as Record<string, unknown>,
       draggable: false,
     }));
 
@@ -82,7 +82,7 @@ export function AgentProjectGraphMini({ agents, projects, assignments }: Props) 
       id: `project-${project.id}`,
       type: 'project',
       position: { x: 300, y: index * 60 + 50 },
-      data: project,
+      data: { ...project } as Record<string, unknown>,
       draggable: false,
     }));
 

@@ -108,14 +108,14 @@ export function AgentProjectGraph({ agents, projects, assignments, organizationI
       id: `agent-${agent.id}`,
       type: 'agent',
       position: { x: 100, y: index * 150 + 100 },
-      data: { ...agent, isOnline: false }, // TODO: compute isOnline from last_seen_at
+      data: { ...agent, isOnline: false } as Record<string, unknown>,
     }));
 
     const projectNodes: Node[] = projects.map((project, index) => ({
       id: `project-${project.id}`,
       type: 'project',
       position: { x: 600, y: index * 150 + 100 },
-      data: project,
+      data: { ...project } as Record<string, unknown>,
     }));
 
     return [...agentNodes, ...projectNodes];
