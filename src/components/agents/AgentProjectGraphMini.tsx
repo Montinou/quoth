@@ -70,23 +70,23 @@ const nodeTypes = {
 
 export function AgentProjectGraphMini({ agents, projects, assignments }: Props) {
   const nodes: Node[] = useMemo(() => {
-    const agentNodes: Node[] = agents.map((agent, index) => ({
+    const agentNodes = agents.map((agent, index) => ({
       id: `agent-${agent.id}`,
       type: 'agent',
       position: { x: 50, y: index * 60 + 50 },
-      data: { ...agent } as Record<string, unknown>,
+      data: { ...agent },
       draggable: false,
     }));
 
-    const projectNodes: Node[] = projects.map((project, index) => ({
+    const projectNodes = projects.map((project, index) => ({
       id: `project-${project.id}`,
       type: 'project',
       position: { x: 300, y: index * 60 + 50 },
-      data: { ...project } as Record<string, unknown>,
+      data: { ...project },
       draggable: false,
     }));
 
-    return [...agentNodes, ...projectNodes];
+    return [...agentNodes, ...projectNodes] as Node[];
   }, [agents, projects]);
 
   const edges: Edge[] = useMemo(() => {

@@ -104,21 +104,21 @@ const nodeTypes = {
 export function AgentProjectGraph({ agents, projects, assignments, organizationId }: Props) {
   // Convert data to React Flow format
   const initialNodes: Node[] = useMemo(() => {
-    const agentNodes: Node[] = agents.map((agent, index) => ({
+    const agentNodes = agents.map((agent, index) => ({
       id: `agent-${agent.id}`,
       type: 'agent',
       position: { x: 100, y: index * 150 + 100 },
-      data: { ...agent, isOnline: false } as Record<string, unknown>,
+      data: { ...agent, isOnline: false },
     }));
 
-    const projectNodes: Node[] = projects.map((project, index) => ({
+    const projectNodes = projects.map((project, index) => ({
       id: `project-${project.id}`,
       type: 'project',
       position: { x: 600, y: index * 150 + 100 },
-      data: { ...project } as Record<string, unknown>,
+      data: { ...project },
     }));
 
-    return [...agentNodes, ...projectNodes];
+    return [...agentNodes, ...projectNodes] as Node[];
   }, [agents, projects]);
 
   const initialEdges: Edge[] = useMemo(() => {
