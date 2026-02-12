@@ -239,13 +239,6 @@ export function AgentProjectGraph({ agents, projects, assignments, organizationI
         />
         <Controls
           className="!bg-charcoal !border-violet-spectral/20"
-          style={{
-            button: {
-              backgroundColor: '#131a2b',
-              borderColor: '#1f2937',
-              color: '#fff',
-            },
-          }}
         />
         <MiniMap
           nodeColor={(node) => {
