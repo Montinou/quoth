@@ -24,6 +24,7 @@ interface AgentWithProjects {
     project_id: string;
     role: string;
     assigned_at: string;
+    assigned_by: string | null;
     projects: {
       id: string;
       slug: string;
@@ -63,6 +64,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
         project_id,
         role,
         assigned_at,
+        assigned_by,
         projects(
           id,
           slug,
@@ -201,7 +203,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
             </div>
           ) : (
             <div className="space-y-3">
-              {agentData.agent_projects.map(({ project_id, role, assigned_at, projects }) => (
+              {agentData.agent_projects.map(({ project_id, role, assigned_at, assigned_by, projects }) => (
                 <Link
                   key={project_id}
                   href={`/dashboard/${projects.slug}`}
@@ -216,6 +218,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
                         </p>
                         <p className="text-xs text-gray-500">
                           Assigned {new Date(assigned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {assigned_by && ` by ${assigned_by}`}
                         </p>
                       </div>
                     </div>
@@ -237,8 +240,44 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
           )}
         </div>
 
+        {/* Capabilities & Metadata */}
+        {(agentData.capabilities || agentData.metadata) && (
+          <div className="glass-panel rounded-2xl p-8 mt-8 animate-stagger stagger-2">
+            <h2 className="text-xl font-semibold text-white mb-6">Technical Details</h2>
+            
+            <div className="grid gap-6">
+              {agentData.capabilities && Object.keys(agentData.capabilities).length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-400 mb-3">Capabilities</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(agentData.capabilities).map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="px-3 py-2 rounded-lg bg-charcoal border border-violet-spectral/20 text-sm"
+                      >
+                        <span className="text-gray-400">{key}:</span>{' '}
+                        <span className="text-white font-mono">
+                          {typeof value === 'boolean' ? (value ? '✓' : '✗') : JSON.stringify(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {agentData.metadata && Object.keys(agentData.metadata).length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-400 mb-3">Metadata</h3>
+                  <pre className="p-4 rounded-lg bg-charcoal border border-graphite text-sm text-gray-300 overflow-x-auto">
+                    {JSON.stringify(agentData.metadata, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* TODO: Add Messaging section */}
-        {/* TODO: Add Capabilities/Metadata section */}
       </div>
     </div>
   );

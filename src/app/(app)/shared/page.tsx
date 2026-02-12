@@ -15,9 +15,16 @@ interface SharedDocument {
   project_id: string;
   version: number;
   last_updated: string;
+  doc_type: string | null;
+  tags: string[] | null;
+  agent_id: string | null;
   projects: {
     slug: string;
   };
+  agents?: {
+    agent_name: string;
+    display_name: string | null;
+  } | null;
 }
 
 export default async function SharedKnowledgePage() {
@@ -58,9 +65,16 @@ export default async function SharedKnowledgePage() {
       project_id,
       version,
       last_updated,
+      doc_type,
+      tags,
+      agent_id,
       projects!inner(
         slug,
         organization_id
+      ),
+      agents(
+        agent_name,
+        display_name
       )
     `)
     .eq('visibility', 'shared')
@@ -190,7 +204,7 @@ export default async function SharedKnowledgePage() {
                               {doc.title}
                             </h3>
                             <p className="text-sm text-gray-500 mb-2">{doc.file_path}</p>
-                            <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
                               <div className="flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5" />
                                 <span>
@@ -206,7 +220,29 @@ export default async function SharedKnowledgePage() {
                                   v{doc.version}
                                 </span>
                               )}
+                              {doc.doc_type && (
+                                <span className="px-2 py-0.5 rounded-md bg-violet-spectral/10 text-violet-ghost border border-violet-spectral/30">
+                                  {doc.doc_type}
+                                </span>
+                              )}
+                              {doc.agents && (
+                                <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                                  @{doc.agents.agent_name}
+                                </span>
+                              )}
                             </div>
+                            {doc.tags && doc.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {doc.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="px-2 py-0.5 rounded-md bg-charcoal text-gray-400 text-xs"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium">
