@@ -25,7 +25,7 @@ import { createHash } from "crypto";
 import { astChunker } from "../src/lib/quoth/chunking";
 
 // Dynamic import to ensure env vars are loaded first
-let generateJinaEmbedding: (text: string, task?: 'passage' | 'query') => Promise<number[]>;
+let generateJinaEmbedding: (text: string) => Promise<number[]>;
 
 // Configuration
 const KNOWLEDGE_BASE_PATH = "./quoth-knowledge-base";
