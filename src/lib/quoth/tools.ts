@@ -1160,8 +1160,10 @@ Modes:
       try {
         const targetProjectId = project_id || authContext.project_id;
 
-        // Check access
-        if (!public.has_project_access || !(await supabase.rpc('has_project_access', { target_project_id: targetProjectId }))) {
+        // Check access via RPC
+        const { data: hasAccess } = await supabase.rpc('has_project_access', { target_project_id: targetProjectId });
+        
+        if (!hasAccess) {
           return {
             content: [{
               type: 'text' as const,
