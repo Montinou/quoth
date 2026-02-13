@@ -17,7 +17,11 @@ Quoth exposes several tools through the Model Context Protocol (MCP). These tool
 | `quoth_list_templates` | List available templates | Yes |
 | `quoth_get_template` | Fetch template structure | Yes |
 | `quoth_read_chunks` | Fetch specific chunks | Yes |
+| `quoth_project_list` | List all accessible projects | Yes |
+| `quoth_project_read` | Get detailed project information | Yes |
 | `quoth_project_create` | Create new project in your organization | Yes |
+| `quoth_project_update` | Update project settings | Yes (admin) |
+| `quoth_project_delete` | Permanently delete project | Yes (admin) |
 | `quoth_genesis` | Bootstrap project documentation | Yes (admin) |
 
 ## quoth_guidelines
@@ -123,6 +127,68 @@ Submits a documentation update proposal with evidence.
 | `evidence_snippet` | string | Yes | Code or commit reference |
 | `reasoning` | string | Yes | Why this update is needed |
 
+## Project Management Tools
+
+Quoth provides a complete CRUD interface for managing projects via MCP.
+
+## quoth_project_list
+
+Lists all projects accessible to you, showing your role and the current active project.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `organization_id` | string (UUID) | No | Filter projects by organization |
+
+### Example
+
+```javascript
+// List all your projects
+quoth_project_list()
+
+// List projects in specific organization
+quoth_project_list({ organization_id: "..." })
+```
+
+### Response
+
+Shows:
+- Project slug and ID
+- Your role (admin/editor/viewer)
+- Visibility (public/private)
+- Creation date
+- Active project indicator (✓)
+
+## quoth_project_read
+
+Get detailed information about a specific project.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string (UUID) | No | Project ID (defaults to current active project) |
+
+### Example
+
+```javascript
+// Get current project details
+quoth_project_read()
+
+// Get specific project details
+quoth_project_read({ project_id: "..." })
+```
+
+### Response
+
+Includes:
+- Project settings (slug, visibility, GitHub repo, approval mode)
+- Organization name
+- Member count
+- Document count
+- Creation timestamp
+
 ## quoth_project_create
 
 Creates a new project in your organization. Automatically assigns you as project admin.
@@ -171,6 +237,85 @@ Returns project details including:
 2. **Invite Team:** Go to Settings → Members in the dashboard
 3. **Generate API Token:** Settings → API Tokens for MCP authentication
 4. **Switch Context:** Use `quoth_switch_account` if managing multiple projects
+
+## quoth_project_update
+
+Updates project settings. Requires admin role.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string (UUID) | No | Project ID (defaults to current active project) |
+| `slug` | string | No | New URL-safe slug |
+| `github_repo` | string | No | GitHub repository URL |
+| `is_public` | boolean | No | Public visibility |
+| `require_approval` | boolean | No | Require approval for doc updates |
+
+### Example
+
+```javascript
+// Make project public
+quoth_project_update({
+  is_public: true
+})
+
+// Change slug and disable approval
+quoth_project_update({
+  slug: "new-slug",
+  require_approval: false
+})
+```
+
+### Permissions
+
+- ❌ Requires admin role
+- ✅ Can update current or any project you admin
+- ✅ Slug must be globally unique
+
+### Response
+
+Shows updated settings and which fields were changed.
+
+## quoth_project_delete
+
+Permanently deletes a project and all associated data. **THIS CANNOT BE UNDONE.**
+
+<Callout type="warning">
+  **Irreversible Action:** All documents, embeddings, proposals, and memberships will be permanently deleted. There is no recovery.
+</Callout>
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string (UUID) | Yes | Project ID to delete |
+| `confirm_slug` | string | Yes | Project slug for confirmation (must match exactly) |
+
+### Example
+
+```javascript
+// Delete a project (requires exact slug confirmation)
+quoth_project_delete({
+  project_id: "abc123...",
+  confirm_slug: "my-project-slug"  // Must match exactly
+})
+```
+
+### Safety
+
+- ❌ Requires admin role
+- ✅ Requires explicit slug confirmation
+- ✅ Cascade deletes all project data
+- ⚠️ **NO UNDO** - data is permanently lost
+
+### What Gets Deleted
+
+- All documents
+- All embeddings and vector indexes
+- All pending proposals
+- All project memberships
+- Project settings
 
 ## quoth_genesis
 

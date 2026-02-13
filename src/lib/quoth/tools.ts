@@ -1060,7 +1060,172 @@ Modes:
     }
   );
 
-  // Tool 10: quoth_project_create (Create new project in user's organization)
+  // ============================================================
+  // Project CRUD Tools (v3.0)
+  // ============================================================
+
+  // Tool 10: quoth_project_list (List user's projects)
+  server.registerTool(
+    'quoth_project_list',
+    {
+      title: 'List Projects',
+      description:
+        'Lists all projects accessible to the authenticated user. Shows project details, role, and current active project.',
+      inputSchema: {
+        organization_id: z.string().uuid().optional().describe('Optional: filter by organization ID'),
+      },
+    },
+    async ({ organization_id }) => {
+      try {
+        if (!authContext.user_id) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: '❌ Authentication required.',
+            }],
+          };
+        }
+
+        // Get all projects where user is a member
+        let query = supabase
+          .from('project_members')
+          .select(`
+            role,
+            project:projects (
+              id,
+              slug,
+              github_repo,
+              is_public,
+              created_at,
+              organization_id
+            )
+          `)
+          .eq('user_id', authContext.user_id);
+
+        if (organization_id) {
+          query = query.eq('project.organization_id', organization_id);
+        }
+
+        const { data: memberships, error } = await query;
+
+        if (error) {
+          throw new Error(`Failed to list projects: ${error.message}`);
+        }
+
+        if (!memberships || memberships.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `You don't have access to any projects yet.\n\nUse \`quoth_project_create\` to create your first project.`,
+            }],
+          };
+        }
+
+        const projectsList = memberships.map((m: any) => {
+          const p = m.project;
+          const isActive = p.id === authContext.project_id;
+          const marker = isActive ? '✓ **ACTIVE**' : ' ';
+          return `${marker} **${p.slug}**\n   Project ID: \`${p.id}\`\n   Role: ${m.role}\n   Visibility: ${p.is_public ? 'Public' : 'Private'}\n   Created: ${new Date(p.created_at).toLocaleDateString()}`;
+        }).join('\n\n');
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `# Your Projects (${memberships.length})\n\n${projectsList}\n\n---\n\n**Active Project:** \`${authContext.project_id}\`\n\nUse \`quoth_switch_account\` to change active project.`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error listing projects: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 11: quoth_project_read (Get project details)
+  server.registerTool(
+    'quoth_project_read',
+    {
+      title: 'Get Project Details',
+      description:
+        'Retrieves detailed information about a specific project, including settings, member count, and document stats.',
+      inputSchema: {
+        project_id: z.string().uuid().optional().describe('Project ID (defaults to current active project)'),
+      },
+    },
+    async ({ project_id }) => {
+      try {
+        const targetProjectId = project_id || authContext.project_id;
+
+        // Check access
+        if (!public.has_project_access || !(await supabase.rpc('has_project_access', { target_project_id: targetProjectId }))) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `❌ Access denied. You don't have permission to view this project.`,
+            }],
+          };
+        }
+
+        // Get project details
+        const { data: project, error } = await supabase
+          .from('projects')
+          .select('*, organization:organizations(name)')
+          .eq('id', targetProjectId)
+          .single();
+
+        if (error || !project) {
+          throw new Error(`Project not found: ${error?.message || 'Unknown error'}`);
+        }
+
+        // Get member count
+        const { count: memberCount } = await supabase
+          .from('project_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('project_id', targetProjectId);
+
+        // Get document count
+        const { count: docCount } = await supabase
+          .from('documents')
+          .select('*', { count: 'exact', head: true })
+          .eq('project_id', targetProjectId);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `## Project: ${project.slug}
+
+**Project ID:** \`${project.id}\`
+**Organization:** ${project.organization?.name || 'N/A'}
+**Visibility:** ${project.is_public ? 'Public' : 'Private'}
+**GitHub Repo:** ${project.github_repo || 'None'}
+**Approval Mode:** ${project.require_approval ? 'Approval required' : 'Direct apply'}
+
+### Stats
+- **Documents:** ${docCount || 0}
+- **Members:** ${memberCount || 0}
+
+**Created:** ${new Date(project.created_at).toLocaleString()}
+
+---
+*Use \`quoth_project_update\` to modify settings.*`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error reading project: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 12: quoth_project_create (Create new project in user's organization)
   server.registerTool(
     'quoth_project_create',
     {
@@ -1224,6 +1389,210 @@ Modes:
           content: [{
             type: 'text' as const,
             text: `Error creating project: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 13: quoth_project_update (Update project settings)
+  server.registerTool(
+    'quoth_project_update',
+    {
+      title: 'Update Project',
+      description:
+        'Updates project settings. Requires admin role. Can update name, visibility, GitHub repo, and approval mode.',
+      inputSchema: {
+        project_id: z.string().uuid().optional().describe('Project ID (defaults to current active project)'),
+        slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/).optional().describe('New slug (URL-safe identifier)'),
+        github_repo: z.string().max(200).optional().describe('GitHub repository URL'),
+        is_public: z.boolean().optional().describe('Public visibility'),
+        require_approval: z.boolean().optional().describe('Require approval for documentation updates'),
+      },
+    },
+    async ({ project_id, slug, github_repo, is_public, require_approval }) => {
+      try {
+        const targetProjectId = project_id || authContext.project_id;
+
+        // Check admin permission
+        const { data: isAdmin } = await supabase.rpc('is_project_admin', { target_project_id: targetProjectId });
+
+        if (!isAdmin) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `❌ Permission denied. Only project admins can update settings.`,
+            }],
+          };
+        }
+
+        // Build update object
+        const updates: any = {};
+        if (slug !== undefined) updates.slug = slug;
+        if (github_repo !== undefined) updates.github_repo = github_repo;
+        if (is_public !== undefined) updates.is_public = is_public;
+        if (require_approval !== undefined) updates.require_approval = require_approval;
+
+        if (Object.keys(updates).length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No updates provided. Specify at least one field to update.`,
+            }],
+          };
+        }
+
+        // Check if new slug is taken (if changing slug)
+        if (slug) {
+          const { data: existing } = await supabase
+            .from('projects')
+            .select('id')
+            .eq('slug', slug)
+            .neq('id', targetProjectId)
+            .maybeSingle();
+
+          if (existing) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `❌ Slug "${slug}" is already taken. Choose a different slug.`,
+              }],
+            };
+          }
+        }
+
+        // Apply updates
+        const { data: project, error } = await supabase
+          .from('projects')
+          .update(updates)
+          .eq('id', targetProjectId)
+          .select('slug, is_public, github_repo, require_approval')
+          .single();
+
+        if (error) {
+          throw new Error(`Failed to update project: ${error.message}`);
+        }
+
+        // Log activity
+        logActivity({
+          projectId: targetProjectId,
+          userId: authContext.user_id,
+          eventType: 'update',
+          query: `project:update`,
+          resultCount: 1,
+          toolName: 'quoth_project_update',
+        });
+
+        const changedFields = Object.keys(updates).join(', ');
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `## ✅ Project Updated
+
+**Updated fields:** ${changedFields}
+
+**Current Settings:**
+- Slug: \`${project.slug}\`
+- Visibility: ${project.is_public ? 'Public' : 'Private'}
+- GitHub Repo: ${project.github_repo || 'None'}
+- Approval Mode: ${project.require_approval ? 'Required' : 'Direct apply'}
+
+---
+*Changes applied successfully.*`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error updating project: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Tool 14: quoth_project_delete (Delete project)
+  server.registerTool(
+    'quoth_project_delete',
+    {
+      title: 'Delete Project',
+      description:
+        'Permanently deletes a project and all associated data (documents, embeddings, proposals). Requires admin role. THIS ACTION CANNOT BE UNDONE.',
+      inputSchema: {
+        project_id: z.string().uuid().describe('Project ID to delete (required for safety)'),
+        confirm_slug: z.string().describe('Project slug to confirm deletion (must match exactly)'),
+      },
+    },
+    async ({ project_id, confirm_slug }) => {
+      try {
+        // Check admin permission
+        const { data: isAdmin } = await supabase.rpc('is_project_admin', { target_project_id: project_id });
+
+        if (!isAdmin) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `❌ Permission denied. Only project admins can delete projects.`,
+            }],
+          };
+        }
+
+        // Get project details for confirmation
+        const { data: project, error: fetchError } = await supabase
+          .from('projects')
+          .select('slug')
+          .eq('id', project_id)
+          .single();
+
+        if (fetchError || !project) {
+          throw new Error(`Project not found: ${fetchError?.message || 'Unknown error'}`);
+        }
+
+        // Verify slug confirmation
+        if (project.slug !== confirm_slug) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `❌ Confirmation failed. The provided slug "${confirm_slug}" does not match the project slug "${project.slug}".\n\nTo delete this project, you must provide the exact slug: \`${project.slug}\``,
+            }],
+          };
+        }
+
+        // Delete project (cascade will handle documents, embeddings, etc.)
+        const { error: deleteError } = await supabase
+          .from('projects')
+          .delete()
+          .eq('id', project_id);
+
+        if (deleteError) {
+          throw new Error(`Failed to delete project: ${deleteError.message}`);
+        }
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `## ✅ Project Deleted
+
+**Project:** \`${project.slug}\`
+**Project ID:** \`${project_id}\`
+
+All associated data has been permanently removed:
+- ✓ Documents
+- ✓ Embeddings
+- ✓ Proposals
+- ✓ Memberships
+
+---
+*This action cannot be undone. The project is gone.*`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error deleting project: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
         };
       }
