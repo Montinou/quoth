@@ -1343,7 +1343,7 @@ Modes:
         logActivity({
           projectId: project.id,
           userId: authContext.user_id,
-          eventType: 'create',
+          eventType: 'project_create',
           query: `project:${slug}`,
           resultCount: 1,
           toolName: 'quoth_project_create',
@@ -1477,7 +1477,7 @@ Modes:
         logActivity({
           projectId: targetProjectId,
           userId: authContext.user_id,
-          eventType: 'update',
+          eventType: 'project_update',
           query: `project:update`,
           resultCount: 1,
           toolName: 'quoth_project_update',

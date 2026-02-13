@@ -15,6 +15,10 @@ export type ActivityEventType =
   | 'pattern_inject'
   | 'drift_detected'
   | 'coverage_scan'
+  // Project management events (v3.0)
+  | 'project_create'
+  | 'project_update'
+  | 'project_delete'
   // Agent management events (v3.0)
   | 'agent_register'
   | 'agent_update'
