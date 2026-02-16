@@ -661,8 +661,13 @@ The agent still has access to org-wide knowledge and messaging.`,
     {
       title: 'Send Message to Agent',
       description:
-        'Send a targeted message to a specific agent in your organization',
+        'Send a targeted message to a specific agent in your organization. ' +
+        'IMPORTANT: Always specify "from" with your agent name so the message is signed correctly.',
       inputSchema: {
+        from: z
+          .string()
+          .optional()
+          .describe('Sender agent name or UUID. RECOMMENDED: always specify this so the correct signing key is used.'),
         to: z
           .string()
           .describe('Target agent name or UUID'),
@@ -690,51 +695,76 @@ The agent still has access to org-wide knowledge and messaging.`,
     },
     async (args) => {
       const organizationId = await getOrganizationId(authContext.project_id);
-      const { to, message, type, priority, channel, reply_to } = args;
+      const { from, to, message, type, priority, channel, reply_to } = args;
 
-      // Get current agent (from user_id in auth context or lookup by project)
-      // Assuming user_id maps to an agent, or fallback to a "human" agent
+      // Resolve sender agent
       let fromAgentId: string;
+      let fromAgentKey: string | null = null;
 
-      // Try to find agent by user_id or create a default sender
-      const { data: fromAgent, error: fromError } = await supabase
-        .from('agents')
-        .select('id')
-        .eq('organization_id', organizationId)
-        .or(
-          `metadata->>user_id.eq.${authContext.user_id},agent_name.eq.human`
-        )
-        .limit(1)
-        .single();
-
-      if (fromError || !fromAgent) {
-        // Fallback: use first active agent in org (or create human agent)
-        const { data: fallback } = await supabase
+      if (from) {
+        // Explicit sender specified — look up by name or UUID
+        if (from.match(/^[0-9a-f-]{36}$/i)) {
+          const { data: agent, error } = await supabase
+            .from('agents')
+            .select('id, signing_key')
+            .eq('id', from)
+            .eq('organization_id', organizationId)
+            .single();
+          if (error || !agent) throw new Error(`Sender agent "${from}" not found`);
+          fromAgentId = agent.id;
+          fromAgentKey = agent.signing_key;
+        } else {
+          const { data: agent, error } = await supabase
+            .from('agents')
+            .select('id, signing_key')
+            .eq('agent_name', from)
+            .eq('organization_id', organizationId)
+            .single();
+          if (error || !agent) throw new Error(`Sender agent "${from}" not found`);
+          fromAgentId = agent.id;
+          fromAgentKey = agent.signing_key;
+        }
+      } else {
+        // Legacy fallback: try to find agent by user_id or "human"
+        const { data: fromAgent } = await supabase
           .from('agents')
-          .select('id')
+          .select('id, signing_key')
           .eq('organization_id', organizationId)
-          .eq('status', 'active')
+          .or(
+            `metadata->>user_id.eq.${authContext.user_id},agent_name.eq.human`
+          )
           .limit(1)
           .single();
 
-        if (!fallback) {
-          throw new Error(
-            'No sender agent found. Register an agent first.'
-          );
+        if (fromAgent) {
+          fromAgentId = fromAgent.id;
+          fromAgentKey = fromAgent.signing_key;
+        } else {
+          // Fallback: use first active agent in org
+          const { data: fallback } = await supabase
+            .from('agents')
+            .select('id, signing_key')
+            .eq('organization_id', organizationId)
+            .eq('status', 'active')
+            .limit(1)
+            .single();
+
+          if (!fallback) {
+            throw new Error(
+              'No sender agent found. Specify "from" parameter or register an agent first.'
+            );
+          }
+          fromAgentId = fallback.id;
+          fromAgentKey = fallback.signing_key;
         }
-        fromAgentId = fallback.id;
-      } else {
-        fromAgentId = fromAgent.id;
       }
 
       // Lookup target agent (by name or UUID)
       let toAgentId: string;
 
       if (to.match(/^[0-9a-f-]{36}$/i)) {
-        // Already a UUID
         toAgentId = to;
       } else {
-        // Lookup by name
         const { data: toAgent, error: toError } = await supabase
           .from('agents')
           .select('id')
@@ -749,13 +779,14 @@ The agent still has access to org-wide knowledge and messaging.`,
         toAgentId = toAgent.id;
       }
 
-      // Generate created_at timestamp for signature
-      const createdAt = new Date().toISOString();
+      // Generate signature using legacy format (key@timestamp)
+      // This matches quoth-send.sh and is verified by agent-bus-listener
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = fromAgentKey
+        ? `${fromAgentKey}@${timestamp}`
+        : `unsigned@${timestamp}`;
+
       const payload = { message };
-      
-      // Generate HMAC signature: from:to:payload:timestamp
-      const messageText = `${fromAgentId}:${toAgentId}:${JSON.stringify(payload)}:${createdAt}`;
-      const signature = await generateSignature(fromAgentId, messageText);
 
       // Insert message
       const { data, error } = await supabase
@@ -771,7 +802,6 @@ The agent still has access to org-wide knowledge and messaging.`,
           reply_to,
           signature,
           status: 'pending',
-          created_at: createdAt,
         })
         .select()
         .single();
@@ -794,6 +824,7 @@ The agent still has access to org-wide knowledge and messaging.`,
             type: 'text' as const,
             text: `✅ Message sent to ${to}!
 
+**From:** ${from || fromAgentId}
 **Message ID:** ${data.id}
 **Type:** ${type || 'message'}
 **Priority:** ${priority || 'normal'}
