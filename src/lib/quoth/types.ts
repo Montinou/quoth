@@ -159,7 +159,17 @@ export interface ChunkData {
  * Input schema for quoth_read_chunks tool
  */
 export const ReadChunksInputSchema = z.object({
-  chunk_ids: z.array(z.string())
-    .min(1).max(20)
-    .describe('Array of chunk IDs from search results (1-20 chunks)'),
+  chunk_ids: z.preprocess(
+    (val) => {
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return val; // Will fail validation with clear error
+        }
+      }
+      return val;
+    },
+    z.array(z.string()).min(1).max(20)
+  ).describe('Array of chunk IDs from search results (1-20 chunks)'),
 });

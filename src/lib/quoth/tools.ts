@@ -807,9 +807,19 @@ ${content}
       description:
         'Fetches full content of specific chunks by their IDs. Use chunk IDs from quoth_search_chunks results. Supports batch retrieval (1-20 chunks per call).',
       inputSchema: {
-        chunk_ids: z.array(z.string())
-          .min(1).max(20)
-          .describe('Array of chunk IDs from search results (1-20 chunks)'),
+        chunk_ids: z.preprocess(
+          (val) => {
+            if (typeof val === 'string') {
+              try {
+                return JSON.parse(val);
+              } catch {
+                return val; // Will fail validation with clear error
+              }
+            }
+            return val;
+          },
+          z.array(z.string()).min(1).max(20)
+        ).describe('Array of chunk IDs from search results (1-20 chunks)'),
       },
     },
     async ({ chunk_ids }) => {
