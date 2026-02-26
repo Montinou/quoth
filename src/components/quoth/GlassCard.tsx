@@ -21,6 +21,9 @@ import {
   Brain,
   Bot,
   GitBranch,
+  Network,
+  Workflow,
+  Users,
 } from "lucide-react";
 
 /**
@@ -38,6 +41,9 @@ const ICON_MAP = {
   brain: Brain,
   bot: Bot,
   "git-branch": GitBranch,
+  network: Network,
+  workflow: Workflow,
+  users: Users,
 } as const;
 
 export type GlassCardIconName = keyof typeof ICON_MAP;
