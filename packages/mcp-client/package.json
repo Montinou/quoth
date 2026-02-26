@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/quoth-labs/quoth-mcp"
   },
-  "homepage": "https://quoth.ai-innovation.site",
+  "homepage": "https://quoth.quoth.triqual.dev",
   "bin": {
     "quoth": "./bin/cli.js"
   },

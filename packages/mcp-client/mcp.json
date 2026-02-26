@@ -3,10 +3,10 @@
   "description": "The Living Source of Truth - AI-driven documentation auditor that enforces consistency between code and docs",
   "vendor": "Quoth Labs",
   "version": "0.1.0",
-  "homepage": "https://quoth.ai-innovation.site",
+  "homepage": "https://quoth.quoth.triqual.dev",
   "server": {
     "type": "http",
-    "url": "https://quoth.ai-innovation.site/api/mcp/public"
+    "url": "https://quoth.quoth.triqual.dev/api/mcp/public"
   },
   "capabilities": {
     "tools": [

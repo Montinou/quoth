@@ -1,5 +1,5 @@
 /* =============================================================================
-   QUOTH LANDING PAGE v2.0 - Elevated Design (SERVER COMPONENT)
+   QUOTH LANDING PAGE v3.0 - Multi-Agent Knowledge Platform (SERVER COMPONENT)
    Enhanced animations, atmospheric depth, refined interactions
 
    Converted to Server Component for ~50KB JS bundle reduction and faster TTI.
@@ -8,7 +8,7 @@
    Note: Middleware handles redirects for authenticated users to /dashboard
    ============================================================================= */
 
-import { Sparkles } from "lucide-react";
+import { Sparkles, Network, Brain, Workflow, Users } from "lucide-react";
 import Link from "next/link";
 import { Navbar, Footer, GlassCard, FlowchartShowcase } from "@/components/quoth";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,7 @@ const Hero = () => (
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-spectral opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-violet-spectral" />
         </span>
-        Model Context Protocol Server
+        Multi-Agent Knowledge Platform v3.0
       </div>
 
       {/* Main Title */}
@@ -82,9 +82,9 @@ const Hero = () => (
         className="animate-fade-in-scale font-light text-base sm:text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-12 leading-relaxed"
         style={{ animationDelay: "0.3s" }}
       >
-        Knowledge that outlives the session.
+        Shared knowledge base + Agent-to-Agent Bus.
         <span className="block mt-2 text-gray-500">
-          Wisdom that grows with every conversation.
+          The first MCP server that lets your agents talk to each other across instances.
         </span>
       </p>
 
@@ -143,14 +143,14 @@ const GenesisDemo = () => {
             className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
             style={{ fontFamily: "var(--font-cinzel), serif" }}
           >
-            Memory That Learns With You
+            Agent-to-Agent Communication
           </h2>
           <p
             className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto"
             style={{ animationDelay: "0.1s" }}
           >
-            Initialize AI Memory in seconds. Every session captures knowledge.
-            End-of-session prompts let you promote learnings to persistent storage.
+            Your agents on AWS, Mac, and WSL2 can now talk to each other in real-time.
+            Send messages, assign tasks, and share knowledge across your entire organization.
           </p>
         </div>
 
@@ -174,7 +174,7 @@ const GenesisDemo = () => {
 
               {/* Terminal title */}
               <div className="text-xs text-gray-500 font-medium">
-                Terminal
+                Agent Bus — Cross-Instance Message
               </div>
 
               {/* Spacer */}
@@ -183,72 +183,55 @@ const GenesisDemo = () => {
 
             {/* Terminal Body */}
             <div className="p-4 sm:p-6 text-gray-400 leading-relaxed overflow-x-auto text-left space-y-4">
-              {/* Step 1: Add Marketplace */}
+              {/* Step 1: List agents */}
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">/plugin install quoth@quoth-marketplace</span>
+                  <span className="text-white">mcporter call quoth.quoth_agent_list</span>
                 </div>
-                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
-                  <span className="text-green-400">&#10003;</span> Plugin &apos;quoth&apos; v2.0 installed (MCP + hooks + agents)
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm space-y-1">
+                  <div><span className="text-violet-spectral">●</span> main-orchestrator @ aws — active</div>
+                  <div><span className="text-violet-spectral">●</span> interviews-agent @ mac — active</div>
+                  <div><span className="text-violet-spectral">●</span> curator @ montino — active</div>
                 </div>
               </div>
 
-              {/* Step 2: Initialize Memory */}
+              {/* Step 2: Send message */}
               <div className="space-y-1 mt-4">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">/quoth-init</span>
+                  <span className="text-white">mcporter call quoth.quoth_agent_message \</span>
                 </div>
                 <div className="pl-4 text-gray-500 text-xs sm:text-sm">
-                  <span className="text-green-400">&#10003;</span> Created .quoth/ folder structure
+                  <div>from=main to=interviews-agent \</div>
+                  <div>message="New candidate pipeline ready" \</div>
+                  <div>priority=high</div>
+                </div>
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
+                  <span className="text-green-400">✓</span> Message sent with HMAC-SHA256 signature
                 </div>
               </div>
 
-              {/* Step 3: Session Flow */}
+              {/* Step 3: Create task */}
               <div className="space-y-2 mt-6">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">$</span>
-                  <span className="text-white">Work session:</span>
-                  <span className="text-violet-ghost">&quot;Create auth service tests&quot;</span>
+                  <span className="text-white">mcporter call quoth.quoth_task_create \</span>
+                </div>
+                <div className="pl-4 text-gray-500 text-xs sm:text-sm">
+                  <div>assigned_to=curator \</div>
+                  <div>title="Review new patterns" \</div>
+                  <div>priority=3</div>
                 </div>
 
-                {/* Session Flow Animation */}
-                <div className="pl-4 space-y-2 border-l-2 border-violet-spectral/30 ml-1">
-                  {/* Context injection */}
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Context injected from .quoth/*.md</span>
-                    <span className="text-green-400 ml-auto">~500 tokens</span>
-                  </div>
-
-                  {/* Pattern search */}
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Searching patterns.md for test conventions</span>
-                    <span className="text-green-400 ml-auto">found</span>
-                  </div>
-
-                  {/* Work logged */}
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Actions logged to .quoth/sessions/abc123/</span>
-                    <span className="text-green-400 ml-auto">3 entries</span>
-                  </div>
-
-                  {/* Session end */}
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <span className="text-violet-spectral animate-pulse-slow">&#9670;</span>
-                    <span className="text-gray-400">Session end: reviewing learnings...</span>
-                    <span className="text-green-400 ml-auto">2 patterns</span>
-                  </div>
-                </div>
-
-                {/* Completion */}
+                {/* Real-time notification */}
                 <div className="mt-4 p-3 bg-gradient-to-r from-violet-500/10 to-violet-500/5 border-l-2 border-violet-spectral rounded-r-lg">
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-violet-ghost text-lg">&#9733;</span>
-                    <span className="text-white font-medium">Learnings promoted to .quoth/patterns.md</span>
+                    <span className="text-violet-ghost text-lg">⚡</span>
+                    <span className="text-white font-medium">Realtime delivery via Supabase</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Agent receives instant push notification across instances
                   </div>
                 </div>
               </div>
@@ -268,8 +251,8 @@ const GenesisDemo = () => {
             asChild
           >
             <Link href="/guide">
-              <Sparkles size={18} strokeWidth={1.5} className="mr-2 opacity-70" />
-              Get Started in 3 Minutes
+              <Network size={18} strokeWidth={1.5} className="mr-2 opacity-70" />
+              Explore the A2A Bus
               <span className="group-hover:translate-x-1 transition-transform duration-300 ml-2">
                 &#8594;
               </span>
@@ -299,30 +282,127 @@ const Features = () => (
           The Memory Architecture
         </h2>
         <p className="animate-fade-in-scale text-gray-500 font-light text-sm sm:text-base" style={{ animationDelay: "0.1s" }}>
-          Knowledge as Code. Context as Law.
+          Knowledge as Code. Agents as Network. Context as Law.
         </p>
       </div>
 
       {/* Feature Cards */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-2 gap-6 sm:gap-8">
         <GlassCard
           iconName="brain"
-          title="Local-First Memory"
-          description="Knowledge persists in .quoth/ folder across sessions. Decisions, patterns, errors, and learnings survive context compaction."
+          title="Shared Knowledge Base"
+          description="9 MCP tools for semantic vector search with Jina v3 embeddings (512d). Dual embedding support for text + code. Multi-org, multi-project with curator agent for autonomous documentation reviews."
           className="animate-fade-in-delay-1"
         />
         <GlassCard
-          iconName="bot"
-          title="quoth-memory Subagent"
-          description="A Sonnet-powered memory interface summarizes context (~500 tokens) and answers queries without bloating your main conversation."
+          iconName="network"
+          title="Agent-to-Agent (A2A) Bus"
+          description="10 MCP tools for cross-instance agent communication. Real-time delivery via Supabase. HMAC-SHA256 signed messages. Priority levels: low, normal, high, urgent. Task management between agents on AWS, Mac, WSL2."
           className="animate-fade-in-delay-2"
         />
         <GlassCard
-          iconName="git-branch"
-          title="Knowledge Promotion"
-          description="Session learnings are captured automatically. At session end, choose to promote to local files, remote Quoth, or both."
-          className="animate-fade-in-delay-3 sm:col-span-2 lg:col-span-1"
+          iconName="workflow"
+          title="Genesis Bootstrapping"
+          description="Split-tool architecture with depth levels. Tailored templates per depth. Automated documentation scaffolding for new projects."
+          className="animate-fade-in-delay-3"
         />
+        <GlassCard
+          iconName="users"
+          title="Multi-Account Support"
+          description="Switch between projects and organizations seamlessly. Shared vs project-scoped knowledge. Centralized agent registry per organization."
+          className="animate-fade-in-delay-4"
+        />
+      </div>
+    </div>
+  </section>
+);
+
+/* -----------------------------------------------------------------------------
+   MCP Tools Section
+   ----------------------------------------------------------------------------- */
+const MCPTools = () => (
+  <section className="relative py-24 px-4 sm:px-6 overflow-hidden">
+    <div className="absolute inset-0 bg-gradient-to-b from-charcoal/20 via-obsidian to-charcoal/20" />
+
+    <div className="max-w-6xl mx-auto relative z-10">
+      {/* Section Header */}
+      <div className="text-center mb-12 sm:mb-16">
+        <h2
+          className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
+          style={{ fontFamily: "var(--font-cinzel), serif" }}
+        >
+          19 MCP Tools
+        </h2>
+        <p
+          className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto"
+          style={{ animationDelay: "0.1s" }}
+        >
+          Everything your agents need to remember, communicate, and collaborate.
+        </p>
+      </div>
+
+      {/* Tools Grid */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Knowledge Tools */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Knowledge</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">search_index</code> — Semantic search</li>
+            <li><code className="text-violet-spectral">read_doc</code> — Full document read</li>
+            <li><code className="text-violet-spectral">propose_update</code> — Create/update docs</li>
+            <li><code className="text-violet-spectral">guidelines</code> — Adaptive guidelines</li>
+            <li><code className="text-violet-spectral">read_chunks</code> — Fetch by chunk ID</li>
+            <li><code className="text-violet-spectral">list_templates</code> — List doc templates</li>
+            <li><code className="text-violet-spectral">get_template</code> — Get template</li>
+          </ul>
+        </div>
+
+        {/* Account Tools */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Accounts</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">list_accounts</code> — List projects</li>
+            <li><code className="text-violet-spectral">switch_account</code> — Switch context</li>
+          </ul>
+        </div>
+
+        {/* Agent Management */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Agent Mgmt</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">agent_register</code> — Register agent</li>
+            <li><code className="text-violet-spectral">agent_update</code> — Update agent</li>
+            <li><code className="text-violet-spectral">agent_remove</code> — Archive agent</li>
+            <li><code className="text-violet-spectral">agent_list</code> — List agents</li>
+          </ul>
+        </div>
+
+        {/* Project Assignment */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Assignment</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">agent_assign_project</code> — Assign to project</li>
+            <li><code className="text-violet-spectral">agent_unassign_project</code> — Remove from project</li>
+          </ul>
+        </div>
+
+        {/* Messaging */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Messaging</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">agent_message</code> — Send message (HMAC)</li>
+            <li><code className="text-violet-spectral">agent_inbox</code> — Read inbox</li>
+          </ul>
+        </div>
+
+        {/* Tasks */}
+        <div className="p-4 rounded-lg border border-white/5 bg-white/5 backdrop-blur-sm">
+          <h3 className="text-violet-ghost text-sm font-medium mb-3 uppercase tracking-wider">Tasks</h3>
+          <ul className="space-y-2 text-sm text-gray-400">
+            <li><code className="text-violet-spectral">task_create</code> — Create task</li>
+            <li><code className="text-violet-spectral">task_update</code> — Update status/result</li>
+          </ul>
+        </div>
       </div>
     </div>
   </section>
@@ -336,10 +416,10 @@ const Stats = () => (
     <div className="max-w-5xl mx-auto relative z-10">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
         {[
-          { value: "v2.0", label: "AI Memory" },
-          { value: "~500", label: "Token Context" },
-          { value: "6", label: "Hooks Active" },
-          { value: "∞", label: "Sessions Captured" },
+          { value: "19", label: "MCP Tools" },
+          { value: "v3.0", label: "A2A Bus" },
+          { value: "512d", label: "Jina Embeddings" },
+          { value: "∞", label: "Cross-Instance" },
         ].map((stat, index) => (
           <div
             key={stat.label}
@@ -375,7 +455,7 @@ const CallToAction = () => (
         Ready to Never Forget?
       </h2>
       <p className="animate-fade-in-scale text-gray-400 mb-10 text-sm sm:text-base" style={{ animationDelay: "0.1s" }}>
-        Knowledge that persists. Patterns that compound.
+        Knowledge that persists. Agents that collaborate. Patterns that compound.
       </p>
       <div
         className="animate-fade-in-scale flex flex-col sm:flex-row items-center justify-center gap-4"
@@ -418,6 +498,7 @@ export default function Home() {
         <FlowchartShowcase />
         <GenesisDemo />
         <Features />
+        <MCPTools />
         <Stats />
         <CallToAction />
       </main>

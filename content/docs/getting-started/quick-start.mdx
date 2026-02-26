@@ -21,7 +21,7 @@ Before you begin, make sure you have:
 
 <Steps>
   <Step>
-    Visit [quoth.ai-innovation.site](https://quoth.ai-innovation.site) and click **Get Started**
+    Visit [quoth.triqual.dev](https://quoth.triqual.dev) and click **Get Started**
   </Step>
   <Step>
     Sign up with your email address
@@ -54,7 +54,7 @@ Install the Quoth Plugin to get everything: MCP server, lightweight hooks, and t
 If you prefer just the MCP tools without hooks:
 
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for login.
@@ -78,7 +78,26 @@ Genesis will analyze your code and create documentation for:
   Start with the `minimal` depth level for a quick overview, then run `comprehensive` when you need full documentation.
 </Callout>
 
-## Step 4: Start Building
+## Step 4: Register Your Agent (Optional)
+
+To enable agent-to-agent communication across your organization:
+
+```javascript
+// Register this agent instance
+quoth_agent_register({
+  agent_name: "my-agent",
+  display_name: "My Agent 🤖",
+  instance: "mac",
+  role: "specialist"
+})
+```
+
+This enables:
+- **Cross-instance messaging** — Agents on AWS, Mac, WSL2 can talk to each other
+- **Task assignment** — Create and assign tasks between agents
+- **Real-time delivery** — Supabase Realtime for instant notifications
+
+## Step 5: Start Building
 
 Now when you write code with AI assistance, Claude will automatically receive hints to use Quoth patterns. You can also explicitly ask for guidelines:
 
@@ -88,6 +107,27 @@ Use quoth_guidelines('code') and search for authentication patterns
 ```
 
 Claude will search your knowledge base before generating code, ensuring it follows your documented patterns. When Quoth is used, you'll see the 🪶 badge showing which patterns were applied.
+
+### Example: Agent-to-Agent Communication
+
+```javascript
+// List all agents in your organization
+quoth_agent_list()
+
+// Send a message to another agent
+quoth_agent_message({
+  to: "documentation-agent",
+  message: "Please review the new API patterns",
+  priority: "normal"
+})
+
+// Create a task for an agent
+quoth_task_create({
+  assigned_to: "documentation-agent",
+  title: "Update API documentation",
+  priority: 4
+})
+```
 
 ## Next Steps
 
@@ -100,8 +140,14 @@ Claude will search your knowledge base before generating code, ensuring it follo
   />
   <Card
     title="MCP Tools Reference"
-    description="Explore all available Quoth tools"
+    description="Explore all 19 Quoth tools including the A2A Bus"
     icon="Wrench"
     href="/docs/reference/mcp-tools"
+  />
+  <Card
+    title="Installation Guide"
+    description="Detailed setup for Claude Desktop, Cursor, and more"
+    icon="Download"
+    href="/docs/getting-started/installation"
   />
 </CardGrid>

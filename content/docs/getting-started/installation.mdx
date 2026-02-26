@@ -21,8 +21,9 @@ The Quoth Plugin bundles the MCP server, lightweight hooks (~60 tokens), and the
 ```
 
 This gives you:
-- All MCP tools including `quoth_guidelines`
+- **19 MCP tools** including 9 knowledge tools + 10 A2A Bus tools
 - Lightweight hooks that hint Claude to use Quoth patterns
+- Agent-to-agent communication across instances
 - 🪶 Badge transparency when Quoth is used
 
 ### MCP-Only Installation
@@ -30,7 +31,7 @@ This gives you:
 If you prefer just the MCP server without hooks:
 
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 Then authenticate from the `/mcp` menu.
@@ -38,7 +39,7 @@ Then authenticate from the `/mcp` menu.
 ### Token-Based Installation
 
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp \
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp \
   --header "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -54,7 +55,7 @@ Add to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "quoth": {
-      "url": "https://quoth.ai-innovation.site/api/mcp",
+      "url": "https://quoth.triqual.dev/api/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_TOKEN"
       }
@@ -79,7 +80,7 @@ Cursor supports MCP through its settings:
     Navigate to **Features** → **MCP Servers**
   </Step>
   <Step>
-    Add a new server with URL: `https://quoth.ai-innovation.site/api/mcp`
+    Add a new server with URL: `https://quoth.triqual.dev/api/mcp`
   </Step>
   <Step>
     Add the Authorization header with your token
@@ -92,7 +93,7 @@ For clients that require Server-Sent Events transport:
 
 ```bash
 claude mcp add --transport sse quoth \
-  "https://quoth.ai-innovation.site/api/mcp/sse?token=YOUR_TOKEN"
+  "https://quoth.triqual.dev/api/mcp/sse?token=YOUR_TOKEN"
 ```
 
 ## Public Demo (No Auth)
@@ -101,8 +102,30 @@ For testing without authentication (read-only access):
 
 ```bash
 claude mcp add --transport http quoth-public \
-  https://quoth.ai-innovation.site/api/mcp/public
+  https://quoth.triqual.dev/api/mcp/public
 ```
+
+## Agent-to-Agent Bus Setup
+
+To enable cross-instance agent communication, register your agent after installation:
+
+```javascript
+// Get your organization agents
+quoth_agent_list()
+
+// Register this agent instance
+quoth_agent_register({
+  agent_name: "my-local-agent",
+  display_name: "My Local Agent 🖥️",
+  instance: "mac",  // or "aws", "montino", etc.
+  role: "specialist"
+})
+```
+
+Once registered, you can:
+- Send messages to agents on other instances (with HMAC signing)
+- Create tasks for other agents
+- Receive real-time notifications via Supabase Realtime
 
 ## Verify Installation
 
@@ -114,10 +137,17 @@ Search Quoth for "test patterns"
 
 If connected, you'll see search results from the Quoth knowledge base.
 
+Test the A2A Bus:
+
+```javascript
+// List agents in your organization
+quoth_agent_list()
+```
+
 ## Troubleshooting
 
 <Callout type="danger">
-  **Connection Failed?** Make sure your token hasn't expired. Generate a new one from the [API Keys dashboard](https://quoth.ai-innovation.site/dashboard/api-keys).
+  **Connection Failed?** Make sure your token hasn't expired. Generate a new one from the [API Keys dashboard](https://quoth.triqual.dev/dashboard/api-keys).
 </Callout>
 
 ### Common Issues
@@ -128,3 +158,14 @@ If connected, you'll see search results from the Quoth knowledge base.
 | "Connection refused" | Check your internet connection |
 | "Server not responding" | Verify the MCP URL is correct |
 | "Unauthorized" | Ensure token is properly formatted in header |
+| "No agents found" | Register an agent with `quoth_agent_register` |
+| "Message delivery failed" | Check recipient agent status is "active" |
+
+### Agent Communication Issues
+
+If agent-to-agent messaging isn't working:
+
+1. Verify both agents are registered and active: `quoth_agent_list()`
+2. Check the recipient's inbox: `quoth_agent_inbox({ agent_name: "recipient" })`
+3. Ensure the receiving agent is listening for realtime events
+4. Verify HMAC signatures are being generated (automatic)

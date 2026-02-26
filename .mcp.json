@@ -2,7 +2,7 @@
   "mcpServers": {
     "quoth": {
       "type": "http",
-      "url": "https://quoth.ai-innovation.site/api/mcp"
+      "url": "https://quoth.quoth.triqual.dev/api/mcp"
     }
   }
 }
