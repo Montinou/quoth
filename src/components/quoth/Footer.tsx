@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 interface FooterLink {
   href: string;
   label: string;
+  external?: boolean;
 }
 
 interface FooterProps {
@@ -21,6 +22,14 @@ const defaultLinks: FooterLink[] = [
   { href: "/pricing", label: "Pricing" },
 ];
 
+const ecosystemLinks: FooterLink[] = [
+  { href: "https://triqual.dev", label: "Triqual Platform", external: true },
+  { href: "https://voice.triqual.dev", label: "Voice Agents", external: true },
+  { href: "https://studio.triqual.dev", label: "Studio", external: true },
+  { href: "https://interview-companion.triqual.dev", label: "Interview Companion", external: true },
+  { href: "https://exolar.triqual.dev", label: "Exolar QA", external: true },
+];
+
 export function Footer({ className, links = defaultLinks }: FooterProps) {
   return (
     <footer
@@ -33,8 +42,8 @@ export function Footer({ className, links = defaultLinks }: FooterProps) {
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-spectral/20 to-transparent" />
 
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-8">
-          {/* Logo */}
+        <div className="flex flex-col md:flex-row justify-between items-start gap-8">
+          {/* Logo + Description */}
           <div className="flex flex-col items-center md:items-start gap-3">
             <Logo />
             <p className="text-gray-600 text-xs max-w-xs text-center md:text-left">
@@ -42,18 +51,40 @@ export function Footer({ className, links = defaultLinks }: FooterProps) {
             </p>
           </div>
 
-          {/* Links */}
-          <div className="flex flex-wrap justify-center gap-6 sm:gap-8 text-sm text-gray-500">
-            {links.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="hover:text-violet-ghost transition-colors relative group"
-              >
-                {link.label}
-                <span className="absolute bottom-0 left-0 w-0 h-px bg-violet-spectral/50 group-hover:w-full transition-all duration-300" />
-              </Link>
-            ))}
+          {/* Product Links */}
+          <div className="flex flex-col items-center md:items-start gap-3">
+            <p className="text-gray-500 text-xs font-mono uppercase tracking-wider">Product</p>
+            <div className="flex flex-wrap justify-center md:justify-start gap-x-6 gap-y-2 text-sm text-gray-500">
+              {links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="hover:text-violet-ghost transition-colors relative group"
+                >
+                  {link.label}
+                  <span className="absolute bottom-0 left-0 w-0 h-px bg-violet-spectral/50 group-hover:w-full transition-all duration-300" />
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Ecosystem Links */}
+          <div className="flex flex-col items-center md:items-start gap-3">
+            <p className="text-gray-500 text-xs font-mono uppercase tracking-wider">Ecosystem</p>
+            <div className="flex flex-wrap justify-center md:justify-start gap-x-6 gap-y-2 text-sm text-gray-500">
+              {ecosystemLinks.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-violet-ghost transition-colors relative group"
+                >
+                  {link.label}
+                  <span className="absolute bottom-0 left-0 w-0 h-px bg-violet-spectral/50 group-hover:w-full transition-all duration-300" />
+                </a>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -64,6 +95,9 @@ export function Footer({ className, links = defaultLinks }: FooterProps) {
               &copy; {new Date().getFullYear()} Quoth Labs. &ldquo;Wisdom over Guesswork.&rdquo;
             </p>
             <div className="flex items-center gap-4 text-xs text-gray-600">
+              <a href="https://triqual.dev" target="_blank" rel="noopener noreferrer" className="hover:text-violet-ghost transition-colors">
+                A Triqual product
+              </a>
               <span className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-muted animate-pulse" />
                 All systems operational
