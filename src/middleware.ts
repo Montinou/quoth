@@ -8,7 +8,6 @@
 
 import { type NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { checkUpstashRateLimit } from "@/lib/rate-limit";
 
 // AI crawler user agents for GEO tracking
 const AI_CRAWLERS = ['GPTBot', 'ClaudeBot', 'CCBot', 'Perplexity', 'OAI-SearchBot', 'Google-Extended'];
@@ -20,10 +19,6 @@ const PUBLIC_PAGES = ['/', '/landing', '/manifesto', '/protocol', '/guide', '/pr
 const PROTECTED_PATHS = ['/dashboard', '/api/', '/auth/', '/invitations/'];
 
 export async function middleware(request: NextRequest) {
-  // Upstash rate limit — before any auth
-  const rateLimitResponse = await checkUpstashRateLimit(request);
-  if (rateLimitResponse) return rateLimitResponse;
-
   let supabaseResponse = NextResponse.next({
     request,
   })
