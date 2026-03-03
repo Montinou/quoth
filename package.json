@@ -27,6 +27,8 @@
     "@react-email/components": "^1.0.4",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.90.1",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.3",
     "@xyflow/react": "^12.10.0",
     "autoprefixer": "^10.4.23",
     "class-variance-authority": "^0.7.1",

@@ -8,6 +8,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { checkRateLimit } from "@/lib/rate-limit";
 
 // AI crawler user agents for GEO tracking
 const AI_CRAWLERS = ['GPTBot', 'ClaudeBot', 'CCBot', 'Perplexity', 'OAI-SearchBot', 'Google-Extended'];
@@ -19,6 +20,10 @@ const PUBLIC_PAGES = ['/', '/landing', '/manifesto', '/protocol', '/guide', '/pr
 const PROTECTED_PATHS = ['/dashboard', '/api/', '/auth/', '/invitations/'];
 
 export async function middleware(request: NextRequest) {
+  // Rate limit check — before any auth
+  const rateLimitResponse = await checkRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
   let supabaseResponse = NextResponse.next({
     request,
   })
