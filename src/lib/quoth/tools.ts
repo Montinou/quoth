@@ -22,7 +22,7 @@ import {
 } from './tier';
 import { supabase } from '../supabase';
 import { registerGenesisTools } from './genesis';
-import { syncDocument } from '../sync';
+import { syncDocumentFast, indexDocumentAsync } from '../sync';
 import { createActivityLogger } from './activity';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -391,7 +391,7 @@ Instructions:
 
           // 5a. Direct create mode (no approval required OR new documents always direct)
           if (project && !project.require_approval) {
-            const { document, chunksIndexed, chunksReused } = await syncDocument(
+            const { document, needsIndexing, estimatedChunks } = await syncDocumentFast(
               authContext.project_id,
               docPath,
               docTitle,
@@ -400,6 +400,12 @@ Instructions:
               visibility,
               undefined // tags
             );
+
+            // Fire-and-forget indexing — never block the response on Jina API calls
+            if (needsIndexing) {
+              indexDocumentAsync(document.id, docPath, new_content)
+                .catch(err => console.error('[Async Index] quoth_propose_update (create):', err));
+            }
 
             return {
               content: [{
@@ -410,9 +416,8 @@ Instructions:
 **Path**: \`${docPath}\`
 **Version**: ${document.version || 1}
 
-### Indexing Stats
-- Chunks indexed: ${chunksIndexed}
-- Chunks reused (cached): ${chunksReused}
+### Indexing
+- Status: indexing in background (~${estimatedChunks} chunks queued)
 
 ### Evidence
 \`\`\`
@@ -420,7 +425,7 @@ ${evidence_snippet.slice(0, 200)}${evidence_snippet.length > 200 ? '...' : ''}
 \`\`\`
 
 ---
-*Document created and indexed successfully.*`,
+*Document saved. Embeddings are being generated in the background.*`,
               }],
             };
           }
@@ -480,7 +485,7 @@ ${reasoning}
         // 6. DOCUMENT EXISTS - Update existing document
         // 6a. DIRECT APPLY MODE (no approval required)
         if (project && !project.require_approval) {
-          const { document, chunksIndexed, chunksReused } = await syncDocument(
+          const { document, needsIndexing, estimatedChunks } = await syncDocumentFast(
             authContext.project_id,
             existingDoc.path,
             existingDoc.title,
@@ -489,6 +494,12 @@ ${reasoning}
             visibility,
             undefined // tags
           );
+
+          // Fire-and-forget indexing — never block the response on Jina API calls
+          if (needsIndexing) {
+            indexDocumentAsync(document.id, existingDoc.path, new_content)
+              .catch(err => console.error('[Async Index] quoth_propose_update (update):', err));
+          }
 
           return {
             content: [{
@@ -499,13 +510,11 @@ ${reasoning}
 **Path**: \`${existingDoc.path}\`
 **Version**: ${document.version || 'N/A'}
 
-### Indexing Stats
-- Chunks re-indexed: ${chunksIndexed}
-- Chunks reused (cached): ${chunksReused}
-- Token savings: ${chunksReused > 0 ? Math.round((chunksReused / (chunksIndexed + chunksReused)) * 100) : 0}%
+### Indexing
+- Status: indexing in background (~${estimatedChunks} chunks queued)
 
 ---
-*Changes applied immediately. Previous version preserved in history.*`,
+*Changes saved immediately. Embeddings regenerating in background. Previous version preserved in history.*`,
             }],
           };
         }
@@ -1676,118 +1685,36 @@ All associated data has been permanently removed:
           };
         }
 
-        // Import required functions for re-embedding
-        const { chunkContent, calculateChecksum } = await import('../sync');
-        const { generateEmbedding, detectContentType } = await import('../ai');
+        // For a full reindex: delete all old embeddings first so indexDocumentAsync
+        // regenerates from scratch (not incremental). Then fire all docs in background.
+        const { calculateChecksum } = await import('../sync');
 
-        // Reindex each document
-        let totalChunks = 0;
-        const results: Array<{ title: string; chunks: number; error?: string }> = [];
+        // Delete all existing embeddings for each doc synchronously (fast, no Jina)
+        const docIds = documents.map(d => d.id);
+        const { error: bulkDeleteError } = await supabase
+          .from('document_embeddings')
+          .delete()
+          .in('document_id', docIds);
 
-        for (const doc of documents) {
-          try {
-            // 1. Delete ALL old embeddings for this document
-            const { error: deleteError } = await supabase
-              .from('document_embeddings')
-              .delete()
-              .eq('document_id', doc.id);
-
-            if (deleteError) {
-              throw new Error(`Failed to delete old embeddings: ${deleteError.message}`);
-            }
-
-            // 2. Re-chunk the content
-            const chunks = await chunkContent(doc.file_path, doc.content);
-
-            if (chunks.length === 0) {
-              results.push({
-                title: doc.title,
-                chunks: 0,
-                error: 'No chunks generated (empty content?)',
-              });
-              continue;
-            }
-
-            // 3. Generate fresh embeddings for ALL chunks
-            let successCount = 0;
-            for (let i = 0; i < chunks.length; i++) {
-              const chunk = chunks[i];
-              
-              try {
-                // Detect content type (text vs code) for appropriate embedding model
-                const contentType = detectContentType(chunk.content);
-                const embeddingModel = contentType === 'code' ? 'jina-code-embeddings-1.5b' : 'jina-embeddings-v3';
-                
-                // Generate embedding with appropriate model
-                const embedding = await generateEmbedding(chunk.content, contentType);
-                
-                // Calculate chunk hash for future incremental updates
-                const chunkHash = calculateChecksum(chunk.content);
-                
-                // Insert new embedding
-                const { error: insertError } = await supabase
-                  .from('document_embeddings')
-                  .insert({
-                    document_id: doc.id,
-                    content_chunk: chunk.content,
-                    chunk_hash: chunkHash,
-                    embedding,
-                    embedding_model: embeddingModel,
-                    metadata: { 
-                      chunk_index: i,
-                      source: 'full-reindex',
-                      content_type: contentType,
-                      ...chunk.metadata
-                    },
-                  });
-
-                if (insertError) {
-                  console.error(`Failed to insert chunk ${i} for ${doc.title}:`, insertError);
-                } else {
-                  successCount++;
-                }
-
-                // Rate limit between chunks (avoid hitting Jina's rate limits)
-                // 4.2s = ~14 chunks/min (conservative for 20/min limit)
-                if (i < chunks.length - 1) {
-                  await new Promise(r => setTimeout(r, 4200));
-                }
-              } catch (chunkError) {
-                console.error(`Failed to embed chunk ${i} for ${doc.title}:`, chunkError);
-              }
-            }
-
-            totalChunks += successCount;
-
-            results.push({
-              title: doc.title,
-              chunks: successCount,
-              ...(successCount < chunks.length && { 
-                error: `Only ${successCount}/${chunks.length} chunks embedded successfully` 
-              }),
-            });
-
-          } catch (error) {
-            results.push({
-              title: doc.title,
-              chunks: 0,
-              error: error instanceof Error ? error.message : 'Unknown error',
-            });
-          }
+        if (bulkDeleteError) {
+          throw new Error(`Failed to clear old embeddings: ${bulkDeleteError.message}`);
         }
 
-        // Format results
-        const successCount = results.filter(r => !r.error).length;
-        const failCount = results.filter(r => r.error).length;
+        // Mark all docs as pending and update checksums to force re-embedding
+        // (syncDocumentFast would skip unchanged docs; we bypass that by marking pending directly)
+        await supabase
+          .from('documents')
+          .update({ indexing_status: 'pending' })
+          .in('id', docIds);
 
-        const resultSummary = results
-          .map(r => {
-            if (r.error) {
-              return `❌ **${r.title}**: ${r.error}`;
-            }
-            return `✓ **${r.title}**: ${r.chunks} chunks embedded`;
-          })
-          .join('\n');
+        // Fire-and-forget indexing for every document — never block the response
+        let totalEstimatedChunks = 0;
+        for (const doc of documents) {
+          const estChunks = Math.max(1, Math.ceil((doc.content?.length || 0) / 500));
+          totalEstimatedChunks += estChunks;
+          indexDocumentAsync(doc.id, doc.file_path, doc.content)
+            .catch(err => console.error(`[Async Index] quoth_reindex doc ${doc.id} (${doc.title}):`, err));
+        }
 
         // Log activity
         logActivity({
@@ -1795,35 +1722,30 @@ All associated data has been permanently removed:
           userId: authContext.user_id,
           eventType: 'reindex',
           query: 'reindex:full-reembed',
-          resultCount: totalChunks,
+          resultCount: documents.length,
           toolName: 'quoth_reindex',
           context: {
             totalDocuments: documents.length,
-            successCount,
-            failCount,
-            totalChunks,
+            totalEstimatedChunks,
+            mode: 'async-background',
           },
         });
 
         return {
           content: [{
             type: 'text' as const,
-            text: `## ✅ Full Re-embedding Complete
+            text: `## ✅ Full Re-index Queued
 
 **Project:** \`${targetProjectId}\`
-**Mode:** Full re-embedding (all embeddings regenerated from scratch)
+**Mode:** Full re-embedding (background — all old embeddings cleared)
 
 ### Summary
-- **Documents processed:** ${documents.length}
-- **Successful:** ${successCount}
-- **Failed:** ${failCount}
-- **Total chunks embedded:** ${totalChunks}
-
-### Results
-${resultSummary}
+- **Documents queued:** ${documents.length}
+- **Estimated chunks:** ~${totalEstimatedChunks}
+- **Status:** Indexing in background
 
 ---
-*All embeddings have been regenerated using current embedding models (Jina v3 for text, Jina Code for code).*${failCount > 0 ? '\n\n⚠️ Some documents failed to reindex. Check the error messages above.' : ''}`,
+*All embeddings are being regenerated asynchronously. Documents remain readable. Search results will improve as each document is indexed. Check \`indexing_status\` on documents for progress.*`,
           }],
         };
       } catch (error) {

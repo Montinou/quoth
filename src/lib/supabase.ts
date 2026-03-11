@@ -17,6 +17,8 @@ export interface Document {
   checksum: string;
   last_updated: string;
   doc_type: 'testing-pattern' | 'architecture' | 'contract' | 'meta' | 'template' | null;
+  /** Async indexing lifecycle: pending → indexing → indexed | failed */
+  indexing_status?: 'pending' | 'indexing' | 'indexed' | 'failed' | null;
 }
 
 export interface DocumentEmbedding {
