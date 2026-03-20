@@ -30,6 +30,7 @@ import matter from 'gray-matter';
 import { logActivity } from './activity';
 import { formatCompactGuidelines, formatFullGuidelines, type GuidelinesMode } from './guidelines';
 import { registerAgentTools, getOrganizationId, generateSignature } from './agent-tools';
+import { registerProjectTools } from './project-tools';
 
 // Templates directory path (relative to project root)
 const TEMPLATES_DIR = path.join(process.cwd(), 'quoth-knowledge-template', 'templates');
@@ -1764,4 +1765,7 @@ All associated data has been permanently removed:
 
   // Register Agent CRUD tools (v3.0)
   registerAgentTools(server, authContext);
+
+  // Register project management tools (create, list, provision, token generation)
+  registerProjectTools(server, authContext);
 }

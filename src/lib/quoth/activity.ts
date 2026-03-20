@@ -31,7 +31,10 @@ export type ActivityEventType =
   // Maintenance events
   | 'reindex'
   | 'agent_task_created'
-  | 'agent_task_updated';
+  | 'agent_task_updated'
+  // Project provisioning events (v3.0)
+  | 'token_generate'
+  | 'agent_provision';
 
 export interface ActivityLogParams {
   projectId: string;
