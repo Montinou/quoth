@@ -331,7 +331,7 @@ const MCPTools = () => (
           className="animate-fade-in-scale font-serif text-2xl sm:text-3xl md:text-4xl text-white mb-4"
           style={{ fontFamily: "var(--font-cinzel), serif" }}
         >
-          19 MCP Tools
+          28 MCP Tools
         </h2>
         <p
           className="animate-fade-in-scale text-gray-400 font-light text-sm sm:text-base max-w-2xl mx-auto"

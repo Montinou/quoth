@@ -1,7 +1,10 @@
 /**
- * Quoth v3.0 Project Management MCP Tools
- * Create projects, generate tokens, list projects
+ * Quoth v3.0 Project Provisioning MCP Tools
+ * Token generation + one-shot agent provisioning
  * Enables full agent autonomy — no dashboard needed
+ * 
+ * Note: quoth_project_create, quoth_project_list, quoth_project_read,
+ * quoth_project_update, quoth_project_delete are registered in tools.ts
  */
 
 import { z } from 'zod';
@@ -14,109 +17,13 @@ import { logActivity } from './activity';
 import { getOrganizationId } from './agent-tools';
 
 /**
- * Register project management tools on the MCP server
+ * Register provisioning tools on the MCP server
  */
 export function registerProjectTools(
   server: McpServer,
   authContext: AuthContext
 ) {
-  // ─── Tool 1: quoth_project_create ───────────────────────────
-  server.registerTool(
-    'quoth_project_create',
-    {
-      title: 'Create Project',
-      description:
-        'Create a new project in your organization. Returns the project ID. ' +
-        'Use this to provision new agent workspaces programmatically.',
-      inputSchema: {
-        slug: z
-          .string()
-          .regex(/^[a-z0-9-]+$/)
-          .describe('Project slug (lowercase, hyphens). e.g. "deployer-verticals"'),
-        github_repo: z
-          .string()
-          .optional()
-          .describe('Optional GitHub repo URL'),
-        is_public: z
-          .boolean()
-          .default(false)
-          .describe('Whether project docs are publicly searchable'),
-      },
-    },
-    async (args) => {
-      const organizationId = await getOrganizationId(authContext.project_id);
-      const { slug, github_repo, is_public } = args;
-
-      // Check if project already exists
-      const { data: existing } = await supabase
-        .from('projects')
-        .select('id, slug')
-        .eq('organization_id', organizationId)
-        .eq('slug', slug)
-        .single();
-
-      if (existing) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Project "${slug}" already exists.\n\n**ID:** ${existing.id}\n**Slug:** ${existing.slug}`,
-            },
-          ],
-        };
-      }
-
-      const { data: project, error } = await supabase
-        .from('projects')
-        .insert({
-          slug,
-          github_repo: github_repo || '',
-          is_public: is_public || false,
-          organization_id: organizationId,
-          owner_id: authContext.user_id,
-          created_by: authContext.user_id,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw new Error(`Failed to create project: ${error.message}`);
-      }
-
-      // Auto-add creator as admin member
-      await supabase.from('project_members').insert({
-        project_id: project.id,
-        user_id: authContext.user_id,
-        role: 'admin',
-      });
-
-      await logActivity({
-        projectId: authContext.project_id,
-        userId: authContext.user_id,
-        eventType: 'project_create',
-        query: slug,
-        toolName: 'quoth_project_create',
-      });
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `✅ Project created!
-
-**ID:** ${project.id}
-**Slug:** ${slug}
-**Public:** ${is_public || false}
-**Organization:** ${organizationId}
-
-Use \`quoth_token_generate\` to create an MCP token for this project.`,
-          },
-        ],
-      };
-    }
-  );
-
-  // ─── Tool 2: quoth_token_generate ───────────────────────────
+  // ─── Tool 1: quoth_token_generate ───────────────────────────
   server.registerTool(
     'quoth_token_generate',
     {
@@ -129,14 +36,14 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
           .string()
           .uuid()
           .optional()
-          .describe('Project UUID. If omitted, uses the project from slug lookup.'),
+          .describe('Project UUID. If omitted, uses project_slug.'),
         project_slug: z
           .string()
           .optional()
           .describe('Project slug (alternative to project_id)'),
         label: z
           .string()
-          .describe('Token label, e.g. "agent-deployer" or "ci-pipeline"'),
+          .describe('Token label, e.g. "agent-deployer"'),
         expires_days: z
           .number()
           .default(90)
@@ -150,7 +57,6 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
         throw new Error('Must provide project_id or project_slug');
       }
 
-      // Resolve project
       let targetProjectId = project_id;
       if (!targetProjectId && project_slug) {
         const organizationId = await getOrganizationId(authContext.project_id);
@@ -167,12 +73,10 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
         targetProjectId = project.id;
       }
 
-      // Verify caller has admin access
       if (authContext.role !== 'admin') {
         throw new Error('Only admins can generate tokens');
       }
 
-      // Generate JWT
       const jwtSecret = process.env.JWT_SECRET;
       if (!jwtSecret) {
         throw new Error('JWT_SECRET not configured on server');
@@ -198,9 +102,7 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
         .setJti(jti)
         .sign(secret);
 
-      // Store hashed token
       const keyHash = crypto.createHash('sha256').update(token).digest('hex');
-      const keyPrefix = token.substring(0, 12) + '...';
 
       const { error: insertError } = await supabase
         .from('project_api_keys')
@@ -208,7 +110,7 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
           id: jti,
           project_id: targetProjectId,
           key_hash: keyHash,
-          key_prefix: keyPrefix,
+          key_prefix: token.substring(0, 12) + '...',
           label: label.trim(),
           expires_at: new Date((now + expiresIn) * 1000).toISOString(),
         });
@@ -234,14 +136,13 @@ Use \`quoth_token_generate\` to create an MCP token for this project.`,
 **Label:** ${label}
 **Project:** ${targetProjectId}
 **Expires:** ${expires_days || 90} days
-**JTI:** ${jti}
 
-**Token (save this — shown only once):**
+**Token (save — shown once):**
 \`\`\`
 ${token}
 \`\`\`
 
-Configure in mcporter:
+**mcporter config:**
 \`\`\`json
 {
   "mcpServers": {
@@ -259,67 +160,7 @@ Configure in mcporter:
     }
   );
 
-  // ─── Tool 3: quoth_project_list ─────────────────────────────
-  server.registerTool(
-    'quoth_project_list',
-    {
-      title: 'List Projects',
-      description:
-        'List all projects in your organization.',
-      inputSchema: {
-        include_public: z
-          .boolean()
-          .default(false)
-          .describe('Include public projects from other orgs'),
-      },
-    },
-    async (args) => {
-      const organizationId = await getOrganizationId(authContext.project_id);
-
-      let query = supabase
-        .from('projects')
-        .select('id, slug, is_public, github_repo, created_at')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false });
-
-      const { data: projects, error } = await query;
-
-      if (error) {
-        throw new Error(`Failed to list projects: ${error.message}`);
-      }
-
-      if (!projects || projects.length === 0) {
-        return {
-          content: [
-            { type: 'text' as const, text: 'No projects found.' },
-          ],
-        };
-      }
-
-      const formatted = projects
-        .map(
-          (p) =>
-            `- **${p.slug}** (\`${p.id}\`)
-  - Public: ${p.is_public}
-  - Repo: ${p.github_repo || 'none'}
-  - Created: ${p.created_at}`
-        )
-        .join('\n');
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `# Projects (${projects.length})
-
-${formatted}`,
-          },
-        ],
-      };
-    }
-  );
-
-  // ─── Tool 4: quoth_project_provision_agent ──────────────────
+  // ─── Tool 2: quoth_project_provision_agent ──────────────────
   server.registerTool(
     'quoth_project_provision_agent',
     {
@@ -340,7 +181,7 @@ ${formatted}`,
         display_name: z
           .string()
           .optional()
-          .describe('Human-readable name. e.g. "Deployer 🚀"'),
+          .describe('Human-readable name. e.g. "Deployer"'),
         instance: z
           .string()
           .describe('Instance: aws, montino, mac'),
@@ -398,7 +239,6 @@ ${formatted}`,
         if (error) throw new Error(`Project creation failed: ${error.message}`);
         projectId = newProject.id;
 
-        // Add membership
         await supabase.from('project_members').insert({
           project_id: projectId,
           user_id: authContext.user_id,
@@ -469,7 +309,6 @@ ${formatted}`,
         .setJti(jti)
         .sign(secret);
 
-      // Store token hash
       const keyHash = crypto.createHash('sha256').update(token).digest('hex');
       await supabase.from('project_api_keys').insert({
         id: jti,

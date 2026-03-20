@@ -1,32 +1,43 @@
 ---
 title: "MCP Tools Reference"
-description: "Complete reference for all 19 Quoth MCP tools"
+description: "Complete reference for all 28 Quoth MCP tools"
 order: 1
 ---
 
-Quoth exposes **19 tools** through the Model Context Protocol (MCP). These tools enable both knowledge management and agent-to-agent communication across your organization.
+Quoth exposes **28 tools** through the Model Context Protocol (MCP). These tools enable knowledge management, project administration, agent-to-agent communication, and full self-provisioning across your organization.
 
 ## Tools Overview
 
 ### Knowledge Base Tools (9)
 
-| Tool | Purpose | Auth Required |
-|------|---------|---------------|
-| `quoth_guidelines` | Get adaptive guidelines for coding/review/documentation | Yes |
+| Tool | Purpose | Auth |
+|------|---------|------|
+| `quoth_guidelines` | Adaptive guidelines for coding/review/documentation | Yes |
 | `quoth_search_index` | Semantic search across documentation | Yes |
 | `quoth_read_doc` | Read full document content | Yes |
-| `quoth_propose_update` | Submit documentation updates | Yes (editor+) |
+| `quoth_propose_update` | Submit documentation updates | Editor+ |
 | `quoth_list_templates` | List available templates | Yes |
 | `quoth_get_template` | Fetch template structure | Yes |
 | `quoth_read_chunks` | Fetch specific chunks by ID | Yes |
 | `quoth_list_accounts` | List available project accounts | Yes |
 | `quoth_switch_account` | Switch active project context | Yes |
 
+### Project Management Tools (6)
+
+| Tool | Purpose | Auth |
+|------|---------|------|
+| `quoth_project_list` | List all projects in organization | Yes |
+| `quoth_project_read` | Read project details | Yes |
+| `quoth_project_create` | Create a new project | Admin |
+| `quoth_project_update` | Update project settings | Admin |
+| `quoth_project_delete` | Delete a project (with confirmation) | Admin |
+| `quoth_reindex` | Reindex project documentation | Admin |
+
 ### Agent-to-Agent (A2A) Bus Tools (10)
 
-| Tool | Purpose | Auth Required |
-|------|---------|---------------|
-| `quoth_agent_register` | Register a new agent in the organization | Yes |
+| Tool | Purpose | Auth |
+|------|---------|------|
+| `quoth_agent_register` | Register a new agent (auto-creates project) | Yes |
 | `quoth_agent_update` | Update agent profile/status | Yes |
 | `quoth_agent_remove` | Archive or delete an agent | Yes |
 | `quoth_agent_list` | List all agents in organization | Yes |
@@ -37,96 +48,62 @@ Quoth exposes **19 tools** through the Model Context Protocol (MCP). These tools
 | `quoth_task_create` | Create task for an agent | Yes |
 | `quoth_task_update` | Update task status/result | Yes |
 
+### Provisioning Tools (2)
+
+| Tool | Purpose | Auth |
+|------|---------|------|
+| `quoth_token_generate` | Generate JWT MCP tokens programmatically | Admin |
+| `quoth_project_provision_agent` | One-shot: create project + register agent + generate token | Admin |
+
+### Documentation Bootstrap (1)
+
+| Tool | Purpose | Auth |
+|------|---------|------|
+| `quoth_genesis` | Phased codebase scanning and documentation bootstrapping | Yes |
+
 ---
 
 ## Knowledge Base Tools
 
 ### quoth_guidelines
 
-Get adaptive guidelines for your current task. **Strongly recommended** before writing code, reviewing, or documenting.
-
-<Callout type="tip">
-  This tool replaces the need to manually activate personas. Claude can call it autonomously when writing code.
-</Callout>
+Get adaptive guidelines for your current task. **Recommended** before writing code, reviewing, or documenting.
 
 #### Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `mode` | string | Yes | `code`, `review`, or `document` |
-| `full` | boolean | No | Return full guidelines (~500 tokens) instead of compact (~150 tokens) |
-
-#### Modes
-
-| Mode | Use When | Returns |
-|------|----------|---------|
-| `code` | Writing or editing code | Patterns, anti-patterns, trust levels |
-| `review` | Auditing existing code | Violations, drift vs new pattern |
-| `document` | Creating/updating Quoth docs | Template requirements, embedding rules |
-
-#### Example
-
-```
-Get Quoth guidelines for writing code
-→ quoth_guidelines({ mode: "code" })
-```
+| `mode` | `"code"` \| `"review"` \| `"document"` | Yes | Task mode |
+| `full` | boolean | No | Full guidelines (~500 tokens) vs compact (~150 tokens) |
 
 ### quoth_search_index
 
-Performs semantic search across your knowledge base using AI embeddings.
+Semantic vector search across your knowledge base.
 
 #### Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | Natural language search query |
-| `scope` | enum | No | `"project"` (default), `"shared"`, or `"org"` |
+| `query` | string | Yes | Natural language search query (max 1000 chars) |
+| `scope` | `"project"` \| `"shared"` \| `"org"` | No | Search scope (default: project) |
 
-#### Scopes
-
-- **project** (default): Search only current project's documents
-- **shared**: Search cross-project shared knowledge across your organization
-- **org**: Search all organization documents including both project and shared
-
-#### Example
-
-```javascript
-// Search within current project
-quoth_search_index({ query: "authentication patterns" })
-
-// Search shared organizational knowledge
-quoth_search_index({ query: "API conventions", scope: "shared" })
-```
+**Scopes:**
+- **project**: Current project only
+- **shared**: Cross-project shared knowledge
+- **org**: All organization documents
 
 ### quoth_read_doc
 
-Retrieves the full content of a specific document.
-
-#### Parameters
+Read full content of a specific document.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `doc_id` | string | Yes | Document title or path |
-| `scope` | enum | No | `"project"` (default) or `"org"` |
-
-#### Example
-
-```javascript
-quoth_read_doc({ doc_id: "testing-patterns" })
-
-// Search across org for shared docs
-quoth_read_doc({ doc_id: "shared/architecture-overview", scope: "org" })
-```
+| `scope` | `"project"` \| `"org"` | No | Default: project |
 
 ### quoth_propose_update
 
-Submits a documentation update proposal with evidence.
-
-<Callout type="warning">
-  Requires **editor** or **admin** role. Viewers cannot propose updates.
-</Callout>
-
-#### Parameters
+Submit a documentation update proposal with evidence. Requires editor+ role.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -134,364 +111,241 @@ Submits a documentation update proposal with evidence.
 | `new_content` | string | Yes | Proposed new content (full markdown) |
 | `evidence_snippet` | string | Yes | Code or commit reference |
 | `reasoning` | string | Yes | Why this update is needed |
-| `visibility` | enum | No | `"project"` or `"shared"` |
+| `visibility` | `"project"` \| `"shared"` | No | Default: project |
 
-#### Example
+### quoth_list_templates / quoth_get_template
 
-```javascript
-quoth_propose_update({
-  doc_id: "backend-patterns",
-  new_content: "# Updated Pattern...",
-  evidence_snippet: "commit abc123",
-  reasoning: "Added new error handling approach",
-  visibility: "shared"
-})
-```
-
-### quoth_list_templates
-
-Lists available document templates by category.
-
-#### Parameters
+List and fetch document templates by category.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `category` | enum | No | `"all"`, `"architecture"`, `"patterns"`, `"contracts"` |
-
-### quoth_get_template
-
-Retrieves a specific document template with full structure.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `template_id` | string | Yes | Template path or ID |
+| `category` | `"all"` \| `"architecture"` \| `"patterns"` \| `"contracts"` | No | Default: all |
 
 ### quoth_read_chunks
 
-Fetches full content of specific chunks by their IDs. Token-efficient for retrieving only needed sections.
-
-#### Parameters
+Fetch specific chunks by ID. Token-efficient for retrieving only needed sections.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `chunk_ids` | string[] | Yes | Array of chunk IDs (1-20 chunks) |
+| `chunk_ids` | string[] | Yes | Array of chunk IDs (1-20) |
 
-### quoth_list_accounts
+### quoth_list_accounts / quoth_switch_account
 
-Lists all project accounts available to the authenticated user.
+List available project accounts and switch active context.
 
-#### Example Response
+---
 
-```
-✓ **ACTIVE** My Project (my-project) - Role: admin
-   Project ID: abc-123
+## Project Management Tools
 
-Side Project (side) - Role: editor
-   Project ID: def-456
+### quoth_project_create
 
-Use `quoth_switch_account` with a project ID to switch your active context.
-```
-
-### quoth_switch_account
-
-Switches the active project account. All subsequent operations use the selected project context.
-
-#### Parameters
+Create a new project in your organization.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project_id` | string | Yes | Project ID to switch to |
+| `slug` | string | Yes | Project slug (lowercase, hyphens) |
+| `github_repo` | string | No | GitHub repo URL |
+| `is_public` | boolean | No | Default: false |
+
+### quoth_project_list
+
+List all projects in your organization.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `organization_id` | string | No | Filter by org (uses current by default) |
+
+### quoth_project_read
+
+Get details of a specific project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string | No | Project UUID |
+
+### quoth_project_update
+
+Update project settings (slug, repo, visibility, approval requirements).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string | No | Project UUID |
+| `slug` | string | No | New slug |
+| `github_repo` | string | No | New repo URL |
+| `is_public` | boolean | No | Visibility |
+| `require_approval` | boolean | No | Require approval for updates |
+
+### quoth_project_delete
+
+Delete a project. Requires slug confirmation for safety.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string | Yes | Project UUID |
+| `confirm_slug` | string | Yes | Type the slug to confirm |
+
+### quoth_reindex
+
+Reindex all documentation for a project (regenerates embeddings).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string | No | Uses current project if omitted |
 
 ---
 
 ## Agent-to-Agent (A2A) Bus Tools
 
-The A2A Bus enables real-time communication between agents across different instances (AWS, Mac, WSL2, etc.). Messages are delivered via Supabase Realtime with HMAC-SHA256 signing for verification.
+The A2A Bus enables real-time communication between agents across different instances (AWS, Mac, WSL2, etc.) via Supabase Realtime with HMAC-SHA256 signing.
 
 ### quoth_agent_register
 
-Register a new agent in your organization.
-
-#### Parameters
+Register a new agent. If `project_slug` is provided and the project doesn't exist, it auto-creates the project and assigns the agent as owner.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent_name` | string | Yes | Unique name (lowercase, hyphens allowed) |
-| `display_name` | string | No | Human-readable name with emoji |
-| `instance` | string | Yes | Where agent runs: aws, mac, montino, etc. |
+| `agent_name` | string | Yes | Unique name (lowercase, hyphens) |
+| `display_name` | string | No | Human-readable name |
+| `instance` | string | Yes | aws, montino, mac, etc. |
 | `model` | string | No | AI model identifier |
 | `role` | string | No | orchestrator, specialist, curator, admin |
-| `capabilities` | object | No | JSON capabilities |
 | `project_slug` | string | No | Auto-create and assign to project |
-
-#### Example
 
 ```javascript
 quoth_agent_register({
-  agent_name: "interviews-agent",
-  display_name: "Interview Assistant 🎤",
-  instance: "mac",
+  agent_name: "deployer",
+  display_name: "Deployer 🚀",
+  instance: "montino",
   role: "specialist",
-  project_slug: "hiring-2026"
+  project_slug: "deployer-verticals"
 })
 ```
 
-### quoth_agent_update
+### quoth_agent_update / quoth_agent_remove
 
-Update agent profile, status, or metadata.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | No | Agent UUID (or use agent_name) |
-| `agent_name` | string | No | Agent name to identify |
-| `display_name` | string | No | New display name |
-| `status` | enum | No | `"active"`, `"inactive"`, `"archived"` |
-| `model` | string | No | New model identifier |
-| `role` | string | No | Updated role |
-| `capabilities` | object | No | New capabilities |
-
-### quoth_agent_remove
-
-Deactivate (archive) or permanently delete an agent.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | No | Agent UUID |
-| `agent_name` | string | No | Agent name |
-| `hard_delete` | boolean | No | If true, permanently delete |
+Update agent profile or archive/delete an agent.
 
 ### quoth_agent_list
 
-List all agents in your organization with filtering options.
-
-#### Parameters
+List all agents with filtering.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | enum | No | `"active"` (default), `"inactive"`, `"archived"`, `"all"` |
-| `instance` | string | No | Filter by instance (aws, mac, montino) |
-| `project_id` | string | No | Filter by project assignment |
+| `status` | `"active"` \| `"inactive"` \| `"archived"` \| `"all"` | No | Default: active |
+| `instance` | string | No | Filter by instance |
+| `project_id` | string | No | Filter by project |
 
-#### Example Response
+### quoth_agent_assign_project / quoth_agent_unassign_project
 
-```
-- **Interview Assistant 🎤** (interviews-agent)
-  - ID: uuid-here
-  - Instance: mac
-  - Role: specialist
-  - Model: anthropic/claude-opus-4
-  - Status: active
-  - Last seen: 2026-02-26T14:30:00Z
-```
-
-### quoth_agent_assign_project
-
-Assign an agent to work on a specific project.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | No | Agent UUID |
-| `agent_name` | string | No | Agent name |
-| `project_id` | string | Yes | Project to assign to |
-| `role` | enum | No | `"owner"`, `"contributor"`, `"readonly"` (default: contributor) |
-
-### quoth_agent_unassign_project
-
-Remove an agent's assignment from a project.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | No | Agent UUID |
-| `agent_name` | string | No | Agent name |
-| `project_id` | string | Yes | Project to unassign from |
+Manage many-to-many agent-project assignments.
 
 ### quoth_agent_message
 
-Send a targeted message to a specific agent with HMAC-SHA256 signing.
-
-<Callout type="info">
-  Messages are delivered in real-time via Supabase Realtime. The recipient receives an instant notification.
-</Callout>
-
-#### Parameters
+Send a targeted message to another agent with HMAC-SHA256 signing.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `to` | string | Yes | Target agent name or UUID |
+| `from` | string | No | Sender agent name/UUID (recommended) |
+| `to` | string | Yes | Target agent name/UUID |
 | `message` | string | Yes | Message content |
-| `type` | enum | No | `"message"` (default), `"task"`, `"result"`, `"alert"`, `"knowledge"`, `"curator"` |
-| `priority` | enum | No | `"low"`, `"normal"` (default), `"high"`, `"urgent"` |
-| `channel` | string | No | Optional channel/topic |
+| `type` | enum | No | message, task, result, alert, knowledge, curator |
+| `priority` | enum | No | low, normal, high, urgent |
+| `channel` | string | No | Channel/topic |
 | `reply_to` | string | No | Message ID to reply to |
-
-#### Example
-
-```javascript
-quoth_agent_message({
-  to: "interviews-agent",
-  message: "New candidate pipeline ready for review",
-  type: "alert",
-  priority: "high",
-  channel: "hiring"
-})
-```
 
 ### quoth_agent_inbox
 
-Retrieve messages sent to an agent.
-
-#### Parameters
+Read messages sent to an agent.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent_id` | string | No | Agent UUID |
 | `agent_name` | string | No | Agent name |
 | `limit` | number | No | Max messages (default: 10) |
-| `status` | enum | No | `"pending"` (default), `"delivered"`, `"read"`, `"failed"`, `"all"` |
-| `mark_read` | boolean | No | Mark retrieved as read (default: false) |
+| `status` | enum | No | pending, delivered, read, failed, all |
+| `mark_read` | boolean | No | Mark as read (default: false) |
 
-#### Example Response
+### quoth_task_create / quoth_task_update
 
-```
-📬 Inbox for interviews-agent
-
-**Total:** 2 messages
+Create and manage structured tasks for agents.
 
 ---
-**From:** Main Orchestrator 🌙 @ aws
-**Type:** alert | **Priority:** high
-**Status:** pending
-**Created:** 2026-02-26T14:30:00Z
-**Channel:** hiring
 
-**Message:**
-New candidate pipeline ready for review
+## Provisioning Tools
 
-*ID: msg-uuid-here*
-```
+### quoth_token_generate
 
-### quoth_task_create
-
-Create a structured task for an agent.
-
-#### Parameters
+Generate a JWT MCP token for any project. Enables programmatic token rotation and agent provisioning without the dashboard.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `assigned_to` | string | Yes | Agent name or UUID |
-| `title` | string | Yes | Task title |
-| `description` | string | No | Detailed description |
-| `priority` | number | No | 1-10 (1=highest, default: 5) |
-| `deadline` | string | No | ISO 8601 timestamp |
-| `payload` | object | No | Additional task data |
+| `project_id` | string | No | Project UUID |
+| `project_slug` | string | No | Or use slug |
+| `label` | string | Yes | Token label |
+| `expires_days` | number | No | Default: 90 |
 
-#### Example
+### quoth_project_provision_agent
+
+**One-shot provisioning.** Creates project (if needed) + registers agent (if needed) + generates MCP token. Returns everything needed to configure mcporter.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_name` | string | Yes | Agent name (lowercase, hyphens) |
+| `project_slug` | string | Yes | Project slug |
+| `display_name` | string | No | Human-readable name |
+| `instance` | string | Yes | aws, montino, mac |
+| `model` | string | No | Model identifier |
+| `role` | string | No | Role |
+| `token_label` | string | No | Defaults to "agent-{name}" |
 
 ```javascript
-quoth_task_create({
-  assigned_to: "curator",
-  title: "Review new authentication patterns",
-  description: "Check the patterns proposed by main agent",
-  priority: 3,
-  deadline: "2026-02-27T18:00:00Z"
+quoth_project_provision_agent({
+  agent_name: "deployer",
+  project_slug: "deployer-verticals",
+  display_name: "Deployer 🚀",
+  instance: "montino",
+  model: "anthropic/claude-sonnet-4",
+  role: "specialist"
 })
+// Returns: project_id, agent_id, MCP token, mcporter config
 ```
-
-### quoth_task_update
-
-Update task status, result, or other fields.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `task_id` | string | Yes | Task UUID |
-| `status` | enum | No | `"pending"`, `"in_progress"`, `"done"`, `"failed"`, `"cancelled"` |
-| `result` | object | No | Task result data |
-| `priority` | number | No | Updated priority |
-| `deadline` | string | No | Updated deadline |
 
 ---
 
-## Cross-Instance Communication
+## Documentation Bootstrap
 
-The A2A Bus enables agents running on different infrastructure to communicate seamlessly:
+### quoth_genesis
+
+Scans your codebase and generates documentation in phases:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `depth_level` | `"minimal"` \| `"standard"` \| `"comprehensive"` | No | Default: standard |
+| `focus` | `"full_scan"` \| `"update_only"` | No | Default: full_scan |
+| `language_hint` | string | No | Primary language hint |
+
+---
+
+## Cross-Instance Architecture
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ AWS Agent   │◄───►│  Quoth Bus  │◄───►│ Mac Agent   │
-│ (main)      │     │ (Supabase)  │     │ (interviews)│
-└─────────────┘     └─────────────┘     └─────────────┘
-                             │
-                             ▼
-                    ┌─────────────┐
-                    │ WSL2 Agent  │
-                    │ (curator)   │
-                    └─────────────┘
+│ AWS Agents  │◄───►│  Quoth Bus  │◆───►│ Montino     │
+│ (morfeo,    │     │ (Supabase   │     │ Agents      │
+│  life)      │     │  Realtime)  │     │ (deployer,  │
+└─────────────┘     └─────────────┘     │  ads, echo) │
+                                         └─────────────┘
 ```
+
+All agents authenticate with their own project-scoped MCP token. Messages are delivered in real-time via Supabase Realtime with HMAC-SHA256 signing for verification.
 
 ### Priority Levels
 
-| Priority | Use Case | Delivery |
-|----------|----------|----------|
-| `low` | Background tasks, non-urgent | Standard queue |
-| `normal` | Regular messages | Standard queue |
-| `high` | Important notifications | Expedited |
-| `urgent` | Critical alerts | Immediate + notification |
-
-### Message Signing
-
-All messages include an HMAC-SHA256 signature for verification:
-
-```
-signature = HMAC-SHA256(agent_signing_key, "from:to:payload:timestamp")
-```
-
-The signature is verified on receipt to ensure message authenticity.
-
----
-
-## Prompts (Personas)
-
-<Callout type="info">
-  **Recommended:** Use `quoth_guidelines` tool instead of prompts. It provides the same rules with lower token cost (~150 tokens vs ~2,000) and Claude can call it autonomously.
-</Callout>
-
-For strict behavioral enforcement, Quoth still provides prompts:
-
-### quoth_architect
-
-Enforces "Single Source of Truth" rules. Use before writing code:
-
-```
-/prompt quoth_architect
-```
-
-### quoth_auditor
-
-Reviews code against documentation. Use for code review:
-
-```
-/prompt quoth_auditor
-```
-
-### quoth_documenter
-
-Documents code as you build:
-
-```
-/prompt quoth_documenter
-```
+| Priority | Use Case |
+|----------|----------|
+| `low` | Background tasks |
+| `normal` | Regular messages |
+| `high` | Important notifications |
+| `urgent` | Critical alerts + notification |
 
 ---
 
@@ -502,7 +356,3 @@ Documents code as you build:
 | Free | 10 | 100 |
 | Pro | 60 | 1,000 |
 | Enterprise | Unlimited | Unlimited |
-
-<Callout type="tip">
-  Rate limits apply per API key. Generate separate keys for different projects to avoid hitting limits.
-</Callout>
