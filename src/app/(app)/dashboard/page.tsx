@@ -53,7 +53,7 @@ export default async function DashboardPage() {
     .select('*, project_members!inner(role)')
     .eq('project_members.user_id', user.id);
 
-  const projectIds = projects?.map((p) => p.id) || [];
+  const projectIds = projects?.map((p: any) => p.id) || [];
   const firstProject = projects?.[0];
 
   // Parallelize independent queries for ~50-60% latency reduction (3-4 RTTs → 2 RTTs)
@@ -233,7 +233,7 @@ export default async function DashboardPage() {
 
           <div className="space-y-4">
             {projects && projects.length > 0 ? (
-              projects.map((project, index) => (
+              projects.map((project: any, index: any) => (
                 <div
                   key={project.id}
                   className="glass-panel interactive-card rounded-2xl p-6 animate-stagger"

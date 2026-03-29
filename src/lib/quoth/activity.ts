@@ -137,18 +137,18 @@ export async function getActivitySummary(
     };
   }
 
-  const searchCount = activities.filter((a) => a.event_type === 'search').length;
-  const readCount = activities.filter((a) => a.event_type === 'read' || a.event_type === 'read_chunks').length;
-  const proposeCount = activities.filter((a) => a.event_type === 'propose').length;
+  const searchCount = activities.filter((a: any) => a.event_type === 'search').length;
+  const readCount = activities.filter((a: any) => a.event_type === 'read' || a.event_type === 'read_chunks').length;
+  const proposeCount = activities.filter((a: any) => a.event_type === 'propose').length;
 
   // Calculate miss rate (searches with 0 results)
-  const searches = activities.filter((a) => a.event_type === 'search');
-  const misses = searches.filter((a) => (a.result_count ?? 0) === 0).length;
+  const searches = activities.filter((a: any) => a.event_type === 'search');
+  const misses = searches.filter((a: any) => (a.result_count ?? 0) === 0).length;
   const missRate = searches.length > 0 ? (misses / searches.length) * 100 : 0;
 
   // Top search terms
   const queryCount = new Map<string, number>();
-  searches.forEach((s) => {
+  searches.forEach((s: any) => {
     if (s.query) {
       const normalized = s.query.toLowerCase().trim();
       queryCount.set(normalized, (queryCount.get(normalized) || 0) + 1);
@@ -202,7 +202,7 @@ export async function getMissRateTrends(
   // Group by date
   const byDate = new Map<string, { searches: number; misses: number }>();
 
-  activities.forEach((a) => {
+  activities.forEach((a: any) => {
     const date = new Date(a.created_at).toISOString().split('T')[0];
     const current = byDate.get(date) || { searches: 0, misses: 0 };
     current.searches++;
@@ -219,7 +219,7 @@ export async function getMissRateTrends(
   }));
 
   // Calculate average
-  const totalMisses = activities.filter((a) => (a.result_count ?? 0) === 0).length;
+  const totalMisses = activities.filter((a: any) => (a.result_count ?? 0) === 0).length;
   const averageMissRate = activities.length > 0
     ? Math.round((totalMisses / activities.length) * 100)
     : 0;
@@ -272,7 +272,7 @@ export async function getTopMissedQueries(
   // Count misses per query
   const queryMisses = new Map<string, { count: number; lastMissed: string }>();
 
-  activities.forEach((a) => {
+  activities.forEach((a: any) => {
     if (a.query) {
       const normalized = a.query.toLowerCase().trim();
       const existing = queryMisses.get(normalized);

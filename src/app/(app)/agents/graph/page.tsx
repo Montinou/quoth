@@ -53,8 +53,8 @@ export default async function AgentGraphPage() {
   const { data: assignments } = await supabase
     .from('agent_projects')
     .select('agent_id, project_id, role')
-    .in('agent_id', (agents || []).map(a => a.id))
-    .in('project_id', (projects || []).map(p => p.id));
+    .in('agent_id', (agents || []).map((a: { id: string }) => a.id))
+    .in('project_id', (projects || []).map((p: { id: string }) => p.id));
 
   return (
     <div className="h-screen flex flex-col">

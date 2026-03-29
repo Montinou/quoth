@@ -6,7 +6,11 @@ import { redirect } from 'next/navigation'
 
 export async function signOutAction() {
   const supabase = await createServerSupabaseClient()
-  await supabase.auth.signOut()
+
+  // Only call Supabase signOut if client is configured
+  if (supabase) {
+    await supabase.auth.signOut()
+  }
 
   // Explicitly clear Supabase auth cookies
   const cookieStore = await cookies()

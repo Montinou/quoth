@@ -64,7 +64,7 @@ export default async function AgentsPage() {
     console.error('Failed to fetch agents:', error);
   }
 
-  const agentList = (agents || []).map(agent => ({
+  const agentList = (agents || []).map((agent: Record<string, unknown> & { agent_projects?: { count: number }[] }) => ({
     ...agent,
     project_count: agent.agent_projects?.[0]?.count || 0,
   })) as Agent[];

@@ -465,7 +465,7 @@ This agent can now send/receive messages and create shared knowledge.`,
 
       const formatted = data
         .map(
-          (a) => `- **${a.display_name || a.agent_name}** (\`${a.agent_name}\`)
+          (a: any) => `- **${a.display_name || a.agent_name}** (\`${a.agent_name}\`)
   - ID: \`${a.id}\`
   - Instance: ${a.instance}
   - Role: ${a.role || 'unspecified'}
@@ -928,7 +928,7 @@ The recipient agent will receive this via Realtime push.`,
 
       // Optionally mark as read
       if (mark_read) {
-        const messageIds = messages.map((m) => m.id);
+        const messageIds = messages.map((m: any) => m.id);
         await supabase
           .from('agent_messages')
           .update({

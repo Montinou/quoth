@@ -1691,7 +1691,7 @@ All associated data has been permanently removed:
         const { calculateChecksum } = await import('../sync');
 
         // Delete all existing embeddings for each doc synchronously (fast, no Jina)
-        const docIds = documents.map(d => d.id);
+        const docIds = documents.map((d: any) => d.id);
         const { error: bulkDeleteError } = await supabase
           .from('document_embeddings')
           .delete()
