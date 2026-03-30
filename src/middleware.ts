@@ -38,6 +38,11 @@ const isPublicRoute = createRouteMatcher([
   '/protocol(.*)',
   '/guide(.*)',
   '/pricing(.*)',
+  '/docs(.*)',
+  '/blog(.*)',
+  '/changelog(.*)',
+  '/terms(.*)',
+  '/onboarding(.*)',
   // Sign-in / sign-up (Clerk hosted components)
   '/sign-in(.*)',
   '/sign-up(.*)',
@@ -64,11 +69,10 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
     console.log(`[AI-CRAWLER] ${userAgent.split('/')[0]} -> ${pathname}`);
   }
 
-  // ── H-03: Redirect authenticated users from / to /dashboard ───
-  // Must happen BEFORE the public route early return, otherwise
-  // the "/" match returns NextResponse.next() and this is unreachable.
+  // ── Redirect authenticated users from / to /dashboard ──────────
+  // Use auth() (not protect()) — don't force login on the landing page.
   if (pathname === '/') {
-    const { userId } = await auth.protect().catch(() => ({ userId: null }));
+    const { userId } = await auth();
     if (userId) {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
