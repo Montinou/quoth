@@ -55,28 +55,31 @@ export async function maybeRunConsolidation(): Promise<void> {
 
     // Run the same 3 core tasks as the cron route
     try {
-      await db.execute(sql`SELECT agents.apply_memory_decay() AS affected`);
-    } catch (err) {
-      console.error("[worker/trigger] Temporal decay failed:", err);
+      try {
+        await db.execute(sql`SELECT agents.apply_memory_decay() AS affected`);
+      } catch (err) {
+        console.error("[worker/trigger] Temporal decay failed:", err);
+      }
+
+      try {
+        await db.execute(sql`SELECT agents.consolidate_memory() AS affected`);
+      } catch (err) {
+        console.error("[worker/trigger] Consolidation failed:", err);
+      }
+
+      try {
+        await db.execute(sql`SELECT agents.cleanup_memory() AS affected`);
+      } catch (err) {
+        console.error("[worker/trigger] Cleanup failed:", err);
+      }
+
+      // Update the timestamp only on success
+      await client.set(LAST_CONSOLIDATION_KEY, now);
+
+      console.log("[worker/trigger] Self-triggered consolidation complete");
+    } finally {
+      await client.del(lockKey);
     }
-
-    try {
-      await db.execute(sql`SELECT agents.consolidate_memory() AS affected`);
-    } catch (err) {
-      console.error("[worker/trigger] Consolidation failed:", err);
-    }
-
-    try {
-      await db.execute(sql`SELECT agents.cleanup_memory() AS affected`);
-    } catch (err) {
-      console.error("[worker/trigger] Cleanup failed:", err);
-    }
-
-    // Update the timestamp after success
-    await client.set(LAST_CONSOLIDATION_KEY, now);
-    await client.del(lockKey);
-
-    console.log("[worker/trigger] Self-triggered consolidation complete");
   } catch (err) {
     // Fire-and-forget: never let this crash the caller
     console.error("[worker/trigger] maybeRunConsolidation error:", err);

@@ -37,6 +37,13 @@ function rowToEntry(row: Record<string, unknown>): MemoryEntry {
     source: (row.source as string) ?? "",
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
+    lastAccessedAt: row.last_accessed_at
+      ? new Date(row.last_accessed_at as string)
+      : new Date(row.created_at as string),
+    decayRate: Number(row.decay_rate ?? 0.05),
+    expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
+    embeddingModel: (row.embedding_model as string) ?? "text-embedding-3-small",
+    projectId: (row.project_id as string) ?? null,
   };
 }
 
@@ -112,6 +119,7 @@ export async function storeMemory(
       metadata      = EXCLUDED.metadata,
       source        = EXCLUDED.source,
       expires_at    = EXCLUDED.expires_at,
+      tier          = 'working',
       updated_at    = now()
     RETURNING *
   `);
@@ -139,12 +147,12 @@ export async function searchMemory(
 
   const rows = await db.execute(sql`
     SELECT * FROM agents.search_memory(
-      ${agentId}::uuid,
-      ${sql`${JSON.stringify(queryEmbedding)}::vector`},
-      ${input.namespace ?? null}::text,
-      ${input.tier ?? null}::text,
-      ${limit}::int,
-      ${threshold}::float
+      p_agent_id := ${agentId}::uuid,
+      p_query_embedding := ${sql`${JSON.stringify(queryEmbedding)}::vector`},
+      p_namespace := ${input.namespace ?? null}::text,
+      p_tier := ${input.tier ?? null}::text,
+      p_limit := ${limit}::int,
+      p_threshold := ${threshold}::float
     )
   `);
 

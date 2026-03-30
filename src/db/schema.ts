@@ -295,6 +295,7 @@ export const agentMemory = agentsSchema.table(
       .with({ m: 16, ef_construction: 200 }),
     index("idx_memory_agent_ns").on(t.agentId, t.namespace),
     index("idx_memory_agent_tier").on(t.agentId, t.tier),
+    index("idx_memory_agent_tier_relevance").on(t.agentId, t.tier, t.relevanceScore),
     index("idx_memory_relevance").on(t.agentId, t.relevanceScore),
     index("idx_memory_tags").using("gin", t.tags),
     index("idx_memory_expires")
@@ -561,7 +562,7 @@ export const activity = analyticsSchema.table(
     index("idx_activity_project").on(t.projectId),
     index("idx_activity_event").on(t.projectId, t.eventType),
     index("idx_activity_agent").on(t.agentId).where(sql`agent_id IS NOT NULL`),
-    check("activity_event_type_check", sql`${t.eventType} IN ('search', 'read', 'read_chunks', 'propose', 'genesis', 'pattern_match', 'pattern_inject', 'drift_detected', 'coverage_scan', 'project_create', 'project_update', 'project_delete', 'agent_register', 'agent_update', 'agent_remove', 'agent_assign_project', 'agent_unassign_project', 'agent_message_sent', 'agent_inbox_read', 'reindex', 'agent_task_created', 'agent_task_updated', 'token_generate', 'agent_provision', 'webhook_delivery', 'channel_publish')`),
+    check("activity_event_type_check", sql`${t.eventType} IN ('search', 'read', 'read_chunks', 'propose', 'genesis', 'pattern_match', 'pattern_inject', 'drift_detected', 'coverage_scan', 'project_create', 'project_update', 'project_delete', 'agent_register', 'agent_update', 'agent_remove', 'agent_assign_project', 'agent_unassign_project', 'agent_message_sent', 'agent_inbox_read', 'reindex', 'agent_task_created', 'agent_task_updated', 'token_generate', 'agent_provision', 'webhook_delivery', 'channel_publish', 'memory_store', 'memory_search', 'memory_list', 'memory_forget', 'consolidation', 'cache_cleanup')`),
   ]
 );
 

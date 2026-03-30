@@ -82,40 +82,33 @@ export async function POST(req: NextRequest) {
 
   // ── Task 4: Drift Detection ─────────────────────────────────────
   try {
-    // Find documents updated in the last hour
-    const recentDocs = await db.execute(sql`
-      SELECT d.id, d.project_id, d.file_path, d.title
+    // Batch query: find recently updated docs that have chunks referencing them
+    const driftCandidates = await db.execute(sql`
+      SELECT d.id, d.project_id, d.file_path, d.title,
+             COUNT(c.id)::int as ref_count
       FROM docs.documents d
+      LEFT JOIN docs.chunks c ON c.file_path = d.file_path AND c.project_id = d.project_id
       WHERE d.updated_at > now() - interval '1 hour'
+      GROUP BY d.id, d.project_id, d.file_path, d.title
+      HAVING COUNT(c.id) > 0
     `);
 
-    for (const doc of recentDocs.rows) {
-      // Check if any agent memory references this document's file_path
-      // Using a broad search across agents schema for file_path references
-      const memoryRefs = await db.execute(sql`
-        SELECT COUNT(*) AS ref_count
-        FROM docs.chunks c
-        WHERE c.file_path = ${doc.file_path}
+    for (const doc of driftCandidates.rows) {
+      await db.execute(sql`
+        INSERT INTO search.drift_events (
+          project_id, document_id, severity, drift_type,
+          file_path, description, resolved
+        ) VALUES (
+          ${doc.project_id},
+          ${doc.id},
+          'info',
+          'stale_doc',
+          ${doc.file_path},
+          ${"Document updated; " + doc.ref_count + " chunk(s) may reference stale content: " + doc.title},
+          false
+        )
       `);
-
-      const refCount = Number(memoryRefs.rows[0]?.ref_count ?? 0);
-      if (refCount > 0) {
-        await db.execute(sql`
-          INSERT INTO search.drift_events (
-            project_id, document_id, severity, drift_type,
-            file_path, description, resolved
-          ) VALUES (
-            ${doc.project_id},
-            ${doc.id},
-            'info',
-            'stale_doc',
-            ${doc.file_path},
-            ${"Document updated; " + refCount + " chunk(s) may reference stale content: " + doc.title},
-            false
-          )
-        `);
-        results.driftEvents++;
-      }
+      results.driftEvents++;
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -136,7 +129,7 @@ export async function POST(req: NextRequest) {
       SELECT
         p.id,
         p.org_id,
-        'coverage_scan',
+        'consolidation',
         ${JSON.stringify({
           cron: "consolidate",
           decayed: results.decayed,
@@ -146,8 +139,7 @@ export async function POST(req: NextRequest) {
           errors: results.errors,
         })}::jsonb,
         ${results.durationMs}
-      FROM projects p
-      LIMIT 1
+      FROM (SELECT NULL::uuid AS id, NULL::uuid AS org_id) AS p
     `);
   } catch (err) {
     // Non-fatal — the cron still succeeded even if logging fails

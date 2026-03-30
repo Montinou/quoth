@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       SELECT
         p.id,
         p.org_id,
-        'coverage_scan',
+        'cache_cleanup',
         ${JSON.stringify({
           cron: "cleanup-cache",
           cacheDeleted: results.cacheDeleted,

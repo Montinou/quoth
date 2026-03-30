@@ -32,6 +32,12 @@ Issues identified during code review that were intentionally deferred. Track the
 **What:** Some index names in Drizzle schema don't match the SQL migration (e.g., Drizzle auto-generates names that differ from explicit migration names).
 **Why deferred:** Drizzle schema index names are used only for push/generate commands. Actual production indexes are managed by the SQL migration. No runtime impact.
 
+## M-03: search_memory() returns subset of columns used by rowToEntry()
+
+**File:** `src/lib/memory/service.ts` (rowToEntry), `src/db/migrations/003_memory_fixes.sql` (search_memory)
+**What:** `search_memory()` returns 14 columns but `rowToEntry()` maps 17 fields (also `last_accessed_at`, `decay_rate`, `expires_at`, `embedding_model`, `project_id`). When called from `searchMemory()`, those 5 fields fall back to defaults (current date, 0.05, null, "text-embedding-3-small", null) which are reasonable but not the actual stored values.
+**Why deferred:** The defaults in `rowToEntry()` are safe fallbacks and match the DB column defaults. Adding these 5 columns to `search_memory()` RETURNS TABLE would fix it but the function signature would need another DROP+RECREATE migration. Low priority since search results primarily need similarity, key, value, and tags.
+
 ## M-04: EMBEDDING_DIMS constant exported but unused
 
 **File:** `src/lib/embeddings/gateway.ts`

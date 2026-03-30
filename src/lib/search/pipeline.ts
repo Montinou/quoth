@@ -21,6 +21,7 @@ import type { SearchOptions, SearchResult } from './types';
 import { SEARCH_CONFIG, getAdaptiveFetchCount } from './types';
 import { getCachedResults, setCachedResults } from './cache';
 import { searchSharedDocs } from './shared';
+import { maybeRunConsolidation } from '@/lib/worker/trigger';
 
 // ---------------------------------------------------------------------------
 // Internal Types
@@ -321,6 +322,9 @@ export async function searchDocuments(
       console.warn('[SEARCH] Shared doc search failed:', error);
     }
   }
+
+  // Fire-and-forget: trigger consolidation if overdue
+  void maybeRunConsolidation().catch(() => {});
 
   return results;
 }

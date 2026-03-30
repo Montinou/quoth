@@ -17,6 +17,11 @@ export interface MemoryEntry {
   source: string;
   createdAt: Date;
   updatedAt: Date;
+  lastAccessedAt: Date;
+  decayRate: number;
+  expiresAt: Date | null;
+  embeddingModel: string;
+  projectId: string | null;
 }
 
 export interface StoreMemoryInput {
