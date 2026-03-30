@@ -3,7 +3,9 @@
  * Shows status, last_seen, instance, and assigned projects
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { getDb } from '@/db/connection';
+import { sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, Circle, Clock, Server, FolderOpen, Network } from 'lucide-react';
@@ -23,24 +25,21 @@ interface Agent {
 }
 
 export default async function AgentsPage() {
-  const supabase = await createServerSupabaseClient();
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     redirect('/');
   }
 
-  // Get user's organization
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single();
+  const db = getDb();
 
-  if (!profile?.organization_id) {
+  // Get user's organization
+  const userRow = await db.execute(sql`
+    SELECT default_org_id FROM public.users WHERE clerk_user_id = ${userId}
+  `).then(r => r.rows[0] as any);
+
+  const organizationId = userRow?.default_org_id;
+
+  if (!organizationId) {
     return (
       <div className="px-6 py-8">
         <div className="max-w-5xl mx-auto">
@@ -50,36 +49,31 @@ export default async function AgentsPage() {
     );
   }
 
-  // Fetch all agents in organization
-  const { data: agents, error } = await supabase
-    .from('agents')
-    .select(`
-      *,
-      agent_projects(count)
-    `)
-    .eq('organization_id', profile.organization_id)
-    .order('created_at', { ascending: false });
+  // Fetch all agents in organization with project count
+  const agents = await db.execute(sql`
+    SELECT r.*,
+      COALESCE((SELECT COUNT(*)::int FROM agents.agent_projects ap WHERE ap.agent_id = r.id), 0) AS project_count
+    FROM agents.registry r
+    WHERE r.org_id = ${organizationId}
+    ORDER BY r.created_at DESC
+  `).then(r => r.rows as any[]);
 
-  if (error) {
-    console.error('Failed to fetch agents:', error);
-  }
-
-  const agentList = (agents || []).map((agent: Record<string, unknown> & { agent_projects?: { count: number }[] }) => ({
-    ...agent,
-    project_count: agent.agent_projects?.[0]?.count || 0,
-  })) as Agent[];
+  const agentList = agents as Agent[];
 
   // Fetch projects and assignments for graph
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id, slug')
-    .eq('organization_id', profile.organization_id)
-    .order('slug');
+  const projects = await db.execute(sql`
+    SELECT id, slug FROM public.projects
+    WHERE org_id = ${organizationId}
+    ORDER BY slug
+  `).then(r => r.rows as any[]);
 
-  const { data: assignments } = await supabase
-    .from('agent_projects')
-    .select('agent_id, project_id, role')
-    .in('agent_id', agentList.map(a => a.id));
+  const agentIds = agentList.map(a => a.id);
+  const assignments = agentIds.length > 0
+    ? await db.execute(sql`
+        SELECT agent_id, project_id, role FROM agents.agent_projects
+        WHERE agent_id = ANY(${agentIds})
+      `).then(r => r.rows as any[])
+    : [];
 
   // Status badge component
   const StatusBadge = ({ status, lastSeen }: { status: string; lastSeen: string | null }) => {

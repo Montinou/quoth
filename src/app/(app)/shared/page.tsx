@@ -3,7 +3,9 @@
  * Cross-project documentation shared across the organization
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { getDb } from '@/db/connection';
+import { sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { Globe, FileText, Clock, FolderOpen, Search } from 'lucide-react';
@@ -28,24 +30,21 @@ interface SharedDocument {
 }
 
 export default async function SharedKnowledgePage() {
-  const supabase = await createServerSupabaseClient();
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     redirect('/');
   }
 
-  // Get user's organization
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single();
+  const db = getDb();
 
-  if (!profile?.organization_id) {
+  // Get user's organization
+  const userRow = await db.execute(sql`
+    SELECT default_org_id FROM public.users WHERE clerk_user_id = ${userId}
+  `).then(r => r.rows[0] as any);
+
+  const organizationId = userRow?.default_org_id;
+
+  if (!organizationId) {
     return (
       <div className="px-6 py-8">
         <div className="max-w-5xl mx-auto">
@@ -55,37 +54,33 @@ export default async function SharedKnowledgePage() {
     );
   }
 
-  // Fetch all shared documents in organization
-  const { data: sharedDocs, error } = await supabase
-    .from('documents')
-    .select(`
-      id,
-      title,
-      file_path,
-      project_id,
-      version,
-      last_updated,
-      doc_type,
-      tags,
-      agent_id,
-      projects!inner(
-        slug,
-        organization_id
-      ),
-      agents(
-        agent_name,
-        display_name
-      )
-    `)
-    .eq('visibility', 'shared')
-    .eq('projects.organization_id', profile.organization_id)
-    .order('last_updated', { ascending: false });
+  // Fetch all shared documents in organization with project and agent info
+  const sharedDocs = await db.execute(sql`
+    SELECT d.id, d.title, d.file_path, d.project_id, d.version,
+           d.updated_at AS last_updated, d.doc_type, d.tags, d.agent_id,
+           p.slug AS project_slug,
+           r.agent_name, r.display_name AS agent_display_name
+    FROM docs.documents d
+    INNER JOIN public.projects p ON p.id = d.project_id
+    LEFT JOIN agents.registry r ON r.id = d.agent_id
+    WHERE d.visibility = 'shared' AND p.org_id = ${organizationId}
+    ORDER BY d.updated_at DESC
+  `).then(r => r.rows as any[]);
 
-  if (error) {
-    console.error('Failed to fetch shared documents:', error);
-  }
-
-  const documents = (sharedDocs || []) as any as SharedDocument[];
+  // Transform to match SharedDocument shape
+  const documents: SharedDocument[] = sharedDocs.map((doc: any) => ({
+    id: doc.id,
+    title: doc.title,
+    file_path: doc.file_path,
+    project_id: doc.project_id,
+    version: doc.version,
+    last_updated: doc.last_updated,
+    doc_type: doc.doc_type,
+    tags: doc.tags,
+    agent_id: doc.agent_id,
+    projects: { slug: doc.project_slug },
+    agents: doc.agent_name ? { agent_name: doc.agent_name, display_name: doc.agent_display_name } : null,
+  }));
 
   // Group documents by project
   const projectGroups = documents.reduce((acc, doc) => {
@@ -145,7 +140,7 @@ export default async function SharedKnowledgePage() {
           </div>
           <div className="glass-panel rounded-xl p-5">
             <p className="text-gray-500 text-sm mb-1">Organization</p>
-            <p className="text-xl font-bold text-white mt-2">{profile.organization_id.slice(0, 8)}...</p>
+            <p className="text-xl font-bold text-white mt-2">{organizationId.slice(0, 8)}...</p>
           </div>
         </div>
 
