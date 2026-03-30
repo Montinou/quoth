@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { documents } from '@/db/schema';
 
 interface DocumentResponse {
@@ -39,7 +39,7 @@ export async function GET(
     return NextResponse.json({ error: 'Missing document id' }, { status: 400 });
   }
 
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   const rows = await db
     .select({

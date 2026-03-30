@@ -11,7 +11,11 @@
     "test:run": "vitest run",
     "verify:rag": "tsx src/scripts/verify-rag.ts",
     "reindex": "tsx src/scripts/reindex.ts",
-    "setup:wasm": "tsx src/scripts/setup-wasm.ts"
+    "setup:wasm": "tsx src/scripts/setup-wasm.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.48",

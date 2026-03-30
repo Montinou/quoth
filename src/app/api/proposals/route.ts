@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { proposals } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ export const GET = createApiHandler(
   },
   async (_req, ctx, _params) => {
     const query = _req.validatedQuery as z.infer<typeof listProposalsQuery>;
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
 
     const conditions = [eq(proposals.projectId, ctx!.projectId)];
     if (query.status) {

@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle, NeonHttpDatabase } from "drizzle-orm/neon-http";
+import { sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 // Singleton pattern: one Drizzle instance per runtime
@@ -50,6 +51,27 @@ export function getUnpooledDb(): NeonHttpDatabase<typeof schema> {
   const sql = neon(url);
   _unpooledDb = drizzle(sql, { schema });
   return _unpooledDb;
+}
+
+/**
+ * Get a database connection with RLS session variables set.
+ * Uses unpooled connection to support SET LOCAL per-request.
+ *
+ * Use this from all authenticated API routes. Cron/webhook routes
+ * should use getDb() instead — the table owner bypasses RLS.
+ *
+ * @param orgId - Organization UUID from auth context
+ * @param userId - Clerk user ID (optional, for user-scoped policies)
+ */
+export async function getSecureDb(orgId: string, userId?: string | null) {
+  const db = getUnpooledDb();
+
+  await db.execute(sql`SELECT set_config('app.org_id', ${orgId}, true)`);
+  if (userId) {
+    await db.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+  }
+
+  return db;
 }
 
 // Re-export schema for convenience

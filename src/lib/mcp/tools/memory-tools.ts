@@ -231,7 +231,7 @@ export function registerMemoryTools(server: McpServer, authContext: AuthContext)
         const { agentId } = requireAgent(authContext);
         const input = MemorySearchInput.parse(args);
 
-        const results = await searchMemory(agentId, {
+        const results = await searchMemory(agentId, authContext.orgId, {
           query: input.query,
           namespace: input.namespace,
           tier: input.tier,

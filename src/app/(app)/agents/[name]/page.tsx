@@ -4,7 +4,7 @@
  */
 
 import { auth } from '@clerk/nextjs/server';
-import { getDb } from '@/db/connection';
+import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -41,11 +41,10 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
     redirect('/');
   }
 
-  const db = getDb();
-
-  // Get user's organization
-  const userRow = await db.execute(sql`
-    SELECT default_org_id FROM public.users WHERE clerk_user_id = ${userId}
+  // Get user's organization (self-lookup, no RLS needed)
+  const pooledDb = getDb();
+  const userRow = await pooledDb.execute(sql`
+    SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
   `).then(r => r.rows[0] as any);
 
   if (!userRow?.default_org_id) {
@@ -53,6 +52,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
   }
 
   const organizationId = userRow.default_org_id;
+  const db = await getSecureDb(organizationId, userRow.id);
 
   // Fetch agent by name
   const agentRow = await db.execute(sql`

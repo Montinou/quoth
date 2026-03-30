@@ -5,7 +5,7 @@
 
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { projects } from '@/db/schema';
 import { notFound } from '@/lib/api/errors';
 
@@ -19,7 +19,7 @@ export const GET = createApiHandler(
     rateLimit: { rpm: 120 },
   },
   async (_req, ctx, params) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
 
     const [project] = await db
       .select()

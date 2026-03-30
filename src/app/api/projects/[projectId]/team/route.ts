@@ -17,7 +17,7 @@ export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { projects, projectMembers, users } from '@/db/schema';
 
 export async function GET(
@@ -32,7 +32,7 @@ export async function GET(
 
   const { projectId } = await params;
 
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Verify the project belongs to the caller's org
   const [project] = await db

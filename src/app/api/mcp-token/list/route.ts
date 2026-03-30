@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 
 import { eq, and, isNull } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { agentApiKeys, agentRegistry } from '@/db/schema';
 
 export async function GET(): Promise<Response> {
@@ -25,7 +25,7 @@ export async function GET(): Promise<Response> {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   const rows = await db
     .select({

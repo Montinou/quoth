@@ -82,6 +82,16 @@ export async function storeMemory(
 ): Promise<MemoryEntry> {
   const db = getDb();
 
+  // Validate agent belongs to this org
+  const agentCheck = await db.execute(sql`
+    SELECT 1 FROM agents.registry
+    WHERE id = ${agentId}::uuid AND org_id = ${orgId}::uuid
+    LIMIT 1
+  `);
+  if (!agentCheck.rows.length) {
+    throw new Error('Agent not found in organization');
+  }
+
   const namespace = input.namespace ?? "default";
   const tags = input.tags ?? [];
   const metadata = input.metadata ?? {};
@@ -135,9 +145,20 @@ export async function storeMemory(
  */
 export async function searchMemory(
   agentId: string,
+  orgId: string,
   input: SearchMemoryInput,
 ): Promise<SearchMemoryResult[]> {
   const db = getDb();
+
+  // Validate agent belongs to this org
+  const agentCheck = await db.execute(sql`
+    SELECT 1 FROM agents.registry
+    WHERE id = ${agentId}::uuid AND org_id = ${orgId}::uuid
+    LIMIT 1
+  `);
+  if (!agentCheck.rows.length) {
+    throw new Error('Agent not found in organization');
+  }
 
   const limit = input.limit ?? 10;
   const threshold = input.threshold ?? 0.3;

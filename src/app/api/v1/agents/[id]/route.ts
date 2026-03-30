@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { agentRegistry } from '@/db/schema';
 import { notFound, forbidden } from '@/lib/api/errors';
 
@@ -34,7 +34,7 @@ export const GET = createApiHandler(
     rateLimit: { rpm: 120 },
   },
   async (_req, ctx, params) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
 
     const [agent] = await db
       .select({
@@ -78,7 +78,7 @@ export const PATCH = createApiHandler(
       throw forbidden('Only admins can update agents.');
     }
 
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const body = req.validatedBody as z.infer<typeof updateAgentBody>;
 
     // Build update set from provided fields only

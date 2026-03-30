@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { generateEmbedding } from '@/lib/embeddings/gateway';
 
 interface SearchResult {
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to generate query embedding' }, { status: 502 });
   }
 
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Cosine similarity search over docs.chunks, scoped to org
   // 1 - cosine_distance = cosine similarity
