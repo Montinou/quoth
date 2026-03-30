@@ -35,6 +35,7 @@ create_default_config() {
     "require_error_documentation": false,
     "require_memory_context": true
   },
+  "auto_memory": true,
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -118,4 +119,19 @@ is_reminder_mode() {
 # Check if strictness is off
 is_off_mode() {
     [ "$(get_strictness)" = "off" ]
+}
+
+# Check if auto_memory is enabled (default: true for non-off modes)
+is_auto_memory_enabled() {
+    if is_off_mode; then
+        return 1
+    fi
+    # Check explicit config value
+    if [ -f "$QUOTH_CONFIG_FILE" ]; then
+        if grep -q '"auto_memory"[[:space:]]*:[[:space:]]*false' "$QUOTH_CONFIG_FILE" 2>/dev/null; then
+            return 1
+        fi
+    fi
+    # Default: enabled
+    return 0
 }
