@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Plus,
   Sparkles,
   Layers,
   Bot,
@@ -40,6 +41,18 @@ import { cn } from "@/lib/utils";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+interface CreatedProject {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface CreatedAgent {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
 interface OnboardingFlowProps {
   initialStep: number;
   initialData: Record<string, string>;
@@ -52,6 +65,10 @@ interface StepComponentProps {
   totalSteps: number;
   loading: boolean;
   savedData: Record<string, string>;
+  createdProjects?: CreatedProject[];
+  setCreatedProjects?: React.Dispatch<React.SetStateAction<CreatedProject[]>>;
+  createdAgents?: CreatedAgent[];
+  setCreatedAgents?: React.Dispatch<React.SetStateAction<CreatedAgent[]>>;
 }
 
 // ── Shared wrappers (adapted from onboarding1) ──────────────────────────────
@@ -344,11 +361,14 @@ function StepProject({
   currentStep,
   totalSteps,
   loading,
+  createdProjects = [],
+  setCreatedProjects,
 }: StepComponentProps) {
   const [projectName, setProjectName] = useState("");
   const [projectSlug, setProjectSlug] = useState("");
   const [description, setDescription] = useState("");
   const [slugManual, setSlugManual] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -361,64 +381,120 @@ function StepProject({
     setProjectSlug(slugify(e.target.value));
   };
 
+  const handleAdd = async () => {
+    setAdding(true);
+    try {
+      await onSubmit({
+        action: "add",
+        projectName,
+        projectSlug,
+        description,
+      });
+      setCreatedProjects?.((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), name: projectName, slug: projectSlug },
+      ]);
+      setProjectName("");
+      setProjectSlug("");
+      setDescription("");
+      setSlugManual(false);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleContinue = () => {
+    onSubmit({ action: "continue" });
+  };
+
   return (
     <OnboardingStepLayout>
       <LeftPanel
-        title="Create your first project"
+        title={createdProjects.length ? "Add projects" : "Create your first project"}
         description="Projects group documents, agents, and search indexes."
         currentStep={currentStep}
         totalSteps={totalSteps}
         goBack={goBack}
       >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({ projectName, projectSlug, description });
-          }}
-          className="space-y-6 py-4"
-        >
-          <FormField
-            label="Project name"
-            placeholder="My App"
-            name="projectName"
-            value={projectName}
-            onChange={handleNameChange}
-            disabled={loading}
-          />
-          <FormField
-            label="Project slug"
-            placeholder="my-app"
-            name="projectSlug"
-            value={projectSlug}
-            onChange={handleSlugChange}
-            disabled={loading}
-          />
-          <div className="space-y-2">
-            <Label htmlFor="description" className="text-gray-300">
-              Description (optional)
-            </Label>
-            <Textarea
-              id="description"
-              placeholder="A brief description of your project..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={loading}
-              className="w-full bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-violet-500"
-              style={{ resize: "none" }}
-            />
-          </div>
-          <Button
-            type="submit"
-            disabled={loading || !projectName.trim()}
-            className="mt-4 w-full bg-violet-600 hover:bg-violet-700 text-white"
+        <div className="space-y-6 py-4">
+          {/* Created projects list */}
+          {createdProjects.length > 0 && (
+            <div className="space-y-2">
+              {createdProjects.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-3 py-2"
+                >
+                  <Check className="size-3.5 text-violet-400 shrink-0" />
+                  <span className="text-sm text-gray-200 truncate">{p.name}</span>
+                  <span className="text-xs text-gray-500 truncate">/{p.slug}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAdd();
+            }}
+            className="space-y-4"
           >
-            {loading ? "Creating..." : "Continue"}
-          </Button>
-        </form>
+            <FormField
+              label="Project name"
+              placeholder="My App"
+              name="projectName"
+              value={projectName}
+              onChange={handleNameChange}
+              disabled={loading || adding}
+            />
+            <FormField
+              label="Project slug"
+              placeholder="my-app"
+              name="projectSlug"
+              value={projectSlug}
+              onChange={handleSlugChange}
+              disabled={loading || adding}
+            />
+            <div className="space-y-2">
+              <Label htmlFor="description" className="text-gray-300">
+                Description (optional)
+              </Label>
+              <Textarea
+                id="description"
+                placeholder="A brief description of your project..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={loading || adding}
+                className="w-full bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-violet-500"
+                style={{ resize: "none" }}
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={loading || adding || !projectName.trim()}
+                className="flex-1 border-zinc-700 text-gray-300 hover:bg-zinc-800 hover:text-white"
+              >
+                <Plus className="mr-1 size-4" />
+                {adding ? "Adding..." : createdProjects.length ? "Add Another Project" : "Add Project"}
+              </Button>
+              <Button
+                type="button"
+                onClick={handleContinue}
+                disabled={loading || createdProjects.length === 0}
+                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+              >
+                {loading ? "Saving..." : "Continue"}
+              </Button>
+            </div>
+          </form>
+        </div>
       </LeftPanel>
       <RightPanel>
         <DashboardIllustration
-          title={projectName || "Your Project"}
+          title={projectName || (createdProjects[0]?.name ?? "Your Project")}
           icon={<Layers className="size-3.5 text-violet-400" />}
         />
       </RightPanel>
@@ -434,81 +510,168 @@ function StepAgent({
   currentStep,
   totalSteps,
   loading,
+  createdProjects = [],
+  createdAgents = [],
+  setCreatedAgents,
 }: StepComponentProps) {
   const [agentName, setAgentName] = useState("claude");
   const [displayName, setDisplayName] = useState("Claude");
   const [model, setModel] = useState("claude-sonnet-4-6");
   const [role, setRole] = useState("orchestrator");
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    createdProjects[0]?.id ?? ""
+  );
+  const [adding, setAdding] = useState(false);
   const [skipDialogOpen, setSkipDialogOpen] = useState(false);
+
+  const handleAdd = async () => {
+    setAdding(true);
+    try {
+      await onSubmit({
+        action: "add",
+        agentName: slugify(agentName),
+        displayName,
+        model,
+        role,
+        projectId: selectedProjectId,
+      });
+      setCreatedAgents?.((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), name: slugify(agentName), displayName },
+      ]);
+      setAgentName("");
+      setDisplayName("");
+      setModel("claude-sonnet-4-6");
+      setRole("orchestrator");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleContinue = () => {
+    onSubmit({ action: "continue" });
+  };
 
   return (
     <OnboardingStepLayout>
       <LeftPanel
-        title="Register your AI agent"
-        description="Connect an AI agent to your project for documentation and search."
+        title="Register your AI agents"
+        description="Connect AI agents to your projects for documentation and search."
         currentStep={currentStep}
         totalSteps={totalSteps}
         goBack={goBack}
       >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({ agentName: slugify(agentName), displayName, model, role });
-          }}
-          className="space-y-5 py-4"
-        >
-          <FormField
-            label="Agent name"
-            placeholder="claude"
-            name="agentName"
-            value={agentName}
-            onChange={(e) => setAgentName(e.target.value)}
-            disabled={loading}
-          />
-          <FormField
-            label="Display name"
-            placeholder="Claude"
-            name="displayName"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            disabled={loading}
-          />
+        <div className="space-y-5 py-4">
+          {/* Created agents list */}
+          {createdAgents.length > 0 && (
+            <div className="space-y-2">
+              {createdAgents.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-3 py-2"
+                >
+                  <Check className="size-3.5 text-violet-400 shrink-0" />
+                  <span className="text-sm text-gray-200 truncate">{a.displayName}</span>
+                  <span className="text-xs text-gray-500 truncate">({a.name})</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-          <div className="space-y-2">
-            <Label className="text-gray-300">Model</Label>
-            <Select value={model} onValueChange={setModel} disabled={loading}>
-              <SelectTrigger className="w-full bg-zinc-800/50 border-zinc-700 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude-sonnet-4-6">Claude Sonnet 4.6</SelectItem>
-                <SelectItem value="claude-opus-4-6">Claude Opus 4.6</SelectItem>
-                <SelectItem value="claude-haiku-4-5">Claude Haiku 4.5</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-gray-300">Role</Label>
-            <Select value={role} onValueChange={setRole} disabled={loading}>
-              <SelectTrigger className="w-full bg-zinc-800/50 border-zinc-700 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="orchestrator">Orchestrator</SelectItem>
-                <SelectItem value="specialist">Specialist</SelectItem>
-                <SelectItem value="curator">Curator</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Button
-            type="submit"
-            disabled={loading || !agentName.trim()}
-            className="mt-4 w-full bg-violet-600 hover:bg-violet-700 text-white"
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAdd();
+            }}
+            className="space-y-4"
           >
-            {loading ? "Registering..." : "Continue"}
-          </Button>
+            <FormField
+              label="Agent name"
+              placeholder="claude"
+              name="agentName"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+              disabled={loading || adding}
+            />
+            <FormField
+              label="Display name"
+              placeholder="Claude"
+              name="displayName"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              disabled={loading || adding}
+            />
+
+            {createdProjects.length > 1 && (
+              <div className="space-y-2">
+                <Label className="text-gray-300">Assign to project</Label>
+                <Select
+                  value={selectedProjectId}
+                  onValueChange={setSelectedProjectId}
+                  disabled={loading || adding}
+                >
+                  <SelectTrigger className="w-full bg-zinc-800/50 border-zinc-700 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {createdProjects.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-gray-300">Model</Label>
+              <Select value={model} onValueChange={setModel} disabled={loading || adding}>
+                <SelectTrigger className="w-full bg-zinc-800/50 border-zinc-700 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="claude-sonnet-4-6">Claude Sonnet 4.6</SelectItem>
+                  <SelectItem value="claude-opus-4-6">Claude Opus 4.6</SelectItem>
+                  <SelectItem value="claude-haiku-4-5">Claude Haiku 4.5</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-gray-300">Role</Label>
+              <Select value={role} onValueChange={setRole} disabled={loading || adding}>
+                <SelectTrigger className="w-full bg-zinc-800/50 border-zinc-700 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="orchestrator">Orchestrator</SelectItem>
+                  <SelectItem value="specialist">Specialist</SelectItem>
+                  <SelectItem value="curator">Curator</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={loading || adding || !agentName.trim()}
+                className="flex-1 border-zinc-700 text-gray-300 hover:bg-zinc-800 hover:text-white"
+              >
+                <Plus className="mr-1 size-4" />
+                {adding ? "Adding..." : createdAgents.length ? "Add Another Agent" : "Add Agent"}
+              </Button>
+              <Button
+                type="button"
+                onClick={handleContinue}
+                disabled={loading}
+                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+              >
+                {loading ? "Saving..." : "Continue"}
+              </Button>
+            </div>
+          </form>
 
           <Dialog open={skipDialogOpen} onOpenChange={setSkipDialogOpen}>
             <DialogTrigger asChild>
@@ -534,7 +697,7 @@ function StepAgent({
                 <Button
                   onClick={() => {
                     setSkipDialogOpen(false);
-                    onSubmit({ skip: true });
+                    onSubmit({ action: "skip" });
                   }}
                   className="bg-violet-600 hover:bg-violet-700 text-white"
                 >
@@ -543,7 +706,7 @@ function StepAgent({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </form>
+        </div>
       </LeftPanel>
       <RightPanel>
         <DashboardIllustration
@@ -695,18 +858,32 @@ function StepDone({
                   <span className="text-gray-400">Organization created</span>
                 </div>
               )}
-              {savedData.projectId && (
-                <div className="flex items-center gap-2 text-sm">
-                  <FileText className="size-4 text-violet-400" />
-                  <span className="text-gray-400">Project created</span>
-                </div>
-              )}
-              {savedData.agentId && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Bot className="size-4 text-violet-400" />
-                  <span className="text-gray-400">Agent registered</span>
-                </div>
-              )}
+              {(() => {
+                const projectCount = savedData.projectIds
+                  ? JSON.parse(savedData.projectIds).length
+                  : savedData.projectId ? 1 : 0;
+                return projectCount > 0 ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <FileText className="size-4 text-violet-400" />
+                    <span className="text-gray-400">
+                      {projectCount} {projectCount === 1 ? "project" : "projects"} created
+                    </span>
+                  </div>
+                ) : null;
+              })()}
+              {(() => {
+                const agentCount = savedData.agentIds
+                  ? JSON.parse(savedData.agentIds).length
+                  : savedData.agentId ? 1 : 0;
+                return agentCount > 0 ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Bot className="size-4 text-violet-400" />
+                    <span className="text-gray-400">
+                      {agentCount} {agentCount === 1 ? "agent" : "agents"} registered
+                    </span>
+                  </div>
+                ) : null;
+              })()}
             </div>
 
             {/* Next steps */}
@@ -769,6 +946,8 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [loading, setLoading] = useState(false);
   const [savedData, setSavedData] = useState<Record<string, string>>(initialData);
+  const [createdProjects, setCreatedProjects] = useState<CreatedProject[]>([]);
+  const [createdAgents, setCreatedAgents] = useState<CreatedAgent[]>([]);
   const router = useRouter();
   const { error: showError } = useToast();
 
@@ -790,7 +969,12 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
         }
 
         const newData = json.data ?? {};
-        setSavedData((prev) => ({ ...prev, ...newData }));
+        // Serialize arrays for savedData (used in StepDone summary)
+        const flatData: Record<string, string> = {};
+        for (const [k, v] of Object.entries(newData)) {
+          flatData[k] = Array.isArray(v) ? JSON.stringify(v) : String(v ?? "");
+        }
+        setSavedData((prev) => ({ ...prev, ...flatData }));
 
         // Step 4 (Done) -> redirect to dashboard
         if (currentStep === 4) {
@@ -852,6 +1036,10 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
               totalSteps={STEPS.length}
               loading={loading}
               savedData={savedData}
+              createdProjects={createdProjects}
+              setCreatedProjects={setCreatedProjects}
+              createdAgents={createdAgents}
+              setCreatedAgents={setCreatedAgents}
             />
           </motion.div>
         </AnimatePresence>

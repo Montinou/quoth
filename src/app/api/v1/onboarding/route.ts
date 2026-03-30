@@ -29,18 +29,39 @@ interface OnboardingMeta {
   onboarding_completed: boolean;
   onboarding_data: {
     orgId?: string;
+    projectIds: string[];
+    agentIds: string[];
+    genesisDepth?: string;
+    // Backward compat — old single-value fields
     projectId?: string;
     agentId?: string;
-    genesisDepth?: string;
   };
 }
 
 function parseMetadata(raw: unknown): OnboardingMeta {
   const meta = (raw ?? {}) as Record<string, unknown>;
+  const data = (meta.onboarding_data as Record<string, unknown>) ?? {};
+
+  // Backward compat: migrate old single projectId/agentId to arrays
+  let projectIds: string[] = Array.isArray(data.projectIds) ? (data.projectIds as string[]) : [];
+  if (!projectIds.length && typeof data.projectId === 'string' && data.projectId) {
+    projectIds = [data.projectId];
+  }
+
+  let agentIds: string[] = Array.isArray(data.agentIds) ? (data.agentIds as string[]) : [];
+  if (!agentIds.length && typeof data.agentId === 'string' && data.agentId) {
+    agentIds = [data.agentId];
+  }
+
   return {
     onboarding_step: typeof meta.onboarding_step === 'number' ? meta.onboarding_step : 0,
     onboarding_completed: meta.onboarding_completed === true,
-    onboarding_data: (meta.onboarding_data as OnboardingMeta['onboarding_data']) ?? {},
+    onboarding_data: {
+      orgId: typeof data.orgId === 'string' ? data.orgId : undefined,
+      projectIds,
+      agentIds,
+      genesisDepth: typeof data.genesisDepth === 'string' ? data.genesisDepth : undefined,
+    },
   };
 }
 
@@ -168,50 +189,70 @@ export async function POST(req: Request) {
         return Response.json({ error: 'Complete step 0 first' }, { status: 400 });
       }
 
-      const projectName = String(data.projectName || '').trim();
-      const projectSlug = slugify(String(data.projectSlug || projectName));
-      const description = data.description ? String(data.description).trim() : null;
+      const action = String(data.action || 'continue');
 
-      if (!projectName || !projectSlug) {
-        return Response.json({ error: 'Project name is required' }, { status: 400 });
+      if (action === 'add') {
+        const projectName = String(data.projectName || '').trim();
+        const projectSlug = slugify(String(data.projectSlug || projectName));
+        const description = data.description ? String(data.description).trim() : null;
+
+        if (!projectName || !projectSlug) {
+          return Response.json({ error: 'Project name is required' }, { status: 400 });
+        }
+
+        // Check for duplicate slug within org
+        const [dupCheck] = await db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(and(eq(projects.orgId, orgId), eq(projects.slug, projectSlug)))
+          .limit(1);
+
+        let projectId: string;
+
+        if (dupCheck) {
+          projectId = dupCheck.id;
+        } else {
+          const [created] = await db
+            .insert(projects)
+            .values({ orgId, name: projectName, slug: projectSlug, description })
+            .returning({ id: projects.id });
+          projectId = created!.id;
+
+          // Add user as admin of the project
+          await db.insert(projectMembers).values({
+            projectId,
+            userId: user.id,
+            role: 'admin',
+          });
+        }
+
+        // Set defaultProjectId on first project
+        const isFirst = meta.onboarding_data.projectIds.length === 0;
+        meta.onboarding_data.projectIds = [...meta.onboarding_data.projectIds, projectId];
+
+        const updateSet: Record<string, unknown> = {
+          metadata: { ...meta },
+          updatedAt: new Date(),
+        };
+        if (isFirst) {
+          updateSet.defaultProjectId = projectId;
+        }
+
+        await db.update(users).set(updateSet).where(eq(users.id, user.id));
+
+        return Response.json({ success: true, step: 1, data: meta.onboarding_data });
       }
 
-      // Check for duplicate slug within org
-      const [dupCheck] = await db
-        .select({ id: projects.id })
-        .from(projects)
-        .where(and(eq(projects.orgId, orgId), eq(projects.slug, projectSlug)))
-        .limit(1);
-
-      let projectId: string;
-
-      if (dupCheck) {
-        projectId = dupCheck.id;
-      } else {
-        const [created] = await db
-          .insert(projects)
-          .values({ orgId, name: projectName, slug: projectSlug, description })
-          .returning({ id: projects.id });
-        projectId = created!.id;
-
-        // Add user as admin of the project
-        await db.insert(projectMembers).values({
-          projectId,
-          userId: user.id,
-          role: 'admin',
-        });
+      // action === 'continue' — advance to step 2
+      if (!meta.onboarding_data.projectIds.length) {
+        return Response.json({ error: 'Create at least one project' }, { status: 400 });
       }
 
       meta.onboarding_step = 2;
-      meta.onboarding_data.projectId = projectId;
 
       await db
         .update(users)
-        .set({
-          defaultProjectId: projectId,
-          metadata: { ...meta },
-          updatedAt: new Date(),
-        })
+        .set({ metadata: { ...meta }, updatedAt: new Date() })
         .where(eq(users.id, user.id));
 
       return Response.json({ success: true, step: 2, data: meta.onboarding_data });
@@ -220,20 +261,22 @@ export async function POST(req: Request) {
     // ── Step 2: Agent ──────────────────────────────────────────────────
     if (step === 2) {
       const orgId = meta.onboarding_data.orgId;
-      const projectId = meta.onboarding_data.projectId;
 
-      if (!orgId || !projectId) {
+      if (!orgId || !meta.onboarding_data.projectIds.length) {
         return Response.json({ error: 'Complete steps 0-1 first' }, { status: 400 });
       }
 
-      const skipped = data.skip === true;
-      let agentId: string | undefined;
+      const action = String(data.action || 'continue');
 
-      if (!skipped) {
+      if (action === 'add') {
         const agentName = slugify(String(data.agentName || 'claude'));
         const displayName = String(data.displayName || 'Claude').trim();
         const model = String(data.model || 'claude-sonnet-4-6');
         const role = String(data.role || 'orchestrator');
+        // Which project to assign the agent to (defaults to first)
+        const targetProjectId = String(
+          data.projectId || meta.onboarding_data.projectIds[0]
+        );
 
         // Generate a signing key for the agent
         const signingKey = randomBytes(32).toString('hex');
@@ -252,19 +295,28 @@ export async function POST(req: Request) {
             capabilities: {},
           })
           .returning({ id: agentRegistry.id });
-        agentId = created!.id;
+        const agentId = created!.id;
 
-        // Assign agent to project
+        // Assign agent to selected project
         await db.insert(agentProjects).values({
           agentId,
-          projectId,
+          projectId: targetProjectId,
           role: 'contributor',
           assignedBy: user.id,
         });
+
+        meta.onboarding_data.agentIds = [...meta.onboarding_data.agentIds, agentId];
+
+        await db
+          .update(users)
+          .set({ metadata: { ...meta }, updatedAt: new Date() })
+          .where(eq(users.id, user.id));
+
+        return Response.json({ success: true, step: 2, data: meta.onboarding_data });
       }
 
+      // action === 'continue' or 'skip' — advance to step 3
       meta.onboarding_step = 3;
-      if (agentId) meta.onboarding_data.agentId = agentId;
 
       await db
         .update(users)
