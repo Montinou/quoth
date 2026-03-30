@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { agentApiKeys, agentRegistry } from '@/db/schema';
 import { generateAgentApiKey } from '@/lib/auth/agent-keys';
 
@@ -44,7 +44,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: 'Invalid request body. "label" is required.' }, { status: 400 });
   }
 
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Resolve agentId: use provided agentId (must belong to org), or fall back to
   // the caller's own agentId (when authenticated via an agent key).

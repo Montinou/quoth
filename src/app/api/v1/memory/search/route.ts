@@ -40,7 +40,7 @@ export const POST = createApiHandler(
     const { agentId } = requireAgentAuth(ctx);
     const body = req.validatedBody as z.infer<typeof SearchBodySchema>;
 
-    const results = await searchMemory(agentId, {
+    const results = await searchMemory(agentId, ctx!.orgId, {
       query: body.query,
       namespace: body.namespace,
       tier: body.tier,

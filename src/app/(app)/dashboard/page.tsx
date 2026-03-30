@@ -6,7 +6,7 @@
 
 import { Suspense } from 'react';
 import { auth } from '@clerk/nextjs/server';
-import { getDb } from '@/db/connection';
+import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
@@ -45,7 +45,23 @@ export default async function DashboardPage() {
     redirect('/');
   }
 
-  const db = getDb();
+  // Look up user's org with pooled connection (self-lookup, no RLS needed)
+  const pooledDb = getDb();
+  const userRow = await pooledDb.execute(sql`
+    SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
+  `).then(r => r.rows[0] as any);
+
+  if (!userRow?.default_org_id) {
+    return (
+      <div className="px-6 py-8">
+        <div className="max-w-7xl mx-auto">
+          <p className="text-gray-400">No organization found. Complete onboarding first.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const db = await getSecureDb(userRow.default_org_id, userRow.id);
 
   // Fetch user's projects with role (join through users table using clerk_user_id)
   const projects = await db.execute(sql`

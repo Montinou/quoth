@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { agentRegistry } from '@/db/schema';
 import { forbidden } from '@/lib/api/errors';
 import { nanoid } from 'nanoid';
@@ -50,7 +50,7 @@ export const GET = createApiHandler(
     validate: { query: listAgentsQuery },
   },
   async (req, ctx) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const { status, limit, offset } = req.validatedQuery as z.infer<typeof listAgentsQuery>;
 
     const rows = await db
@@ -90,7 +90,7 @@ export const POST = createApiHandler(
       throw forbidden('Only admins can register agents.');
     }
 
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const body = req.validatedBody as z.infer<typeof registerAgentBody>;
 
     // Generate a signing key for message authentication

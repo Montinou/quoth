@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { documents } from '@/db/schema';
 import { forbidden } from '@/lib/api/errors';
 
@@ -84,7 +84,7 @@ export const GET = createApiHandler(
     validate: { query: listDocsQuery },
   },
   async (req, ctx) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const { limit, offset, docType, indexingStatus } = req.validatedQuery as z.infer<
       typeof listDocsQuery
     >;
@@ -131,7 +131,7 @@ export const POST = createApiHandler(
       throw forbidden('Viewers cannot create documents.');
     }
 
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const body = req.validatedBody as z.infer<typeof createDocBody>;
     const hash = await checksum(body.content);
 

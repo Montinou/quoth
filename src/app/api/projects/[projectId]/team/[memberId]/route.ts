@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getDb } from '@/db/connection';
+import { getDb, getSecureDb } from '@/db/connection';
 import { projects, projectMembers, users } from '@/db/schema';
 
 async function getCallerDbUserId(clerkUserId: string): Promise<string | null> {
@@ -37,7 +37,7 @@ export async function PATCH(
   }
 
   const { projectId, memberId } = await params;
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Verify project belongs to caller's org
   const [project] = await db
@@ -127,7 +127,7 @@ export async function DELETE(
   }
 
   const { projectId, memberId } = await params;
-  const db = getDb();
+  const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Verify project belongs to caller's org
   const [project] = await db

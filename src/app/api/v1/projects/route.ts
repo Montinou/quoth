@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { projects, projectMembers } from '@/db/schema';
 import { forbidden } from '@/lib/api/errors';
 
@@ -42,7 +42,7 @@ export const GET = createApiHandler(
     validate: { query: listProjectsQuery },
   },
   async (req, ctx) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const { limit, offset } = req.validatedQuery as z.infer<typeof listProjectsQuery>;
 
     // Agents scoped to allowed projects; humans see all org projects
@@ -79,7 +79,7 @@ export const POST = createApiHandler(
       throw forbidden('Viewers cannot create projects.');
     }
 
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const body = req.validatedBody as z.infer<typeof createProjectBody>;
 
     const [project] = await db

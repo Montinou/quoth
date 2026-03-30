@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and, isNull } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { agentApiKeys, agentRegistry } from '@/db/schema';
 import { notFound, forbidden } from '@/lib/api/errors';
 import { nanoid } from 'nanoid';
@@ -58,7 +58,7 @@ export const POST = createApiHandler(
       throw forbidden('Only admins can generate API keys.');
     }
 
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const agentId = params.id;
 
     // Verify agent exists and belongs to this org
@@ -126,7 +126,7 @@ export const GET = createApiHandler(
     rateLimit: { rpm: 60 },
   },
   async (_req, ctx, params) => {
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const agentId = params.id;
 
     // Verify agent belongs to this org

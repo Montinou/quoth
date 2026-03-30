@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
-import { getDb } from '@/db/connection';
+import { getSecureDb } from '@/db/connection';
 import { proposals, users } from '@/db/schema';
 import { notFound, forbidden, badRequest } from '@/lib/api/errors';
 
@@ -33,7 +33,7 @@ export const POST = createApiHandler(
   },
   async (_req, ctx, params) => {
     const body = _req.validatedBody as z.infer<typeof rejectBody>;
-    const db = getDb();
+    const db = await getSecureDb(ctx!.orgId, ctx!.userId);
 
     // Verify proposal exists and belongs to the caller's project
     const [proposal] = await db
