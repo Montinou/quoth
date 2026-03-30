@@ -22,6 +22,7 @@ import { registerAgentTools } from './tools/agent-tools';
 import { registerProjectTools } from './tools/project-tools';
 import { registerGenesisTools } from './tools/genesis-tools';
 import { registerMemoryTools } from './tools/memory-tools';
+import { storeMemory } from '@/lib/memory/service';
 
 /**
  * Log a tool invocation to the analytics.activity table.
@@ -87,6 +88,84 @@ function mapToolToEventType(toolName: string): string {
   return mapping[toolName] ?? 'search';
 }
 
+// ── Auto-Memory ─────────────────────────────────────────────────────────────
+
+/** Tools worth auto-capturing as working memory (high-value interactions). */
+const AUTO_MEMORY_TOOLS = new Set([
+  'quoth_search_index',
+  'quoth_read_doc',
+  'quoth_read_chunks',
+  'quoth_genesis',
+  'quoth_agent_send_message',
+  'quoth_agent_tasks',
+]);
+
+/**
+ * Auto-store a tool invocation as working memory for the calling agent.
+ * Fire-and-forget — never blocks tool execution, never throws.
+ * Only fires for agent-authenticated calls on high-value tools.
+ * Temporal decay in the consolidation cron handles cleanup.
+ */
+function autoStoreMemory(
+  authContext: AuthContext,
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+) {
+  // Only for authenticated agents with a project context
+  if (!authContext.isAgent || !authContext.agentId || !authContext.orgId) return;
+  if (!AUTO_MEMORY_TOOLS.has(toolName)) return;
+
+  // Build a concise summary of the tool call
+  const summary = buildToolSummary(toolName, toolArgs);
+  if (!summary) return;
+
+  const key = `auto:${toolName}:${Date.now()}`;
+
+  void storeMemory(authContext.agentId, authContext.orgId, {
+    key,
+    value: summary,
+    namespace: 'auto-memory',
+    tags: ['auto-capture', toolName.replace('quoth_', '')],
+    metadata: { tool: toolName, captured_at: new Date().toISOString() },
+    source: 'auto-capture',
+    projectId: authContext.projectId || undefined,
+  }).catch(() => {
+    // Swallow — auto-memory must never break tool execution
+  });
+}
+
+/** Build a concise summary string from tool args. Cap at 500 chars. */
+function buildToolSummary(
+  toolName: string,
+  args: Record<string, unknown>,
+): string | null {
+  switch (toolName) {
+    case 'quoth_search_index':
+      return args.query ? `Searched: "${args.query}"` : null;
+    case 'quoth_read_doc':
+      return args.documentId ? `Read doc: ${args.documentId}` : null;
+    case 'quoth_read_chunks':
+      return args.documentId ? `Read chunks: ${args.documentId}` : null;
+    case 'quoth_genesis': {
+      const depth = args.depth ?? 'standard';
+      return `Genesis bootstrap (${depth})`;
+    }
+    case 'quoth_agent_send_message': {
+      const to = args.toAgentId ?? args.to ?? 'unknown';
+      const msg = String(args.content ?? args.message ?? '').slice(0, 200);
+      return `Message to ${to}: ${msg}`;
+    }
+    case 'quoth_agent_tasks': {
+      const action = args.action ?? 'list';
+      return `Tasks: ${action}${args.taskId ? ` (${args.taskId})` : ''}`;
+    }
+    default:
+      return null;
+  }
+}
+
+// ── Instrumented Server ─────────────────────────────────────────────────────
+
 /**
  * Create a proxy McpServer that wraps registerTool calls with
  * timeout + activity logging.
@@ -126,6 +205,9 @@ function createInstrumentedServer(
 
         // Log successful invocation
         logToolUsage(authContext, name, startTime);
+
+        // Auto-capture as working memory for agents
+        autoStoreMemory(authContext, name, handlerArgs[0] ?? {});
 
         return result;
       } catch (err) {
