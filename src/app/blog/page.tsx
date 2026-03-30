@@ -3,10 +3,10 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 import { getAllPosts, getFeaturedPost } from '@/lib/content/blog';
-import { cacheTag, cacheLife } from 'next/cache';
 import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Calendar, Clock, ArrowRight } from 'lucide-react';
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: 'Blog | Quoth',
@@ -22,9 +22,6 @@ function formatDate(dateStr: string): string {
 }
 
 export default async function BlogPage() {
-  'use cache'
-  cacheTag('blog')
-  cacheLife('hours')
 
   const posts = await getAllPosts();
   const featured = await getFeaturedPost();

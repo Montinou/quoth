@@ -17,6 +17,9 @@
         "CLAUDE_FLOW_MEMORY_BACKEND": "hybrid"
       },
       "autoStart": false
+    },
+    "clerk": {
+      "url": "https://mcp.clerk.com/mcp"
     }
   }
 }

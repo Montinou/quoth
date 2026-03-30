@@ -3,8 +3,8 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 import { getDocsSidebar } from '@/lib/content/docs';
-import { cacheTag, cacheLife } from 'next/cache';
 import { BookOpen, Zap, Code, BarChart, ArrowRight } from 'lucide-react';
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: 'Documentation | Quoth',
@@ -19,9 +19,6 @@ const sectionIcons: Record<string, typeof BookOpen> = {
 };
 
 export default async function DocsPage() {
-  'use cache'
-  cacheTag('docs')
-  cacheLife('hours')
 
   const sections = await getDocsSidebar();
 

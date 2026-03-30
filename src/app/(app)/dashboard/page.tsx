@@ -8,6 +8,7 @@ import { Suspense } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
+export const revalidate = 60;
 
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';

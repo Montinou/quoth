@@ -9,6 +9,7 @@ import { sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { Globe, FileText, Clock, FolderOpen, Search } from 'lucide-react';
+export const revalidate = 60;
 
 interface SharedDocument {
   id: string;

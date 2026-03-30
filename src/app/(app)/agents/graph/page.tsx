@@ -8,6 +8,7 @@ import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { AgentProjectGraph } from '@/components/agents/AgentProjectGraph';
+export const revalidate = 60;
 
 export default async function AgentGraphPage() {
   const { userId } = await auth();
