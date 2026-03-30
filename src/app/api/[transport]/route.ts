@@ -7,7 +7,7 @@
  * Features:
  * - OAuth 2.1 authentication via MCP API keys or OAuth tokens
  * - Proper WWW-Authenticate headers for OAuth discovery
- * - 9 Tools: search, read, propose, guidelines, templates, chunks, accounts
+ * - v2 modular tool registration via registerAllTools
  *
  * Authentication:
  * - Requires Bearer token in Authorization header
@@ -18,8 +18,9 @@
  */
 
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
-import { registerQuothTools } from '@/lib/quoth/tools';
-import { verifyMcpApiKey, type AuthContext } from '@/lib/auth/mcp-auth';
+import { registerAllTools } from '@/lib/mcp/register';
+import { verifyMcpApiKey, type AuthContext as LegacyAuthContext } from '@/lib/auth/mcp-auth';
+import type { AuthContext } from '@/lib/auth/types';
 import { sessionManager } from '@/lib/auth/session-manager';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -40,7 +41,7 @@ async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo
   if (mcpAuth) {
     // Generate unique connection ID (or extract from request headers if available)
     const connectionId = req.headers.get('x-mcp-connection-id') || randomUUID();
-    
+
     return {
       token: bearerToken,
       clientId: mcpAuth.user_id,
@@ -61,65 +62,93 @@ async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo
 }
 
 /**
- * Extract AuthContext from AuthInfo
+ * Extract legacy AuthContext from AuthInfo and map to v2 AuthContext
  */
-function getAuthContextFromRequest(req: Request): AuthContext {
+function getAuthContextFromRequest(req: Request): { legacy: LegacyAuthContext; v2: AuthContext } {
   const authInfo = (req as Request & { auth?: AuthInfo }).auth;
+
+  const defaultLegacy: LegacyAuthContext = {
+    project_id: 'quoth-knowledge-base',
+    user_id: 'anonymous',
+    role: 'viewer',
+  };
+
   if (!authInfo?.extra) {
-    // Default for public access (shouldn't happen with required auth)
     return {
-      project_id: 'quoth-knowledge-base',
-      user_id: 'anonymous',
-      role: 'viewer',
+      legacy: defaultLegacy,
+      v2: {
+        userId: 'anonymous',
+        clerkUserId: null,
+        orgId: '',
+        projectId: 'quoth-knowledge-base',
+        role: 'viewer',
+        tier: 'free',
+        isAgent: false,
+      },
     };
   }
 
   const extra = authInfo.extra as Record<string, unknown>;
-  return {
+  const legacy: LegacyAuthContext = {
     project_id: (extra.project_id as string) || 'quoth-knowledge-base',
     user_id: (extra.user_id as string) || 'anonymous',
     role: (extra.role as 'admin' | 'editor' | 'viewer') || 'viewer',
     connection_id: extra.connection_id as string | undefined,
-    available_projects: extra.available_projects as AuthContext['available_projects'],
+    available_projects: extra.available_projects as LegacyAuthContext['available_projects'],
   };
+
+  // Map legacy role to v2 role
+  const roleMap: Record<string, AuthContext['role']> = {
+    admin: 'admin',
+    editor: 'editor',
+    viewer: 'viewer',
+  };
+
+  const v2: AuthContext = {
+    userId: legacy.user_id,
+    clerkUserId: null, // JWT-based auth, no Clerk user ID
+    orgId: '',
+    projectId: legacy.project_id,
+    role: roleMap[legacy.role] || 'viewer',
+    tier: 'free',
+    isAgent: false,
+  };
+
+  return { legacy, v2 };
 }
 
 /**
  * Register tools on the MCP server
  */
-function setupServer(server: McpServer, authContext: AuthContext) {
+function setupServer(server: McpServer, legacy: LegacyAuthContext, v2: AuthContext) {
   // Initialize or update session if connection ID is available
-  if (authContext.connection_id && authContext.available_projects) {
+  if (legacy.connection_id && legacy.available_projects) {
     sessionManager.createOrUpdateSession(
-      authContext.connection_id,
-      authContext.user_id,
-      authContext.project_id,
-      authContext.role,
-      authContext.available_projects
+      legacy.connection_id,
+      legacy.user_id,
+      legacy.project_id,
+      legacy.role,
+      legacy.available_projects
     );
 
     // Refresh auth context from session (in case account was switched)
-    const activeContext = sessionManager.getActiveContext(authContext.connection_id);
+    const activeContext = sessionManager.getActiveContext(legacy.connection_id);
     if (activeContext) {
-      authContext.project_id = activeContext.project_id;
-      authContext.role = activeContext.role;
+      v2.projectId = activeContext.project_id;
+      v2.role = activeContext.role as AuthContext['role'];
     }
   }
 
-  // Register all Quoth tools with authentication context
-  registerQuothTools(server, authContext);
-
-  // Note: MCP prompts (quoth_architect, quoth_auditor, quoth_documenter) have been removed.
-  // The Quoth plugin now uses hooks (SessionStart, PreToolUse, Stop) to guide Claude toward
-  // documentation patterns. See .claude/plugins/quoth/hooks.json for hook configuration.
+  // Register all v2 tools with authentication context
+  registerAllTools(server, v2);
 }
 
 /**
  * Create MCP handler for a specific auth context
  */
-function createHandlerWithContext(authContext: AuthContext) {
+function createHandlerWithContext(legacy: LegacyAuthContext, v2: AuthContext) {
   return createMcpHandler(
-    (server) => setupServer(server, authContext),
+    (server) => setupServer(server, legacy, v2),
     {},
     {
       basePath: '/api',
@@ -135,10 +164,10 @@ function createHandlerWithContext(authContext: AuthContext) {
 const oauthHandler = withMcpAuth(
   async (req: Request) => {
     // Extract auth context from the authenticated request
-    const authContext = getAuthContextFromRequest(req);
-    
+    const { legacy, v2 } = getAuthContextFromRequest(req);
+
     // Create handler with auth context and process request
-    const handler = createHandlerWithContext(authContext);
+    const handler = createHandlerWithContext(legacy, v2);
     return handler(req);
   },
   verifyToken,

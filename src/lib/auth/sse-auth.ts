@@ -32,7 +32,7 @@ function extractToken(req: NextRequest): string | null {
 
 /**
  * Verifies JWT token and returns auth context
- * Handles both Supabase OAuth tokens and custom API keys
+ * Handles custom API keys
  */
 export async function verifySseToken(req: NextRequest): Promise<AuthContext | null> {
   const token = extractToken(req);

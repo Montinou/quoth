@@ -1,16 +1,14 @@
 /**
  * Quoth Services Export
  * Central export for all Quoth functionality
+ *
+ * NOTE: search, tools, activity, drift, health modules have been removed.
+ * Search is now at @/lib/search/pipeline (v2 Drizzle-based).
+ * Tools registration is at @/lib/mcp/register.
  */
 
 // Core Types
 export * from './types';
-
-// Search & RAG Pipeline
-export * from './search';
-
-// MCP Tools Registration
-export * from './tools';
 
 // Prompts & Personas
 export * from './prompt-constants';
@@ -19,47 +17,13 @@ export * from './prompts';
 // Genesis (Documentation Bootstrap)
 export * from './genesis';
 
-// Activity & Analytics
-export {
-  logActivity,
-  createActivityLogger,
-  getActivitySummary,
-  getMissRateTrends,
-  getTopMissedQueries,
-  type ActivityEventType,
-  type ActivityLogParams,
-} from './activity';
+// Guidelines
+export * from './guidelines';
 
 // Coverage
 export {
-  calculateCoverage,
-  saveCoverageSnapshot,
   getLatestCoverage,
   type CoverageResult,
   type CoverageBreakdown,
   type DocType,
 } from './coverage';
-
-// Drift Detection
-export {
-  detectDrift,
-  getDriftTimeline,
-  getDriftSummary,
-  resolveDrift,
-  type DriftSeverity,
-  type DriftType,
-  type DriftEvent,
-  type DetectDriftParams,
-} from './drift';
-
-// Document Health
-export {
-  calculateStaleness,
-  getDocumentHealth,
-  getProjectHealth,
-  getDocumentsNeedingAttention,
-  type StalenessLevel,
-  type StalenessResult,
-  type DocumentHealth,
-  type ProjectHealthSummary,
-} from './health';

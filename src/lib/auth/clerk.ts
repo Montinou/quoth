@@ -5,7 +5,7 @@
  *   1. Try Clerk JWT (from @clerk/nextjs auth())
  *   2. Fall back to agent API key header (x-api-key / Authorization: Bearer qth_...)
  *
- * Existing Supabase-based auth in mcp-auth.ts is preserved alongside this module.
+ * Legacy MCP JWT auth is preserved in mcp-auth.ts for backward compatibility.
  */
 
 import { auth } from '@clerk/nextjs/server';
