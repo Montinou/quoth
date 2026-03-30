@@ -1,13 +1,13 @@
 /**
  * POST /api/v1/cron/consolidate — Hourly memory consolidation cron.
  *
- * Vercel Cron or QStash calls this every hour. Runs 4 sequential tasks:
+ * QStash calls this every hour. Runs 4 sequential tasks:
  *   1. Temporal decay — working memories lose 5% relevance per cycle
  *   2. Consolidate — promote qualifying working memories to persistent
  *   3. Cleanup — delete expired + low-relevance working memories
  *   4. Drift detection — flag documents updated in the last hour
  *
- * Auth: Bearer CRON_SECRET header OR QStash signature verification.
+ * Auth: QStash signature verification (Upstash-Signature header).
  */
 
 import { getDb } from "@/db/connection";

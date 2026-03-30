@@ -1,11 +1,11 @@
 /**
  * POST /api/v1/cron/cleanup-cache — Daily cache and old generation cleanup.
  *
- * Vercel Cron or QStash calls this at 03:00 UTC daily.
+ * QStash calls this at 03:00 UTC daily.
  *   1. Delete expired entries from search.query_cache
  *   2. Delete old completed generations (> 30 days)
  *
- * Auth: Bearer CRON_SECRET header OR QStash signature verification.
+ * Auth: QStash signature verification (Upstash-Signature header).
  */
 
 import { getDb } from "@/db/connection";

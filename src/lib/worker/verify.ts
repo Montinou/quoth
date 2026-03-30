@@ -1,9 +1,7 @@
 /**
- * Cron auth verification — accepts EITHER:
- *   1. Bearer CRON_SECRET header (Vercel Cron)
- *   2. QStash signature (Upstash-Signature header)
+ * Cron auth verification via QStash signature (Upstash-Signature header).
  *
- * Env vars for QStash verification:
+ * Env vars:
  *   QSTASH_CURRENT_SIGNING_KEY
  *   QSTASH_NEXT_SIGNING_KEY
  */
@@ -23,48 +21,35 @@ function getReceiver(): Receiver | null {
 }
 
 /**
- * Verify cron request authentication.
+ * Verify cron request authentication via QStash signature.
  * Returns null if authorized, or a Response if unauthorized.
  */
 export async function verifyCronAuth(
   req: NextRequest,
 ): Promise<Response | null> {
-  // Method 1: Bearer CRON_SECRET
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.get("authorization");
-
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
-    return null; // Authorized via CRON_SECRET
-  }
-
-  // Method 2: QStash signature verification
   const signature = req.headers.get("upstash-signature");
-  if (signature) {
-    const recv = getReceiver();
-    if (recv) {
-      try {
-        const body = await req.text();
-        const isValid = await recv.verify({
-          signature,
-          body,
-        });
-        if (isValid) return null; // Authorized via QStash signature
-      } catch (err) {
-        console.error(
-          "[verifyCronAuth] QStash signature verification failed:",
-          err,
-        );
-      }
-    }
+  if (!signature) {
+    return Response.json(
+      { error: "Missing Upstash-Signature header" },
+      { status: 401 },
+    );
   }
 
-  // Neither method succeeded
-  if (!cronSecret) {
+  const recv = getReceiver();
+  if (!recv) {
     return Response.json(
-      { error: "CRON_SECRET not configured and no valid QStash signature" },
+      { error: "QStash signing keys not configured" },
       { status: 500 },
     );
   }
 
-  return Response.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const body = await req.text();
+    const isValid = await recv.verify({ signature, body });
+    if (isValid) return null;
+  } catch (err) {
+    console.error("[verifyCronAuth] QStash signature verification failed:", err);
+  }
+
+  return Response.json({ error: "Invalid QStash signature" }, { status: 401 });
 }

@@ -1,11 +1,11 @@
 /**
  * POST /api/v1/cron/webhook-retry — Retry failed webhook deliveries.
  *
- * Runs every 5 minutes via QStash or Vercel Cron. Picks up deliveries
+ * Runs every 5 minutes via QStash. Picks up deliveries
  * with status='retrying' whose next_retry_at has passed, and re-delivers
  * them via deliverWebhook().
  *
- * Auth: Bearer CRON_SECRET header OR QStash signature verification.
+ * Auth: QStash signature verification (Upstash-Signature header).
  */
 
 import { getDb } from "@/db/connection";

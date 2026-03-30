@@ -26,6 +26,7 @@ function getClient(): Client {
 export interface ScheduleResult {
   consolidation: { scheduleId: string };
   cleanup: { scheduleId: string };
+  webhookRetry: { scheduleId: string };
 }
 
 /**
@@ -59,9 +60,17 @@ export async function setupQstashSchedules(
     retries: 2,
   });
 
+  // Schedule 3: Webhook retry — every 5 minutes
+  const webhookRetry = await client.schedules.create({
+    destination: `${baseUrl}/api/v1/cron/webhook-retry`,
+    cron: "*/5 * * * *",
+    retries: 2,
+  });
+
   return {
     consolidation: { scheduleId: consolidation.scheduleId },
     cleanup: { scheduleId: cleanup.scheduleId },
+    webhookRetry: { scheduleId: webhookRetry.scheduleId },
   };
 }
 
@@ -78,7 +87,8 @@ export async function removeQstashSchedules(): Promise<void> {
     if (
       typeof dest === "string" &&
       (dest.includes("/api/v1/cron/consolidate") ||
-        dest.includes("/api/v1/cron/cleanup-cache"))
+        dest.includes("/api/v1/cron/cleanup-cache") ||
+        dest.includes("/api/v1/cron/webhook-retry"))
     ) {
       await client.schedules.delete(schedule.scheduleId);
     }
