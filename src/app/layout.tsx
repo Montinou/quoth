@@ -4,6 +4,8 @@ import { Cinzel, Cormorant_Garamond } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ProfileProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { OrganizationSchema, SoftwareApplicationSchema } from "@/components/SchemaMarkup";
 import "./globals.css";
 
@@ -93,6 +95,8 @@ export default function RootLayout({
             <ToastProvider>{children}</ToastProvider>
           </ProfileProvider>
         </ClerkProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
