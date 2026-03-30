@@ -18,7 +18,6 @@ import {
   removeQstashSchedules,
 } from "@/lib/worker/qstash";
 
-export const runtime = "nodejs";
 
 async function authorize(): Promise<Response | null> {
   const { userId } = await auth();

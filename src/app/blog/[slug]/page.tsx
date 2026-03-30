@@ -4,12 +4,11 @@ import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getPostBySlug, getAllPosts, getRelatedPosts } from '@/lib/content/blog';
+import { cacheTag, cacheLife } from 'next/cache';
 import { MDXContent } from '@/components/mdx';
 import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Calendar, Clock, ArrowLeft } from 'lucide-react';
-
-export const revalidate = 3600;
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -54,6 +53,10 @@ function formatDate(dateStr: string): string {
 }
 
 export default async function BlogPostPage({ params }: Props) {
+  'use cache'
+  cacheTag('blog')
+  cacheLife('hours')
+
   const { slug } = await params;
   const post = await getPostBySlug(slug);
 

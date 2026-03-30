@@ -3,7 +3,6 @@
  *   GET — List proposals, optionally filtered by status.
  */
 
-export const runtime = 'nodejs';
 
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';

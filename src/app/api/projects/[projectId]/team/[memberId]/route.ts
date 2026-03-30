@@ -5,7 +5,6 @@
  * Only project admins may update or remove members.
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

@@ -5,7 +5,6 @@
  * Returns 501 Not Implemented.
  */
 
-export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth/clerk';

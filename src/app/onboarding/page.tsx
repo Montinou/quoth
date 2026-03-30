@@ -13,7 +13,6 @@ import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { OnboardingFlow } from './onboarding-flow';
 
-export const runtime = 'nodejs';
 
 export default async function OnboardingPage() {
   const { userId } = await auth();

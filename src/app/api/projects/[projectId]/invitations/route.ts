@@ -6,7 +6,6 @@
  * GET returns an empty array; POST returns 501 Not Implemented.
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

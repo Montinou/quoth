@@ -7,7 +7,6 @@
  * Response: { project: { id, slug, userRole } }
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

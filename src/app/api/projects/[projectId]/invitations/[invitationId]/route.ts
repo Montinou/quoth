@@ -5,7 +5,6 @@
  * Returns 501 Not Implemented.
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

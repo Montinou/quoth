@@ -8,7 +8,6 @@ import { getDb } from '@/db/connection';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
-export const runtime = 'nodejs';
 
 export async function GET() {
   const { userId } = await auth();

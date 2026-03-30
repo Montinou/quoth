@@ -2,12 +2,11 @@
 
 import { Metadata } from 'next';
 import { getAllChangelogs, groupChangelogsByMonth, formatChangelogDate } from '@/lib/content/changelog';
+import { cacheTag, cacheLife } from 'next/cache';
 import { MDXContent } from '@/components/mdx';
 import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Rss } from 'lucide-react';
-
-export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: 'Changelog | Quoth',
@@ -15,6 +14,10 @@ export const metadata: Metadata = {
 };
 
 export default async function ChangelogPage() {
+  'use cache'
+  cacheTag('changelog')
+  cacheLife('hours')
+
   const entries = await getAllChangelogs();
   const grouped = groupChangelogsByMonth(entries);
 

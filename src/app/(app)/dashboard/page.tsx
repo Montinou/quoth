@@ -8,8 +8,8 @@ import { Suspense } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
+import { cacheTag, cacheLife } from 'next/cache';
 
-export const revalidate = 60; // Revalidate dashboard data every 60 seconds
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
 import { ActivityCard } from '@/components/dashboard/ActivityCard';
@@ -41,11 +41,10 @@ function CardSkeleton() {
   );
 }
 
-export default async function DashboardPage() {
-  const { userId } = await auth();
-  if (!userId) {
-    redirect('/');
-  }
+async function getDashboardData(userId: string) {
+  'use cache'
+  cacheTag('dashboard')
+  cacheLife('minutes')
 
   // Look up user's org with pooled connection (self-lookup, no RLS needed)
   const pooledDb = getDb();
@@ -54,13 +53,7 @@ export default async function DashboardPage() {
   `).then(r => r.rows[0] as any);
 
   if (!userRow?.default_org_id) {
-    return (
-      <div className="px-6 py-8">
-        <div className="max-w-7xl mx-auto">
-          <p className="text-gray-400">No organization found. Complete onboarding first.</p>
-        </div>
-      </div>
-    );
+    return { userRow: null, projects: [], proposalCount: 0, documentCount: 0, initialCoverage: null };
   }
 
   const db = await getSecureDb(userRow.default_org_id, userRow.id);
@@ -88,9 +81,34 @@ export default async function DashboardPage() {
     firstProject ? getLatestCoverage(firstProject.id) : Promise.resolve(null),
   ]);
 
-  const proposalCount = proposalResult;
-  const documentCount = documentResult;
-  const initialCoverage = coverageResult;
+  return {
+    userRow,
+    projects,
+    proposalCount: proposalResult,
+    documentCount: documentResult,
+    initialCoverage: coverageResult,
+  };
+}
+
+export default async function DashboardPage() {
+  const { userId } = await auth();
+  if (!userId) {
+    redirect('/');
+  }
+
+  const { userRow, projects, proposalCount, documentCount, initialCoverage } = await getDashboardData(userId);
+
+  if (!userRow?.default_org_id) {
+    return (
+      <div className="px-6 py-8">
+        <div className="max-w-7xl mx-auto">
+          <p className="text-gray-400">No organization found. Complete onboarding first.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const firstProject = projects[0];
 
   // Stats data
   const stats = [

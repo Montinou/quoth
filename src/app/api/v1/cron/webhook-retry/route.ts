@@ -14,7 +14,6 @@ import { NextRequest } from "next/server";
 import { verifyCronAuth } from "@/lib/worker/verify";
 import { deliverWebhook } from "@/lib/comms/webhooks";
 
-export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {

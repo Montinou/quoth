@@ -9,7 +9,6 @@
  * Returns 501 Not Implemented.
  */
 
-export const runtime = 'nodejs';
 
 import { getAuthContext } from '@/lib/auth/clerk';
 

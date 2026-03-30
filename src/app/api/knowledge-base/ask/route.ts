@@ -6,7 +6,6 @@
  * Returns top 10 results. aiAnswer is always null (LLM disabled).
  */
 
-export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';

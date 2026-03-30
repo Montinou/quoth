@@ -4,11 +4,10 @@ import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getDocBySlug, getDocsSidebar, getAdjacentDocs } from '@/lib/content/docs';
+import { cacheTag, cacheLife } from 'next/cache';
 import { MDXContent } from '@/components/mdx';
 import { TableOfContents } from '@/components/docs/TableOfContents';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-
-export const revalidate = 3600;
 
 interface Props {
   params: Promise<{ slug: string[] }>;
@@ -34,6 +33,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function DocPage({ params }: Props) {
+  'use cache'
+  cacheTag('docs')
+  cacheLife('hours')
+
   const { slug } = await params;
   const doc = await getDocBySlug(slug);
 

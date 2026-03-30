@@ -11,7 +11,6 @@
  *   { keys: [{ id, key_prefix, label, created_at, expires_at, last_used_at }] }
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and, isNull } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

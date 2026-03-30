@@ -6,16 +6,14 @@
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
+import { cacheTag, cacheLife } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { AgentProjectGraph } from '@/components/agents/AgentProjectGraph';
 
-export const revalidate = 60;
-
-export default async function AgentGraphPage() {
-  const { userId } = await auth();
-  if (!userId) {
-    redirect('/');
-  }
+async function getAgentGraphData(userId: string) {
+  'use cache'
+  cacheTag('agents-graph')
+  cacheLife('minutes')
 
   // Get user's organization (self-lookup, no RLS needed)
   const pooledDb = getDb();
@@ -24,13 +22,7 @@ export default async function AgentGraphPage() {
   `).then(r => r.rows[0] as any);
 
   if (!userRow?.default_org_id) {
-    return (
-      <div className="px-6 py-8">
-        <div className="max-w-7xl mx-auto">
-          <p className="text-gray-400">No organization found for this user.</p>
-        </div>
-      </div>
-    );
+    return { organizationId: null, agents: [] as any[], projects: [] as any[], assignments: [] as any[] };
   }
 
   const organizationId = userRow.default_org_id;
@@ -62,6 +54,27 @@ export default async function AgentGraphPage() {
         WHERE agent_id = ANY(${agentIds}) AND project_id = ANY(${projectIds})
       `).then(r => r.rows as any[])
     : [];
+
+  return { organizationId, agents, projects, assignments };
+}
+
+export default async function AgentGraphPage() {
+  const { userId } = await auth();
+  if (!userId) {
+    redirect('/');
+  }
+
+  const { organizationId, agents, projects, assignments } = await getAgentGraphData(userId);
+
+  if (!organizationId) {
+    return (
+      <div className="px-6 py-8">
+        <div className="max-w-7xl mx-auto">
+          <p className="text-gray-400">No organization found for this user.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col">

@@ -3,7 +3,6 @@
  *   GET — Retrieve a single proposal by UUID.
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';

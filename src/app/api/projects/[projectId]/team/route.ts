@@ -13,7 +13,6 @@
  * Note: `username` and `full_name` are mapped from `display_name`; `email` is the user's email.
  */
 
-export const runtime = 'nodejs';
 
 import { eq, and } from 'drizzle-orm';
 import { getAuthContext } from '@/lib/auth/clerk';

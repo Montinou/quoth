@@ -10,7 +10,6 @@
 import { NextResponse } from 'next/server';
 
 // Force Edge runtime for consistent behavior (serverless has issues in Next.js 16)
-export const runtime = 'nodejs';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;

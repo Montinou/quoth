@@ -5,7 +5,6 @@
  * scoped to the authenticated user's org.
  */
 
-export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';

@@ -16,7 +16,6 @@ import { NextRequest } from "next/server";
 import { verifyCronAuth } from "@/lib/worker/verify";
 import { autoFailOverdueTasks } from "@/lib/comms/tasks";
 
-export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {

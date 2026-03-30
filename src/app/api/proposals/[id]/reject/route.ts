@@ -3,7 +3,6 @@
  *   POST — Reject a pending proposal.
  */
 
-export const runtime = 'nodejs';
 
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';

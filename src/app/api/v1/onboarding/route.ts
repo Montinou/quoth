@@ -35,7 +35,6 @@ async function syncToClerk(clerkUserId: string, meta: Record<string, unknown>) {
   }
 }
 
-export const runtime = 'nodejs';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

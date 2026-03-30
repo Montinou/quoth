@@ -6,11 +6,10 @@
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
+import { cacheTag, cacheLife } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { Globe, FileText, Clock, FolderOpen, Search } from 'lucide-react';
-
-export const revalidate = 60;
 
 interface SharedDocument {
   id: string;
@@ -31,11 +30,10 @@ interface SharedDocument {
   } | null;
 }
 
-export default async function SharedKnowledgePage() {
-  const { userId } = await auth();
-  if (!userId) {
-    redirect('/');
-  }
+async function getSharedData(userId: string) {
+  'use cache'
+  cacheTag('shared-docs')
+  cacheLife('minutes')
 
   // Get user's organization (self-lookup, no RLS needed)
   const pooledDb = getDb();
@@ -46,13 +44,7 @@ export default async function SharedKnowledgePage() {
   const organizationId = userRow?.default_org_id;
 
   if (!organizationId) {
-    return (
-      <div className="px-6 py-8">
-        <div className="max-w-5xl mx-auto">
-          <p className="text-gray-400">No organization found for this user.</p>
-        </div>
-      </div>
-    );
+    return { organizationId: null, documents: [] as SharedDocument[], projectGroups: {} as Record<string, SharedDocument[]> };
   }
 
   const db = await getSecureDb(organizationId, userRow.id);
@@ -94,6 +86,27 @@ export default async function SharedKnowledgePage() {
     acc[projectSlug].push(doc);
     return acc;
   }, {} as Record<string, SharedDocument[]>);
+
+  return { organizationId, documents, projectGroups };
+}
+
+export default async function SharedKnowledgePage() {
+  const { userId } = await auth();
+  if (!userId) {
+    redirect('/');
+  }
+
+  const { organizationId, documents, projectGroups } = await getSharedData(userId);
+
+  if (!organizationId) {
+    return (
+      <div className="px-6 py-8">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-gray-400">No organization found for this user.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-8 md:py-10">
