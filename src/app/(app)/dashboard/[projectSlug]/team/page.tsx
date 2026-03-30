@@ -9,6 +9,25 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useUser, useAuth } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 
 interface Member {
   id: string;
@@ -174,7 +193,6 @@ export default function TeamPage() {
   async function handleRemoveMember(memberId: string) {
     const authToken = await getToken();
     if (!projectId || !authToken) return;
-    if (!confirm('Are you sure you want to remove this member?')) return;
 
     try {
       const res = await fetch(`/api/projects/${projectId}/team/${memberId}`, {
@@ -267,16 +285,20 @@ export default function TeamPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-2">Role</label>
-                    <select
+                    <Select
                       value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value as 'admin' | 'editor' | 'viewer')}
-                      className="w-full px-4 py-2 bg-charcoal border border-graphite rounded-lg focus:outline-none focus:border-violet-spectral transition-colors"
+                      onValueChange={(val) => setInviteRole(val as 'admin' | 'editor' | 'viewer')}
                       disabled={inviting}
                     >
-                      <option value="viewer">Viewer - Read-only access</option>
-                      <option value="editor">Editor - Can propose updates</option>
-                      <option value="admin">Admin - Full access</option>
-                    </select>
+                      <SelectTrigger className="w-full bg-charcoal border-graphite focus:border-violet-spectral">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="viewer">Viewer - Read-only access</SelectItem>
+                        <SelectItem value="editor">Editor - Can propose updates</SelectItem>
+                        <SelectItem value="admin">Admin - Full access</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <Button type="submit" disabled={inviting || !inviteEmail}>
                     {inviting ? 'Sending...' : 'Send Invitation'}
@@ -303,13 +325,27 @@ export default function TeamPage() {
                           Expires: {new Date(invite.expires_at).toLocaleDateString()}
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCancelInvitation(invite.id)}
-                      >
-                        Cancel
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            Cancel
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Cancel Invitation</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Cancel the invitation sent to <strong>{invite.email}</strong>? They will no longer be able to join using this invite.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Keep</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleCancelInvitation(invite.id)}>
+                              Cancel Invitation
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
                   ))}
                 </div>
@@ -328,11 +364,15 @@ export default function TeamPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         {/* Avatar */}
-                        <div className="w-10 h-10 rounded-full bg-violet-spectral/20 flex items-center justify-center">
-                          <span className="text-violet-spectral font-bold">
-                            {member.profiles.username?.charAt(0).toUpperCase() || '?'}
-                          </span>
-                        </div>
+                        <Avatar>
+                          <AvatarImage
+                            src={member.profiles.avatar_url}
+                            alt={member.profiles.username}
+                          />
+                          <AvatarFallback className="bg-violet-spectral/20 text-violet-spectral font-bold">
+                            {member.profiles.username?.[0]?.toUpperCase() || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
                         <div>
                           <p className="font-bold">{member.profiles.username}</p>
                           <p className="text-sm text-gray-400">{member.profiles.email}</p>
@@ -342,15 +382,19 @@ export default function TeamPage() {
                       <div className="flex items-center gap-3">
                         {/* Role Badge/Selector */}
                         {isAdmin && member.profiles.id !== user?.id ? (
-                          <select
+                          <Select
                             value={member.role}
-                            onChange={(e) => handleUpdateRole(member.id, e.target.value)}
-                            className="px-3 py-1 bg-charcoal border border-graphite rounded-lg text-sm focus:outline-none focus:border-violet-spectral"
+                            onValueChange={(val) => handleUpdateRole(member.id, val)}
                           >
-                            <option value="viewer">Viewer</option>
-                            <option value="editor">Editor</option>
-                            <option value="admin">Admin</option>
-                          </select>
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="viewer">Viewer</SelectItem>
+                              <SelectItem value="editor">Editor</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
                         ) : (
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -367,26 +411,66 @@ export default function TeamPage() {
 
                         {/* Remove Button */}
                         {isAdmin && member.profiles.id !== user?.id && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveMember(member.id)}
-                            className="text-red-400 hover:text-red-300"
-                          >
-                            Remove
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-400 hover:text-red-300"
+                              >
+                                Remove
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remove Member</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Remove <strong>{member.profiles.username}</strong> from this project? They will lose access immediately.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleRemoveMember(member.id)}
+                                  className="bg-red-600 hover:bg-red-700"
+                                >
+                                  Remove
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
 
                         {/* Leave Button (for self) */}
                         {member.profiles.id === user?.id && members.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveMember(member.id)}
-                            className="text-gray-400 hover:text-gray-300"
-                          >
-                            Leave
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-gray-400 hover:text-gray-300"
+                              >
+                                Leave
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Leave Project</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Leave this project? You will lose access and will need to be re-invited to rejoin.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleRemoveMember(member.id)}
+                                  className="bg-red-600 hover:bg-red-700"
+                                >
+                                  Leave
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
                       </div>
                     </div>
