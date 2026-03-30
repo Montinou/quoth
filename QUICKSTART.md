@@ -155,6 +155,6 @@ To disable: set `"auto_memory": false` in `.quoth/config.json`.
 
 ## Links
 
-- [Full Documentation](https://quoth.ai-innovation.site/docs)
-- [Changelog](https://quoth.ai-innovation.site/changelog)
+- [Full Documentation](https://quoth.triqual.dev/docs)
+- [Changelog](https://quoth.triqual.dev/changelog)
 - [GitHub](https://github.com/Montinou/quoth-mcp)

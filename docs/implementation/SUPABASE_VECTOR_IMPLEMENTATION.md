@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-11
 **Status:** Complete
-**Production URL:** https://quoth.ai-innovation.site
+**Production URL:** https://quoth.triqual.dev
 
 ---
 
@@ -260,7 +260,7 @@ curl -X POST http://localhost:3000/api/mcp \
 ### Production Testing
 
 ```bash
-curl -X POST https://quoth.ai-innovation.site/api/mcp \
+curl -X POST https://quoth.triqual.dev/api/mcp \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"quoth_search_index","arguments":{"query":"playwright e2e testing"}}}'
 # ✅ Returns pattern-frontend-e2e (67% match)

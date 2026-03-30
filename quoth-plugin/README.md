@@ -31,7 +31,7 @@ This installs:
 ### MCP Only (No Local Memory)
 
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 ## Getting Started
@@ -199,7 +199,7 @@ User prompted to promote learnings:
 
 ## Links
 
-- [Quoth Website](https://quoth.ai-innovation.site)
-- [Documentation](https://quoth.ai-innovation.site/docs)
-- [Changelog](https://quoth.ai-innovation.site/changelog)
+- [Quoth Website](https://quoth.triqual.dev)
+- [Documentation](https://quoth.triqual.dev/docs)
+- [Changelog](https://quoth.triqual.dev/changelog)
 - [GitHub](https://github.com/Montinou/quoth-mcp)

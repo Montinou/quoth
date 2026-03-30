@@ -46,7 +46,7 @@ Run `quoth login` to authenticate.
 
 ## Documentation
 
-Visit [quoth.ai-innovation.site](https://quoth.ai-innovation.site) for full documentation.
+Visit [quoth.triqual.dev](https://quoth.triqual.dev) for full documentation.
 
 ## License
 

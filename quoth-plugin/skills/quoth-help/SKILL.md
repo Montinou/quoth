@@ -207,14 +207,14 @@ OPTION 1: Plugin Install (Recommended)
 OPTION 2: MCP Only (No Hooks)
   Just the MCP server, no automatic enforcement.
 
-  claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+  claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 
   Then run /mcp → select quoth → Authenticate
 
 OPTION 3: Public Demo (No Auth)
   Read-only access for testing.
 
-  claude mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
+  claude mcp add --transport http quoth-public https://quoth.triqual.dev/api/mcp/public
 
 CLI COMMANDS:
   quoth login     Authenticate and configure Claude Code
@@ -247,9 +247,9 @@ PROBLEM: "I don't see prompts available"
   3. Reconnect: claude mcp remove quoth → then re-add
 
 PROBLEM: "MCP tools not responding"
-  Check server status: curl https://quoth.ai-innovation.site/api/mcp
+  Check server status: curl https://quoth.triqual.dev/api/mcp
   If down, use public endpoint as fallback:
-  claude mcp add --transport http quoth-public https://quoth.ai-innovation.site/api/mcp/public
+  claude mcp add --transport http quoth-public https://quoth.triqual.dev/api/mcp/public
 
 PROBLEM: "Plugin not loading after install"
   1. Restart Claude Code
@@ -267,6 +267,6 @@ PROBLEM: "Genesis not finding all files"
   Ensure you're running from the project root directory.
   Try: /quoth-genesis (re-running skips unchanged content)
 
-Dashboard: https://quoth.ai-innovation.site/dashboard
-API Keys:  https://quoth.ai-innovation.site/dashboard/api-keys
+Dashboard: https://quoth.triqual.dev/dashboard
+API Keys:  https://quoth.triqual.dev/dashboard/api-keys
 ```

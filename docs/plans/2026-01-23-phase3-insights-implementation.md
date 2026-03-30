@@ -1373,7 +1373,7 @@ export async function sendWeeklyHealthReport(params: WeeklyReportParams): Promis
     return;
   }
 
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.ai-innovation.site';
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
   const dashboardUrl = `${APP_URL}/dashboard/${params.projectSlug}`;
 
   try {

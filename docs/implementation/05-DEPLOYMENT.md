@@ -81,7 +81,7 @@ EMAIL_RECIPIENTS=admin@yourdomain.com,team@yourdomain.com
 
 # Project
 QUOTH_PROJECT_SLUG=quoth-knowledge-base
-NEXT_PUBLIC_APP_URL=https://quoth.ai-innovation.site
+NEXT_PUBLIC_APP_URL=https://quoth.triqual.dev
 
 # Phase 2
 ENABLE_AUTONOMOUS_MODE=false
@@ -131,7 +131,7 @@ Should return:
 
 1. Go to **Project Settings → Domains**
 2. Click **Add Domain**
-3. Enter: `quoth.ai-innovation.site`
+3. Enter: `quoth.triqual.dev`
 4. Click **Add**
 
 ### 4.2 Configure DNS
@@ -162,7 +162,7 @@ Value: cname.vercel-dns.com
 
 Update in Vercel:
 ```bash
-NEXT_PUBLIC_APP_URL=https://quoth.ai-innovation.site
+NEXT_PUBLIC_APP_URL=https://quoth.triqual.dev
 ```
 
 Redeploy to apply.
@@ -173,7 +173,7 @@ Redeploy to apply.
 
 1. Go to GitHub repo → **Settings → Webhooks → Add webhook**
 2. Configure:
-   - **Payload URL**: `https://quoth.ai-innovation.site/api/github/webhook`
+   - **Payload URL**: `https://quoth.triqual.dev/api/github/webhook`
    - **Content type**: `application/json`
    - **Secret**: Your `GITHUB_WEBHOOK_SECRET` from Vercel
    - **SSL verification**: Enable
@@ -274,7 +274,7 @@ Set calendar reminders:
 ### 8.1 Document Access
 
 Share with team:
-- Dashboard URL: `https://quoth.ai-innovation.site/proposals`
+- Dashboard URL: `https://quoth.triqual.dev/proposals`
 - Documentation: `/docs/implementation/`
 - Support contact
 

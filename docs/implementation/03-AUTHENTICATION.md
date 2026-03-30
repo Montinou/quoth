@@ -8,7 +8,7 @@ Quoth uses multi-tenant authentication to secure your documentation and provide 
 
 ### 1. Create Your Account
 
-1. Visit [https://quoth.ai-innovation.site/auth/signup](https://quoth.ai-innovation.site/auth/signup)
+1. Visit [https://quoth.triqual.dev/auth/signup](https://quoth.triqual.dev/auth/signup)
 2. Fill in:
    - **Username**: lowercase letters, numbers, and hyphens only (e.g., `john-doe`)
    - **Email**: your email address
@@ -29,14 +29,14 @@ Quoth uses multi-tenant authentication to secure your documentation and provide 
 
 ### 3. Log In
 
-1. Visit [https://quoth.ai-innovation.site/auth/login](https://quoth.ai-innovation.site/auth/login)
+1. Visit [https://quoth.triqual.dev/auth/login](https://quoth.triqual.dev/auth/login)
 2. Enter your email and password
 3. Click "Sign In"
 4. You'll be redirected to your dashboard
 
 ### 4. Generate MCP Token
 
-1. Navigate to [Dashboard → API Keys](https://quoth.ai-innovation.site/dashboard/api-keys)
+1. Navigate to [Dashboard → API Keys](https://quoth.triqual.dev/dashboard/api-keys)
 2. Enter a label for your token (e.g., "Claude Desktop - Personal Laptop")
 3. Click "Generate Token"
 4. **IMPORTANT**: Copy the token immediately - it will only be shown once!
@@ -54,7 +54,7 @@ Quoth uses multi-tenant authentication to secure your documentation and provide 
 {
   "mcpServers": {
     "quoth": {
-      "url": "https://quoth.ai-innovation.site/api/mcp",
+      "url": "https://quoth.triqual.dev/api/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_TOKEN_HERE"
       }
@@ -128,7 +128,7 @@ When Claude identifies outdated documentation:
 
 As an admin:
 
-1. Go to [Dashboard → Proposals](https://quoth.ai-innovation.site/proposals)
+1. Go to [Dashboard → Proposals](https://quoth.triqual.dev/proposals)
 2. Click on a proposal to view details
 3. Review:
    - Original content vs. proposed content
@@ -277,8 +277,8 @@ A: MCP tools will stop working. Generate a new token from the dashboard and upda
 ## Support
 
 - **GitHub Issues**: [github.com/your-org/quoth-mcp/issues](https://github.com)
-- **Email**: support@quoth.ai-innovation.site
-- **Documentation**: [https://quoth.ai-innovation.site/protocol](https://quoth.ai-innovation.site/protocol)
+- **Email**: support@quoth.triqual.dev
+- **Documentation**: [https://quoth.triqual.dev/protocol](https://quoth.triqual.dev/protocol)
 
 ## Next Steps
 

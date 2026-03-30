@@ -1295,7 +1295,7 @@ git commit -m "feat(memory-v2): add quoth-memory subagent definition"
     "name": "Montinou",
     "url": "https://github.com/Montinou"
   },
-  "homepage": "https://quoth.ai-innovation.site",
+  "homepage": "https://quoth.triqual.dev",
   "repository": "https://github.com/Montinou/quoth-mcp",
   "license": "MIT",
   "keywords": ["documentation", "mcp", "ai", "claude-code", "memory", "patterns", "quoth", "ai-memory"],

@@ -69,7 +69,7 @@ Copy output → `GITHUB_WEBHOOK_SECRET`
 ### 3.2 Add Domain
 
 1. Go to **Domains** → **Add Domain**
-2. Enter your domain (e.g., `ai-innovation.site`)
+2. Enter your domain (e.g., `triqual.dev`)
 3. Add DNS records shown (SPF, DKIM, DMARC)
 4. Wait for verification (usually < 5 minutes)
 
@@ -126,7 +126,7 @@ GITHUB_WEBHOOK_SECRET=abc123...
 
 # Resend
 RESEND_API_KEY=re_xxx...
-RESEND_FROM_EMAIL=Quoth Guardian <quoth@ai-innovation.site>
+RESEND_FROM_EMAIL=Quoth Guardian <quoth@triqual.dev>
 EMAIL_RECIPIENTS=your@email.com
 
 # Project

@@ -87,7 +87,7 @@ This bundles:
 For just the MCP tools without local memory:
 
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 ## Quick Start
@@ -224,9 +224,9 @@ Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types b
 
 ## Links
 
-- **Website**: https://quoth.ai-innovation.site
-- **Documentation**: https://quoth.ai-innovation.site/docs
-- **Changelog**: https://quoth.ai-innovation.site/changelog
+- **Website**: https://quoth.triqual.dev
+- **Documentation**: https://quoth.triqual.dev/docs
+- **Changelog**: https://quoth.triqual.dev/changelog
 - **GitHub**: https://github.com/Montinou/quoth-mcp
 
 ## License

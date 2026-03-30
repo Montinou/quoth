@@ -181,7 +181,7 @@ Running Genesis again will:
 
 Run:
 ```bash
-claude mcp add --transport http quoth https://quoth.ai-innovation.site/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 Then authenticate via the `/mcp` menu.

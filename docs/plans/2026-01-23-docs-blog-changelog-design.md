@@ -957,7 +957,7 @@ import { getAllPosts } from '@/lib/content/blog';
 import { getDocsSidebar } from '@/lib/content/docs';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = 'https://quoth.ai-innovation.site';
+  const baseUrl = 'https://quoth.triqual.dev';
 
   // Static pages
   const staticPages = [

@@ -4,7 +4,7 @@ General context and learnings for this project.
 
 ## Project Identity
 
-Quoth v2.0 is an AI Memory system built with Next.js 16, React 19, Supabase, and MCP Protocol. Production at https://quoth.ai-innovation.site. Multi-tenant with RLS, project-based isolation.
+Quoth v2.0 is an AI Memory system built with Next.js 16, React 19, Supabase, and MCP Protocol. Production at https://quoth.triqual.dev. Multi-tenant with RLS, project-based isolation.
 
 ## Key Numbers
 

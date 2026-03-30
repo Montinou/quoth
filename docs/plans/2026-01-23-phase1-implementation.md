@@ -586,7 +586,7 @@ git commit -m "feat(dashboard): add usage analytics page"
     "name": "Montinou",
     "url": "https://github.com/Montinou"
   },
-  "homepage": "https://quoth.ai-innovation.site",
+  "homepage": "https://quoth.triqual.dev",
   "repository": "https://github.com/Montinou/quoth",
   "license": "MIT",
   "keywords": [
@@ -824,7 +824,7 @@ Find the landing page and add a new section after the hero:
 
     <div className="text-center mt-8">
       <a
-        href="https://quoth.ai-innovation.site/guide"
+        href="https://quoth.triqual.dev/guide"
         className="inline-flex items-center gap-2 bg-violet-spectral hover:bg-violet-glow text-white px-6 py-3 rounded-lg font-medium transition-colors"
       >
         Get Started in 3 Minutes
