@@ -129,7 +129,7 @@ export async function getDriftTimeline(
     return [];
   }
 
-  return data.map((row) => ({
+  return data.map((row: any) => ({
     id: row.id,
     projectId: row.project_id,
     documentId: row.document_id,
@@ -166,10 +166,10 @@ export async function getDriftSummary(projectId: string): Promise<{
 
   return {
     total: data.length,
-    critical: data.filter((d) => d.severity === 'critical').length,
-    warning: data.filter((d) => d.severity === 'warning').length,
-    info: data.filter((d) => d.severity === 'info').length,
-    unresolvedCount: data.filter((d) => !d.resolved).length,
+    critical: data.filter((d: any) => d.severity === 'critical').length,
+    warning: data.filter((d: any) => d.severity === 'warning').length,
+    info: data.filter((d: any) => d.severity === 'info').length,
+    unresolvedCount: data.filter((d: any) => !d.resolved).length,
   };
 }
 

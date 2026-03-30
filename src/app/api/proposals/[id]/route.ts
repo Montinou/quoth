@@ -1,71 +1,43 @@
 /**
- * Proposals API - Detail Endpoint
- * GET /api/proposals/:id - Get single proposal with all details
- * Requires authentication and project access
+ * /api/proposals/[id]
+ *   GET — Retrieve a single proposal by UUID.
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+export const runtime = 'nodejs';
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const supabase = await createServerSupabaseClient();
+import { eq, and } from 'drizzle-orm';
+import { createApiHandler } from '@/lib/api/handler';
+import { getDb } from '@/db/connection';
+import { proposals } from '@/db/schema';
+import { notFound } from '@/lib/api/errors';
 
-    // 1. Authenticate user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+// ---------------------------------------------------------------------------
+// GET /api/proposals/:id
+// ---------------------------------------------------------------------------
 
-    if (authError || !user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = createApiHandler(
+  {
+    auth: 'required',
+    rateLimit: { rpm: 120 },
+  },
+  async (_req, ctx, params) => {
+    const db = getDb();
+
+    const [proposal] = await db
+      .select()
+      .from(proposals)
+      .where(
+        and(
+          eq(proposals.id, params.id),
+          eq(proposals.projectId, ctx!.projectId),
+        ),
+      )
+      .limit(1);
+
+    if (!proposal) {
+      throw notFound(`Proposal ${params.id} not found.`);
     }
 
-    // 2. Fetch proposal
-    const { data, error } = await supabase
-      .from('document_proposals')
-      .select(`
-        *,
-        documents (
-          id,
-          title,
-          file_path
-        )
-      `)
-      .eq('id', id)
-      .single();
-
-    if (error || !data) {
-      return Response.json(
-        { error: 'Proposal not found' },
-        { status: 404 }
-      );
-    }
-
-    // 3. Verify user has access to the proposal's project
-    const { data: membership, error: membershipError } = await supabase
-      .from('project_members')
-      .select('role')
-      .eq('project_id', data.project_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (membershipError || !membership) {
-      return Response.json(
-        { error: 'Access denied. You are not a member of this project.' },
-        { status: 403 }
-      );
-    }
-
-    return Response.json({ proposal: data });
-  } catch (error) {
-    console.error('Error fetching proposal:', error);
-    return Response.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
+    return Response.json({ proposal });
+  },
+);

@@ -1,120 +1,121 @@
 /**
- * Knowledge Base AI Ask API
  * POST /api/knowledge-base/ask
  *
- * Performs RAG: vector search -> retrieve context -> Mistral Small 3.1 answer (CF Workers AI)
+ * Semantic search over docs.chunks using cosine similarity,
+ * joining to docs.documents for document metadata.
+ * Returns top 10 results. aiAnswer is always null (LLM disabled).
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { supabase } from '@/lib/supabase';
-import { searchDocuments } from '@/lib/quoth/search';
-import { generateRAGAnswer, isGenerativeAIConfigured, type RAGContext } from '@/lib/ai';
+export const runtime = 'nodejs';
 
-export async function POST(request: Request) {
+import { NextRequest, NextResponse } from 'next/server';
+import { sql } from 'drizzle-orm';
+import { getAuthContext } from '@/lib/auth/clerk';
+import { getDb } from '@/db/connection';
+import { generateEmbedding } from '@/lib/embeddings/gateway';
+
+interface SearchResult {
+  chunkId: string;
+  documentId: string;
+  title: string;
+  filePath: string;
+  docType: string | null;
+  snippet: string;
+  similarity: number;
+}
+
+interface AskResponse {
+  results: SearchResult[];
+  aiAnswer: null;
+  sources: string[];
+  relatedQuestions: never[];
+  aiEnabled: false;
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  // Auth check
+  const ctx = await getAuthContext();
+  if (!ctx) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Parse and validate body
+  let body: unknown;
   try {
-    const authSupabase = await createServerSupabaseClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Get user's project membership (use limit(1) instead of single() for multi-project users)
-    const { data: memberships, error: membershipError } = await authSupabase
-      .from('project_members')
-      .select('project_id')
-      .eq('user_id', user.id)
-      .limit(1);
-
-    if (membershipError) {
-      console.error('Membership query error:', membershipError);
-      return Response.json({ error: 'Failed to verify project access' }, { status: 500 });
-    }
-
-    const membership = memberships?.[0];
-    if (!membership) {
-      return Response.json({ error: 'No project access' }, { status: 403 });
-    }
-
-    const { query } = await request.json();
-
-    if (!query || typeof query !== 'string') {
-      return Response.json({ error: 'Query is required' }, { status: 400 });
-    }
-
-    console.log('[ASK API] Processing query:', query, 'for user:', user.id, 'project:', membership.project_id);
-
-    // 1. Vector search to get relevant documents
-    const searchResults = await searchDocuments(query, membership.project_id);
-    console.log('[ASK API] Search returned', searchResults.length, 'results');
-
-    if (searchResults.length === 0) {
-      console.warn('[ASK API] No search results found - this will trigger "No relevant documentation found" message');
-    }
-
-    // 2. Check if generative AI is configured
-    if (!isGenerativeAIConfigured()) {
-      console.log('[ASK API] Gemini not configured - returning search results only');
-      // Return search results only without AI answer
-      return Response.json({
-        aiAnswer: null,
-        sources: [],
-        relatedQuestions: [],
-        results: searchResults,
-        aiEnabled: false,
-      });
-    }
-
-    // 3. Fetch full content for top results to build context
-    // Parallelize document fetches for ~80% latency reduction (5 RTTs → 1 RTT)
-    const topResults = searchResults.slice(0, 5);
-    console.log('[ASK API] Fetching full content for top', topResults.length, 'results in parallel');
-
-    const documentPromises = topResults.map((result) =>
-      supabase
-        .from('documents')
-        .select('content')
-        .eq('project_id', membership.project_id)
-        .eq('file_path', result.path)
-        .single()
-    );
-
-    const documentResults = await Promise.all(documentPromises);
-
-    const contexts: RAGContext[] = documentResults
-      .map((result, index) => {
-        const { data: doc, error: fetchError } = result;
-        if (fetchError) {
-          console.error('Document fetch error:', fetchError.message, 'for path:', topResults[index].path);
-          return null;
-        }
-        if (!doc) return null;
-        return {
-          title: topResults[index].title,
-          path: topResults[index].path,
-          content: doc.content.slice(0, 3000), // Limit content per doc
-          relevance: topResults[index].relevance,
-        };
-      })
-      .filter((ctx): ctx is RAGContext => ctx !== null);
-
-    // 4. Generate AI answer using Gemini 2.0 Flash
-    console.log('[ASK API] Generating RAG answer with', contexts.length, 'contexts');
-    const ragAnswer = await generateRAGAnswer(query, contexts, membership.project_id);
-    console.log('[ASK API] RAG answer generated successfully');
-
-    return Response.json({
-      aiAnswer: ragAnswer.answer,
-      sources: ragAnswer.sources,
-      relatedQuestions: ragAnswer.relatedQuestions,
-      results: searchResults,
-      aiEnabled: true,
-    });
-  } catch (error) {
-    console.error('Ask error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Ask failed' },
-      { status: 500 }
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    typeof (body as Record<string, unknown>).query !== 'string' ||
+    !(body as Record<string, unknown>).query
+  ) {
+    return NextResponse.json(
+      { error: 'Missing or invalid field: query (string required)' },
+      { status: 400 },
     );
   }
+
+  const query = ((body as Record<string, unknown>).query as string).trim();
+  if (!query) {
+    return NextResponse.json({ error: 'query must not be empty' }, { status: 400 });
+  }
+
+  // Generate embedding for query
+  let queryEmbedding: number[];
+  try {
+    queryEmbedding = await generateEmbedding(query);
+  } catch (err) {
+    console.error('[knowledge-base/ask] Embedding error:', err);
+    return NextResponse.json({ error: 'Failed to generate query embedding' }, { status: 502 });
+  }
+
+  const db = getDb();
+
+  // Cosine similarity search over docs.chunks, scoped to org
+  // 1 - cosine_distance = cosine similarity
+  const embeddingLiteral = `'[${queryEmbedding.join(',')}]'::vector`;
+
+  const rows = await db.execute(sql`
+    SELECT
+      c.id            AS chunk_id,
+      c.document_id,
+      c.title,
+      c.file_path,
+      c.content,
+      d.doc_type,
+      1 - (c.embedding <=> ${sql.raw(embeddingLiteral)}) AS similarity
+    FROM docs.chunks c
+    JOIN docs.documents d ON d.id = c.document_id
+    WHERE
+      d.org_id = ${ctx.orgId}::uuid
+      AND c.embedding IS NOT NULL
+    ORDER BY c.embedding <=> ${sql.raw(embeddingLiteral)}
+    LIMIT 10
+  `);
+
+  const results: SearchResult[] = (rows.rows as Array<Record<string, unknown>>).map((row) => ({
+    chunkId: row.chunk_id as string,
+    documentId: row.document_id as string,
+    title: row.title as string,
+    filePath: row.file_path as string,
+    docType: (row.doc_type as string | null) ?? null,
+    snippet: ((row.content as string) ?? '').slice(0, 200),
+    similarity: parseFloat(String(row.similarity ?? 0)),
+  }));
+
+  const sources = [...new Set(results.map((r) => r.filePath))];
+
+  const response: AskResponse = {
+    results,
+    aiAnswer: null,
+    sources,
+    relatedQuestions: [],
+    aiEnabled: false,
+  };
+
+  return NextResponse.json(response);
 }

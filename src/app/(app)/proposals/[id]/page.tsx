@@ -9,6 +9,16 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 
 interface Proposal {
   id: string;
@@ -251,20 +261,20 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
           {/* Actions */}
           {proposal.status === 'pending' && (
             <div className="flex gap-4">
-              <button
+              <Button
                 onClick={() => setShowApproveDialog(true)}
                 disabled={processing}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-green-900 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                className="bg-green-600 hover:bg-green-700 disabled:bg-green-900 disabled:cursor-not-allowed text-white px-6 py-3"
               >
-                ✓ Approve & Commit
-              </button>
-              <button
+                ✓ Approve &amp; Commit
+              </Button>
+              <Button
                 onClick={() => setShowRejectDialog(true)}
                 disabled={processing}
-                className="bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                className="bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:cursor-not-allowed text-white px-6 py-3"
               >
                 ✗ Reject
-              </button>
+              </Button>
             </div>
           )}
 
@@ -289,81 +299,88 @@ export default function ProposalDetailPage({ params }: { params: Promise<{ id: s
           )}
         </div>
 
-        {/* Approve Dialog */}
-        {showApproveDialog && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="glass-panel p-8 max-w-md w-full">
-              <h2 className="text-2xl font-bold text-white mb-4">Approve Proposal</h2>
-              <p className="text-gray-400 mb-4">
+        {/* Approve AlertDialog */}
+        <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+          <AlertDialogContent className="bg-zinc-950 border-zinc-800 text-white">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Approve Proposal</AlertDialogTitle>
+              <AlertDialogDescription className="text-gray-400">
                 This will apply the changes to the knowledge base. Enter your email to confirm:
-              </p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="py-2">
               <input
                 type="email"
                 value={reviewerEmail}
                 onChange={(e) => setReviewerEmail(e.target.value)}
                 placeholder="your@email.com"
-                className="w-full bg-charcoal text-white px-4 py-2 rounded-lg mb-4 border border-graphite focus:border-violet-spectral outline-none"
+                className="w-full bg-zinc-900 text-white px-4 py-2 rounded-lg border border-zinc-700 focus:border-violet-spectral outline-none"
                 disabled={processing}
               />
-              <div className="flex gap-4">
-                <button
-                  onClick={handleApprove}
-                  disabled={processing}
-                  className="bg-green-600 hover:bg-green-700 disabled:bg-green-900 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg flex-1 font-semibold"
-                >
-                  {processing ? 'Processing...' : 'Confirm Approval'}
-                </button>
-                <button
-                  onClick={() => setShowApproveDialog(false)}
-                  disabled={processing}
-                  className="bg-charcoal hover:bg-charcoal/80 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
-          </div>
-        )}
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="bg-zinc-900 border-zinc-700 text-white hover:bg-zinc-800"
+                disabled={processing}
+                onClick={() => setShowApproveDialog(false)}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <Button
+                onClick={handleApprove}
+                disabled={processing}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-green-900 text-white"
+              >
+                {processing ? 'Processing...' : 'Confirm Approval'}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
-        {/* Reject Dialog */}
-        {showRejectDialog && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="glass-panel p-8 max-w-md w-full">
-              <h2 className="text-2xl font-bold text-white mb-4">Reject Proposal</h2>
+        {/* Reject AlertDialog */}
+        <AlertDialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+          <AlertDialogContent className="bg-zinc-950 border-zinc-800 text-white">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reject Proposal</AlertDialogTitle>
+              <AlertDialogDescription className="text-gray-400">
+                Please provide your email and a reason for rejecting this proposal.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="py-2 space-y-3">
               <input
                 type="email"
                 value={reviewerEmail}
                 onChange={(e) => setReviewerEmail(e.target.value)}
                 placeholder="your@email.com"
-                className="w-full bg-charcoal text-white px-4 py-2 rounded-lg mb-4 border border-graphite focus:border-violet-spectral outline-none"
+                className="w-full bg-zinc-900 text-white px-4 py-2 rounded-lg border border-zinc-700 focus:border-violet-spectral outline-none"
                 disabled={processing}
               />
               <textarea
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
                 placeholder="Reason for rejection (minimum 10 characters)"
-                className="w-full bg-charcoal text-white px-4 py-2 rounded-lg mb-4 h-24 border border-graphite focus:border-violet-spectral outline-none resize-none"
+                className="w-full bg-zinc-900 text-white px-4 py-2 rounded-lg h-24 border border-zinc-700 focus:border-violet-spectral outline-none resize-none"
                 disabled={processing}
               />
-              <div className="flex gap-4">
-                <button
-                  onClick={handleReject}
-                  disabled={processing}
-                  className="bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg flex-1 font-semibold"
-                >
-                  {processing ? 'Processing...' : 'Confirm Rejection'}
-                </button>
-                <button
-                  onClick={() => setShowRejectDialog(false)}
-                  disabled={processing}
-                  className="bg-charcoal hover:bg-charcoal/80 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
-          </div>
-        )}
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="bg-zinc-900 border-zinc-700 text-white hover:bg-zinc-800"
+                disabled={processing}
+                onClick={() => setShowRejectDialog(false)}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <Button
+                onClick={handleReject}
+                disabled={processing}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white"
+              >
+                {processing ? 'Processing...' : 'Confirm Rejection'}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

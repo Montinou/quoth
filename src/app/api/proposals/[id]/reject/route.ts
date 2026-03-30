@@ -1,131 +1,87 @@
 /**
- * Proposals API - Reject Endpoint
- * POST /api/proposals/:id/reject - Reject proposal with reason
- * Requires authentication and admin role
+ * /api/proposals/[id]/reject
+ *   POST — Reject a pending proposal.
  */
 
-import { z } from 'zod';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { supabase } from '@/lib/supabase';
-import { sendRejectionNotification } from '@/lib/email';
+export const runtime = 'nodejs';
 
-const RejectSchema = z.object({
-  reason: z.string().min(10, 'Rejection reason must be at least 10 characters')
+import { z } from 'zod';
+import { eq, and } from 'drizzle-orm';
+import { createApiHandler } from '@/lib/api/handler';
+import { getDb } from '@/db/connection';
+import { proposals, users } from '@/db/schema';
+import { notFound, forbidden, badRequest } from '@/lib/api/errors';
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+const rejectBody = z.object({
+  reviewerEmail: z.string().email(),
+  reason: z.string().min(1).max(1024),
 });
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const authSupabase = await createServerSupabaseClient();
+// ---------------------------------------------------------------------------
+// POST /api/proposals/:id/reject
+// ---------------------------------------------------------------------------
 
-    // 1. Authenticate user
-    const {
-      data: { user },
-      error: authError,
-    } = await authSupabase.auth.getUser();
+export const POST = createApiHandler(
+  {
+    auth: 'required',
+    rateLimit: { rpm: 60 },
+    validate: { body: rejectBody },
+  },
+  async (_req, ctx, params) => {
+    const body = _req.validatedBody as z.infer<typeof rejectBody>;
+    const db = getDb();
 
-    if (authError || !user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // Verify proposal exists and belongs to the caller's project
+    const [proposal] = await db
+      .select()
+      .from(proposals)
+      .where(
+        and(
+          eq(proposals.id, params.id),
+          eq(proposals.projectId, ctx!.projectId),
+        ),
+      )
+      .limit(1);
+
+    if (!proposal) {
+      throw notFound(`Proposal ${params.id} not found.`);
     }
 
-    // 2. Get user profile for reviewer email
-    const { data: profile, error: profileError } = await authSupabase
-      .from('profiles')
-      .select('email')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile) {
-      return Response.json({ error: 'User profile not found' }, { status: 404 });
-    }
-
-    // 3. Validate request body
-    const body = await request.json();
-    const validation = RejectSchema.safeParse(body);
-
-    if (!validation.success) {
-      return Response.json(
-        { error: 'Invalid request data', details: validation.error.errors },
-        { status: 400 }
-      );
-    }
-
-    const { reason } = validation.data;
-
-    // 4. Fetch proposal
-    const { data: proposal, error: fetchError } = await supabase
-      .from('document_proposals')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !proposal) {
-      return Response.json({ error: 'Proposal not found' }, { status: 404 });
-    }
-
-    // 5. Verify user is admin of the proposal's project
-    const { data: membership, error: membershipError } = await authSupabase
-      .from('project_members')
-      .select('role')
-      .eq('project_id', proposal.project_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (membershipError || !membership) {
-      return Response.json(
-        { error: 'Access denied. You are not a member of this project.' },
-        { status: 403 }
-      );
-    }
-
-    if (membership.role !== 'admin') {
-      return Response.json(
-        { error: 'Only admins can reject proposals.' },
-        { status: 403 }
-      );
-    }
-
-    // 6. Validate status
     if (proposal.status !== 'pending') {
-      return Response.json(
-        { error: `Cannot reject proposal with status: ${proposal.status}` },
-        { status: 400 }
+      throw badRequest(
+        `Proposal is already ${proposal.status} and cannot be rejected.`,
       );
     }
 
-    // 7. Update status to 'rejected'
-    const { error: updateError } = await supabase
-      .from('document_proposals')
-      .update({
-        status: 'rejected',
-        rejection_reason: reason,
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: profile.email
-      })
-      .eq('id', id);
-
-    if (updateError) {
-      throw new Error(`Failed to update proposal: ${updateError.message}`);
+    // Only admins/owners may reject
+    if (ctx!.role === 'viewer') {
+      throw forbidden('Only admins and editors can reject proposals.');
     }
 
-    // 8. Send email notification (fire and forget)
-    sendRejectionNotification(
-      { ...proposal, reviewed_by: profile.email },
-      reason
-    ).catch((err) => console.error('Email notification failed:', err));
+    // Resolve reviewer user row by email
+    const [reviewer] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, body.reviewerEmail))
+      .limit(1);
 
-    return Response.json({
-      success: true,
-      message: 'Proposal rejected'
-    });
-  } catch (error) {
-    console.error('Error in reject endpoint:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
+    const reviewedById = reviewer?.id ?? null;
+
+    const [updated] = await db
+      .update(proposals)
+      .set({
+        status: 'rejected',
+        reviewedBy: reviewedById,
+        reasoning: body.reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(proposals.id, params.id))
+      .returning();
+
+    return Response.json({ success: true, proposal: updated });
+  },
+);

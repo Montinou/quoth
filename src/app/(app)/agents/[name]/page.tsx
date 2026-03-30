@@ -3,7 +3,9 @@
  * Shows agent info, assigned projects, messaging, and metadata
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { getDb } from '@/db/connection';
+import { sql } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, ArrowLeft, Circle, Server, Cpu, FolderOpen, Calendar } from 'lucide-react';
@@ -34,53 +36,57 @@ interface AgentWithProjects {
 }
 
 export default async function AgentDetailPage({ params }: { params: { name: string } }) {
-  const supabase = await createServerSupabaseClient();
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     redirect('/');
   }
 
+  const db = getDb();
+
   // Get user's organization
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single();
+  const userRow = await db.execute(sql`
+    SELECT default_org_id FROM public.users WHERE clerk_user_id = ${userId}
+  `).then(r => r.rows[0] as any);
 
-  if (!profile?.organization_id) {
+  if (!userRow?.default_org_id) {
     notFound();
   }
 
-  // Fetch agent with projects
-  const { data: agent, error } = await supabase
-    .from('agents')
-    .select(`
-      *,
-      agent_projects(
-        project_id,
-        role,
-        assigned_at,
-        assigned_by,
-        projects(
-          id,
-          slug,
-          is_public
-        )
-      )
-    `)
-    .eq('organization_id', profile.organization_id)
-    .eq('agent_name', params.name)
-    .single();
+  const organizationId = userRow.default_org_id;
 
-  if (error || !agent) {
+  // Fetch agent by name
+  const agentRow = await db.execute(sql`
+    SELECT * FROM agents.registry
+    WHERE org_id = ${organizationId} AND agent_name = ${params.name}
+  `).then(r => r.rows[0] as any);
+
+  if (!agentRow) {
     notFound();
   }
 
-  const agentData = agent as AgentWithProjects;
+  // Fetch agent's project assignments with project details
+  const agentProjectRows = await db.execute(sql`
+    SELECT ap.project_id, ap.role, ap.assigned_at, ap.assigned_by,
+           p.id AS proj_id, p.slug, p.is_public
+    FROM agents.agent_projects ap
+    INNER JOIN public.projects p ON p.id = ap.project_id
+    WHERE ap.agent_id = ${agentRow.id}
+  `).then(r => r.rows as any[]);
+
+  const agentData: AgentWithProjects = {
+    ...agentRow,
+    agent_projects: agentProjectRows.map((row: any) => ({
+      project_id: row.project_id,
+      role: row.role,
+      assigned_at: row.assigned_at,
+      assigned_by: row.assigned_by,
+      projects: {
+        id: row.proj_id,
+        slug: row.slug,
+        is_public: row.is_public,
+      },
+    })),
+  };
   const isOnline = agentData.last_seen_at && 
     new Date(agentData.last_seen_at).getTime() > Date.now() - 5 * 60 * 1000;
 

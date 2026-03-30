@@ -104,11 +104,11 @@ export async function getDocumentHealth(
     .eq('document_id', documentId)
     .gte('created_at', thirtyDaysAgo.toISOString());
 
-  const readCount = activities?.filter((a) => a.event_type === 'read').length || 0;
-  const searchHits = activities?.filter((a) =>
+  const readCount = activities?.filter((a: any) => a.event_type === 'read').length || 0;
+  const searchHits = activities?.filter((a: any) =>
     a.event_type === 'search' && (a.result_count ?? 0) > 0
   ).length || 0;
-  const totalSearches = activities?.filter((a) => a.event_type === 'search').length || 1;
+  const totalSearches = activities?.filter((a: any) => a.event_type === 'search').length || 1;
 
   return {
     documentId: doc.id,
@@ -143,7 +143,7 @@ export async function getProjectHealth(projectId: string): Promise<ProjectHealth
     };
   }
 
-  const documents: DocumentHealth[] = docs.map((doc) => {
+  const documents: DocumentHealth[] = docs.map((doc: any) => {
     const staleness = calculateStaleness(doc.last_updated);
     return {
       documentId: doc.id,

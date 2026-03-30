@@ -1,6 +1,6 @@
 /**
  * MCP OAuth Login Page
- * 
+ *
  * Handles OAuth flow login. After successful auth, completes OAuth via POST.
  */
 
@@ -8,7 +8,7 @@
 
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSignIn, useUser } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
@@ -18,7 +18,8 @@ function MCPLoginForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'authorizing' | 'success'>('loading');
-  const { signIn, user } = useAuth();
+  const { signIn } = useSignIn();
+  const { user } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -42,11 +43,11 @@ function MCPLoginForm() {
   async function completeOAuth() {
     try {
       // POST to authorize endpoint to generate auth code
-      const res = await fetch('/api/oauth/authorize', { 
+      const res = await fetch('/api/oauth/authorize', {
         method: 'POST',
         credentials: 'include',
       });
-      
+
       if (res.redirected) {
         setStatus('success');
         // Use window.location.href for the redirect (critical!)
@@ -68,12 +69,29 @@ function MCPLoginForm() {
     setError('');
     setLoading(true);
 
-    const { error } = await signIn(email, password);
-
-    if (error) {
-      setError(error.message);
+    if (!signIn) {
+      setError('Sign-in service not available');
       setLoading(false);
-    } else {
+      return;
+    }
+
+    try {
+      // Clerk v7: two-step flow — create with identifier, then submit password
+      const createResult = await signIn.create({ identifier: email });
+      if (createResult.error) {
+        setError(createResult.error.message || 'Invalid email');
+        setLoading(false);
+        return;
+      }
+
+      const passwordResult = await signIn.password({ password });
+      if (passwordResult.error) {
+        setError(passwordResult.error.message || 'Invalid password');
+        setLoading(false);
+        return;
+      }
+
+      // Session is set automatically by Clerk v7
       // After login, complete OAuth flow
       if (isOAuthFlow) {
         setStatus('authorizing');
@@ -81,6 +99,11 @@ function MCPLoginForm() {
       } else {
         router.push('/dashboard');
       }
+    } catch (err: unknown) {
+      const clerkError = err as { errors?: Array<{ message?: string }> };
+      const message = clerkError.errors?.[0]?.message || 'Invalid email or password';
+      setError(message);
+      setLoading(false);
     }
   }
 
@@ -107,7 +130,7 @@ function MCPLoginForm() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-obsidian to-charcoal">
         <div className="glass-panel p-8 text-center">
-          <div className="text-green-400 text-xl mb-2">✓ Success!</div>
+          <div className="text-green-400 text-xl mb-2">Success!</div>
           <p className="text-gray-400">Redirecting to Claude Code...</p>
         </div>
       </div>
@@ -122,8 +145,8 @@ function MCPLoginForm() {
             {isOAuthFlow ? 'Authorize Claude Code' : 'Quoth Login'}
           </h1>
           <p className="text-gray-400">
-            {isOAuthFlow 
-              ? 'Sign in to connect Claude Code with Quoth' 
+            {isOAuthFlow
+              ? 'Sign in to connect Claude Code with Quoth'
               : 'Sign in to your Quoth account'}
           </p>
         </div>
@@ -131,7 +154,7 @@ function MCPLoginForm() {
         {isOAuthFlow && (
           <div className="bg-violet-spectral/10 border border-violet-spectral/20 rounded-lg p-4 mb-6">
             <p className="text-sm text-violet-glow">
-              🔐 Claude Code is requesting access to your knowledge base.
+              Claude Code is requesting access to your knowledge base.
             </p>
           </div>
         )}

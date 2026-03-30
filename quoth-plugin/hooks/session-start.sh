@@ -76,7 +76,18 @@ CTXEOF
                 ;;
         esac
 
-        local context_msg="**Quoth Memory v2 Active** - Strictness: $strictness - Session: $SESSION_ID - Local storage: .quoth/  Use \`quoth-memory\` subagent for context queries. Session logs: .quoth/sessions/$SESSION_ID/"
+        # Build remote context hint
+        local remote_hint=""
+        if [ -n "$project_id" ]; then
+            remote_hint=" Remote memory available — \`quoth-memory\` will auto-search for relevant context."
+        fi
+
+        local context_msg="**Quoth Memory v2 Active** - Strictness: $strictness - Session: $SESSION_ID - Local: .quoth/ ($(wc -l .quoth/*.md 2>/dev/null | tail -1 | awk '{print $1}') lines)${remote_hint}"
+
+        # Add auto-memory status
+        if is_auto_memory_enabled; then
+            context_msg="$context_msg **Auto-memory ON** — learnings saved automatically at session end."
+        fi
 
         if [ -n "$memory_instruction" ]; then
             context_msg="$context_msg $memory_instruction"

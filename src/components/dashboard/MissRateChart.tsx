@@ -7,6 +7,13 @@
 
 import { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Minus, Search, HelpCircle } from 'lucide-react';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from 'recharts';
 
 interface MissRateTrends {
   dailyMissRates: Array<{ date: string; missRate: number; searchCount: number }>;
@@ -23,6 +30,13 @@ interface TopMissedQuery {
 interface MissRateChartProps {
   projectId: string;
 }
+
+const chartConfig = {
+  missRate: {
+    label: 'Miss Rate',
+    color: 'hsl(var(--chart-1))',
+  },
+} satisfies ChartConfig;
 
 export function MissRateChart({ projectId }: MissRateChartProps) {
   const [trends, setTrends] = useState<MissRateTrends | null>(null);
@@ -84,9 +98,16 @@ export function MissRateChart({ projectId }: MissRateChartProps) {
     }
   };
 
-  const maxRate = trends
-    ? Math.max(...trends.dailyMissRates.map((d) => d.missRate), 10)
-    : 100;
+  // Format chart data with short day labels
+  const chartData = trends
+    ? trends.dailyMissRates.map((d) => ({
+        day: new Date(d.date).toLocaleDateString('en-US', { weekday: 'short' }),
+        missRate: d.missRate,
+        searchCount: d.searchCount,
+        date: d.date,
+        isHigh: d.missRate > 30,
+      }))
+    : [];
 
   if (isLoading) {
     return (
@@ -139,31 +160,48 @@ export function MissRateChart({ projectId }: MissRateChartProps) {
             <p className="text-sm text-gray-500">Average miss rate</p>
           </div>
 
-          {/* Simple Bar Chart */}
+          {/* Bar Chart */}
           <div className="mb-6">
-            <div className="flex items-end justify-between gap-1 h-24">
-              {trends.dailyMissRates.map((day, index) => {
-                const height = (day.missRate / maxRate) * 100;
-                const isHigh = day.missRate > 30;
-                return (
-                  <div
-                    key={index}
-                    className="flex-1 flex flex-col items-center gap-1"
-                  >
-                    <div
-                      className={`w-full rounded-t transition-all ${
-                        isHigh ? 'bg-amber-400' : 'bg-violet-spectral'
-                      }`}
-                      style={{ height: `${Math.max(height, 4)}%` }}
-                      title={`${day.date}: ${day.missRate}% (${day.searchCount} searches)`}
+            <ChartContainer config={chartConfig} className="h-[120px] w-full">
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke="hsl(var(--border) / 0.3)" />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 10 }}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      formatter={(value, name, item) => (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium">{value}% miss rate</span>
+                          <span className="text-muted-foreground text-[10px]">
+                            {item.payload.searchCount} searches · {item.payload.date}
+                          </span>
+                        </div>
+                      )}
+                      hideLabel
                     />
-                    <span className="text-[10px] text-gray-500">
-                      {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                  }
+                />
+                <Bar dataKey="missRate" radius={[4, 4, 0, 0]} maxBarSize={32}>
+                  {chartData.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.isHigh ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ChartContainer>
           </div>
 
           {/* Top Missed Queries */}

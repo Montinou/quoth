@@ -1,5 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
-
 // Database types for Quoth vector storage
 export interface Project {
   id: string;
@@ -53,13 +51,6 @@ export interface ChunkByIdResult {
   total_chunks: number;
 }
 
-// Server-side Supabase client using Service Role key
-// Required env vars: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 // Helper to check if Supabase is configured
 export function isSupabaseConfigured(): boolean {
   return !!(
@@ -67,6 +58,33 @@ export function isSupabaseConfigured(): boolean {
     process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 }
+
+/**
+ * Lazy-initialized server-side Supabase client using Service Role key.
+ * Only creates the client when env vars are present; throws at call-site
+ * (not at module-load) if Supabase is not configured.
+ */
+let _supabaseClient: ReturnType<typeof import('@supabase/supabase-js').createClient> | null = null;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const supabase: any = new Proxy({} as any, {
+  get(_target, prop) {
+    if (!_supabaseClient) {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) {
+        throw new Error(
+          `[Supabase] NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required. ` +
+          `Supabase service client cannot be used without configuration.`
+        );
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createClient } = require('@supabase/supabase-js');
+      _supabaseClient = createClient(url, key);
+    }
+    return (_supabaseClient as any)[prop as string];
+  },
+});
 
 // Get or create a project by slug
 export async function getOrCreateProject(

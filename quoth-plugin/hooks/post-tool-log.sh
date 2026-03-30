@@ -119,6 +119,25 @@ main() {
             ;;
     esac
 
+    # ── Auto-memory: tag significant events for extraction ──────────────
+    if [ "$result" = "Error" ]; then
+        add_pending_learning "$SESSION_ID" "errors" "Error during $tool_name: $(echo "$INPUT" | head -c 200)"
+    fi
+
+    # Tag file edits to important paths
+    case "$tool_name" in
+        Edit|Write)
+            local sig_path=$(extract_file_path "$INPUT")
+            if [ -n "$sig_path" ]; then
+                case "$sig_path" in
+                    */api/*|*/lib/*|*/db/*|*.config.*|*/middleware*)
+                        add_pending_learning "$SESSION_ID" "patterns" "$tool_name: $sig_path"
+                        ;;
+                esac
+            fi
+            ;;
+    esac
+
     output_empty
 }
 

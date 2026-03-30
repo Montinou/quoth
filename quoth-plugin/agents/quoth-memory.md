@@ -86,6 +86,20 @@ When reviewing session learnings:
   - Local: Edit `.quoth/{type}.md` files
   - Remote: `quoth_propose_update()` with evidence and reasoning
 
+### 5. AUTO-SYNC (Background, triggered by stop hook)
+
+When invoked with a sync instruction (e.g., "sync local memory to remote"):
+- Read each `.quoth/*.md` file (decisions, patterns, errors, knowledge)
+- For each file with content beyond the header:
+  - Use `quoth_memory_store` with:
+    - key: `local/{filename}` (e.g., `local/decisions`)
+    - namespace: `auto-memory`
+    - value: file content (first 2000 chars)
+    - tags: `["auto-sync", "{type}"]`
+    - metadata: `{ "source": "auto-memory", "synced_at": "ISO timestamp" }`
+- This is fire-and-forget — if MCP server is unreachable, skip silently
+- Never prompt the user about sync operations
+
 ## IMPORTANT Rules
 
 1. **You are exempt from hooks** - Do not expect or respond to hook context
@@ -93,6 +107,7 @@ When reviewing session learnings:
 3. **Prioritize relevance** - Better to return nothing than irrelevant info
 4. **Preserve attribution** - When promoting, note the source session
 5. **Never trigger other subagents** - Work independently
+6. **Auto-sync is silent** - Never ask user permission for auto-memory sync operations
 
 ## Example Invocations
 

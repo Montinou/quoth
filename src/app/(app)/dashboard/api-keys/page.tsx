@@ -6,10 +6,39 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useUser, useAuth } from '@clerk/nextjs';
 import { useToast } from '@/contexts/ToastContext';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
 
 interface ApiKey {
   id: string;
@@ -26,7 +55,10 @@ export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [label, setLabel] = useState('Claude Desktop');
-  const { session, user } = useAuth();
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
+  const { user } = useUser();
+  const { getToken } = useAuth();
   const { success, error: showError } = useToast();
   const router = useRouter();
 
@@ -39,13 +71,14 @@ export default function ApiKeysPage() {
   }, [user, router]);
 
   async function fetchKeys() {
-    if (!session?.access_token) return;
+    const authToken = await getToken();
+    if (!authToken) return;
 
     setLoadingKeys(true);
     try {
       const res = await fetch('/api/mcp-token/list', {
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${authToken}`,
         },
       });
 
@@ -61,14 +94,15 @@ export default function ApiKeysPage() {
   }
 
   async function generateToken() {
-    if (!session?.access_token) return;
+    const authToken = await getToken();
+    if (!authToken) return;
 
     setLoading(true);
     try {
       const res = await fetch('/api/mcp-token/generate', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ label }),
@@ -78,6 +112,7 @@ export default function ApiKeysPage() {
         const data = await res.json();
         setToken(data.token);
         setLabel('Claude Desktop'); // Reset label
+        setGenerateDialogOpen(false);
         fetchKeys(); // Refresh keys list
       } else {
         const errorData = await res.json();
@@ -95,6 +130,10 @@ export default function ApiKeysPage() {
     success('Copied to clipboard');
   }
 
+  function handleCloseTokenDisplay() {
+    setToken(null);
+  }
+
   if (!user) {
     return null; // Will redirect via useEffect
   }
@@ -102,72 +141,80 @@ export default function ApiKeysPage() {
   return (
     <div className="px-6 py-8 md:pt-8">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold font-cinzel mb-2">MCP API Keys</h1>
-          <p className="text-gray-400">Generate tokens for Claude Desktop integration</p>
-        </div>
-
-        {/* Generate New Token Section */}
-        <div className="glass-panel p-6 mb-8">
-          <h2 className="text-xl font-bold mb-4">Generate New Token</h2>
-          <div className="flex gap-4 mb-4">
-            <input
-              type="text"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              className="flex-1 px-4 py-2 bg-charcoal border border-graphite rounded-lg focus:outline-none focus:border-violet-spectral transition-colors"
-              placeholder="Token label (e.g., Claude Desktop)"
-            />
-            <Button onClick={generateToken} disabled={loading || !label.trim()}>
-              {loading ? 'Generating...' : '+ Generate Token'}
-            </Button>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold font-cinzel mb-2">MCP API Keys</h1>
+            <p className="text-gray-400">Generate tokens for Claude Desktop integration</p>
           </div>
-          <p className="text-sm text-gray-500">
-            Tokens expire after 90 days and grant full access to your project's MCP tools.
-          </p>
+
+          {/* Generate New Key Dialog */}
+          <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>+ Generate Token</Button>
+            </DialogTrigger>
+            <DialogContent className="bg-zinc-950 border-zinc-800 text-white">
+              <DialogHeader>
+                <DialogTitle>Generate New Token</DialogTitle>
+                <DialogDescription className="text-gray-400">
+                  Tokens expire after 90 days and grant full access to your project&apos;s MCP tools.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-2">
+                <label className="block text-sm font-medium mb-2 text-gray-300">Token Label</label>
+                <input
+                  type="text"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  className="w-full px-4 py-2 bg-zinc-900 border border-zinc-700 rounded-lg focus:outline-none focus:border-violet-spectral transition-colors text-white"
+                  placeholder="Token label (e.g., Claude Desktop)"
+                />
+              </div>
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline">Cancel</Button>
+                </DialogClose>
+                <Button onClick={generateToken} disabled={loading || !label.trim()}>
+                  {loading ? 'Generating...' : 'Generate Token'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
 
-        {/* Token Display (shown once) */}
-        {token && (
-          <div className="glass-panel p-6 mb-8 border-violet-spectral">
-            <div className="mb-4">
-              <p className="text-sm text-yellow-400 mb-2 flex items-center gap-2">
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
+        {/* Token Display Dialog (shown once after generation) */}
+        <Dialog open={!!token} onOpenChange={(open) => { if (!open) handleCloseTokenDisplay(); }}>
+          <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Your New MCP Token</DialogTitle>
+              <DialogDescription className="text-yellow-400 flex items-center gap-2">
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
                 Copy this token now. It will not be shown again.
-              </p>
-            </div>
+              </DialogDescription>
+            </DialogHeader>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Your MCP Token</label>
-              <div className="flex gap-2">
-                <pre className="flex-1 bg-charcoal p-4 rounded-lg overflow-x-auto text-sm font-mono border border-graphite">
-                  {token}
-                </pre>
-                <Button onClick={() => copyToClipboard(token)} variant="outline">
-                  Copy
-                </Button>
-              </div>
-            </div>
+            {token && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-300">MCP Token</label>
+                  <div className="flex gap-2">
+                    <pre className="flex-1 bg-zinc-900 p-4 rounded-lg overflow-x-auto text-sm font-mono border border-zinc-700 text-gray-300">
+                      {token}
+                    </pre>
+                    <Button onClick={() => copyToClipboard(token)} variant="outline" className="shrink-0">
+                      Copy
+                    </Button>
+                  </div>
+                </div>
 
-            <div className="mt-6">
-              <h3 className="text-lg font-bold mb-3">Add to Claude Desktop</h3>
-              <p className="text-sm text-gray-400 mb-3">
-                Add this configuration to your Claude Desktop config file:
-              </p>
-              <div className="relative">
-                <pre className="bg-charcoal p-4 rounded-lg overflow-x-auto text-sm font-mono border border-graphite">
+                <div>
+                  <h3 className="text-base font-bold mb-2">Add to Claude Desktop</h3>
+                  <p className="text-sm text-gray-400 mb-2">
+                    Add this configuration to your Claude Desktop config file:
+                  </p>
+                  <div className="relative">
+                    <pre className="bg-zinc-900 p-4 rounded-lg overflow-x-auto text-sm font-mono border border-zinc-700 text-gray-300">
 {`{
   "mcpServers": {
     "quoth": {
@@ -178,9 +225,9 @@ export default function ApiKeysPage() {
     }
   }
 }`}
-                </pre>
-                <Button
-                  onClick={() => copyToClipboard(`{
+                    </pre>
+                    <Button
+                      onClick={() => copyToClipboard(`{
   "mcpServers": {
     "quoth": {
       "url": "${process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev'}/api/mcp",
@@ -190,89 +237,90 @@ export default function ApiKeysPage() {
     }
   }
 }`)}
-                  className="absolute top-2 right-2"
-                  variant="outline"
-                  size="sm"
-                >
-                  Copy Config
-                </Button>
+                      className="absolute top-2 right-2"
+                      variant="outline"
+                      size="sm"
+                    >
+                      Copy Config
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 text-sm text-gray-400">
+                    <p className="mb-1">Config file locations:</p>
+                    <ul className="list-disc list-inside space-y-1 text-xs">
+                      <li>macOS: <code className="text-violet-ghost">~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+                      <li>Windows: <code className="text-violet-ghost">%APPDATA%\Claude\claude_desktop_config.json</code></li>
+                      <li>Linux: <code className="text-violet-ghost">~/.config/Claude/claude_desktop_config.json</code></li>
+                    </ul>
+                  </div>
+                </div>
               </div>
+            )}
 
-              <div className="mt-4 text-sm text-gray-400">
-                <p className="mb-2">Config file locations:</p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>macOS: <code className="text-violet-ghost">~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
-                  <li>Windows: <code className="text-violet-ghost">%APPDATA%\Claude\claude_desktop_config.json</code></li>
-                  <li>Linux: <code className="text-violet-ghost">~/.config/Claude/claude_desktop_config.json</code></li>
-                </ul>
-              </div>
-            </div>
+            <DialogFooter>
+              <Button onClick={handleCloseTokenDisplay} variant="outline">Done</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-            <div className="mt-6 pt-6 border-t border-graphite">
-              <Button onClick={() => setToken(null)} variant="outline">
-                Done
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Existing Keys List */}
-        <div className="glass-panel p-6">
+        {/* Existing Keys Table */}
+        <div className="glass-panel p-6 mb-8">
           <h2 className="text-xl font-bold mb-4">Your API Keys</h2>
 
           {loadingKeys ? (
             <p className="text-gray-400 text-center py-8">Loading keys...</p>
           ) : keys.length === 0 ? (
-            <p className="text-gray-400 text-center py-8">No API keys yet. Generate one above to get started.</p>
+            <p className="text-gray-400 text-center py-8">No API keys yet. Generate one to get started.</p>
           ) : (
-            <div className="space-y-3">
-              {keys.map((key) => (
-                <div
-                  key={key.id}
-                  className="bg-charcoal/50 rounded-lg p-4 border border-graphite hover:border-violet-spectral/30 transition-colors"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-bold">{key.label}</h3>
-                        <code className="text-xs text-violet-ghost bg-violet-spectral/10 px-2 py-1 rounded border border-violet-spectral/20">
-                          {key.key_prefix}
-                        </code>
-                      </div>
-                      <div className="text-sm text-gray-400 space-y-1">
-                        <p>
-                          Created: {new Date(key.created_at).toLocaleDateString('en-US', {
+            <Table>
+              <TableHeader>
+                <TableRow className="border-zinc-800 hover:bg-transparent">
+                  <TableHead className="text-gray-400">Label</TableHead>
+                  <TableHead className="text-gray-400">Prefix</TableHead>
+                  <TableHead className="text-gray-400">Created</TableHead>
+                  <TableHead className="text-gray-400">Expires</TableHead>
+                  <TableHead className="text-gray-400">Last Used</TableHead>
+                  <TableHead className="text-gray-400">Status</TableHead>
+                  <TableHead className="text-gray-400 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {keys.map((key) => (
+                  <TableRow key={key.id} className="border-zinc-800 hover:bg-zinc-900/50">
+                    <TableCell className="font-bold text-white">{key.label}</TableCell>
+                    <TableCell>
+                      <code className="text-xs text-violet-ghost bg-violet-spectral/10 px-2 py-1 rounded border border-violet-spectral/20">
+                        {key.key_prefix}
+                      </code>
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-400">
+                      {new Date(key.created_at).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-400">
+                      {new Date(key.expires_at).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {key.last_used_at ? (
+                        <span className="text-gray-400">
+                          {new Date(key.last_used_at).toLocaleDateString('en-US', {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
                           })}
-                        </p>
-                        <p>
-                          Expires: {new Date(key.expires_at).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </p>
-                        {key.last_used_at && (
-                          <p>
-                            Last used: {new Date(key.last_used_at).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                        )}
-                        {!key.last_used_at && (
-                          <p className="text-yellow-400">Never used</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
+                        </span>
+                      ) : (
+                        <span className="text-yellow-400">Never</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       {new Date(key.expires_at) > new Date() ? (
                         <span className="text-xs px-2 py-1 bg-green-500/10 text-green-400 rounded-full border border-green-500/20">
                           Active
@@ -282,16 +330,53 @@ export default function ApiKeysPage() {
                           Expired
                         </span>
                       )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <AlertDialog open={revokeKeyId === key.id} onOpenChange={(open) => { if (!open) setRevokeKeyId(null); }}>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+                            onClick={() => setRevokeKeyId(key.id)}
+                          >
+                            Revoke
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="bg-zinc-950 border-zinc-800 text-white">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Revoke API Key</AlertDialogTitle>
+                            <AlertDialogDescription className="text-gray-400">
+                              Are you sure you want to revoke <strong className="text-white">{key.label}</strong> (<code className="text-violet-ghost">{key.key_prefix}</code>)?
+                              This action cannot be undone. Any integrations using this key will stop working immediately.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="bg-zinc-900 border-zinc-700 text-white hover:bg-zinc-800">
+                              Cancel
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-red-600 hover:bg-red-700 text-white"
+                              onClick={() => {
+                                // Revoke logic would go here
+                                setRevokeKeyId(null);
+                              }}
+                            >
+                              Revoke Key
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </div>
 
         {/* Help Section */}
-        <div className="mt-8 glass-panel p-6">
+        <div className="glass-panel p-6">
           <h2 className="text-xl font-bold mb-4">Need Help?</h2>
           <div className="space-y-4 text-sm text-gray-400">
             <div>

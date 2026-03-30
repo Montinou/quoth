@@ -22,8 +22,8 @@ import {
   Bot,
   Globe,
 } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
-import { signOutAction } from "@/app/auth/actions";
+import { useUser, useClerk } from "@clerk/nextjs";
+import { useProfile } from "@/contexts/AuthContext";
 import { Logo } from "@/components/quoth/Logo";
 import {
   Sidebar,
@@ -113,7 +113,9 @@ const settingsNavItems = [
 // Inner component that uses useSidebar hook (must be inside Sidebar context)
 function SidebarInner() {
   const pathname = usePathname();
-  const { user, profile, isHydrated } = useAuth();
+  const { user, isLoaded } = useUser();
+  const { profile } = useProfile();
+  const { signOut } = useClerk();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
@@ -126,11 +128,11 @@ function SidebarInner() {
   };
 
   // Get display name for user - use consistent fallback during SSR/hydration
-  // This prevents hydration mismatch when localStorage has cached profile
-  const displayName = isHydrated
-    ? (profile?.username || user?.email?.split("@")[0] || "User")
+  const displayName = isLoaded
+    ? (profile?.displayName || user?.fullName || user?.primaryEmailAddress?.emailAddress?.split("@")[0] || "User")
     : "User";
   const userInitial = displayName[0]?.toUpperCase() || "U";
+  const userEmail = user?.primaryEmailAddress?.emailAddress;
 
   return (
     <>
@@ -222,7 +224,7 @@ function SidebarInner() {
         </SidebarGroup>
 
         {/* Team Navigation - Dynamic based on profile */}
-        {profile?.default_project_id && (
+        {profile?.defaultProjectId && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-xs uppercase tracking-wider text-gray-500 mb-2">
               Team
@@ -241,7 +243,7 @@ function SidebarInner() {
                       ${pathname.includes("/team") ? "nav-active-indicator" : ""}
                     `}
                   >
-                    <Link href={`/dashboard/${profile.username}-knowledge-base/team`} className={isCollapsed ? "!justify-center" : ""}>
+                    <Link href="/dashboard/team" className={isCollapsed ? "!justify-center" : ""}>
                       <Users
                         className={`size-4 transition-all duration-300 group-hover/item:scale-110 ${
                           pathname.includes("/team")
@@ -328,11 +330,19 @@ function SidebarInner() {
                 >
                   {/* Avatar with gradient ring */}
                   <div className="relative shrink-0">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-spectral/30 to-violet-glow/30 flex items-center justify-center border border-violet-spectral/40 transition-all duration-300 group-hover/user:border-violet-spectral/60 group-hover/user:shadow-lg group-hover/user:shadow-violet-spectral/20">
-                      <span className="text-violet-ghost font-semibold text-sm">
-                        {userInitial}
-                      </span>
-                    </div>
+                    {user?.imageUrl ? (
+                      <img
+                        src={user.imageUrl}
+                        alt={displayName}
+                        className="w-8 h-8 rounded-full border border-violet-spectral/40 transition-all duration-300 group-hover/user:border-violet-spectral/60 group-hover/user:shadow-lg group-hover/user:shadow-violet-spectral/20"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-spectral/30 to-violet-glow/30 flex items-center justify-center border border-violet-spectral/40 transition-all duration-300 group-hover/user:border-violet-spectral/60 group-hover/user:shadow-lg group-hover/user:shadow-violet-spectral/20">
+                        <span className="text-violet-ghost font-semibold text-sm">
+                          {userInitial}
+                        </span>
+                      </div>
+                    )}
                     {/* Online indicator */}
                     <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-muted rounded-full border-2 border-sidebar" />
                   </div>
@@ -343,7 +353,7 @@ function SidebarInner() {
                           {displayName}
                         </span>
                         <span className="truncate text-xs text-gray-500">
-                          {user?.email}
+                          {userEmail}
                         </span>
                       </div>
                       <ChevronUp className="ml-auto size-4 text-gray-500 transition-transform duration-200 group-data-[state=open]/user:rotate-180" />
@@ -360,7 +370,7 @@ function SidebarInner() {
                 {/* User info header */}
                 <div className="px-3 py-2 mb-1">
                   <p className="text-sm font-medium text-white">{displayName}</p>
-                  <p className="text-xs text-gray-500">{user?.email}</p>
+                  <p className="text-xs text-gray-500">{userEmail}</p>
                 </div>
                 <DropdownMenuSeparator className="bg-sidebar-border/50" />
                 <DropdownMenuItem
@@ -382,17 +392,13 @@ function SidebarInner() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-sidebar-border/50" />
-                <form action={signOutAction}>
-                  <DropdownMenuItem asChild>
-                    <button
-                      type="submit"
-                      className="w-full cursor-pointer rounded-lg text-red-400 focus:text-red-400 focus:bg-red-500/10 transition-colors duration-200 flex items-center"
-                    >
-                      <LogOut className="mr-2 size-4" />
-                      Sign Out
-                    </button>
-                  </DropdownMenuItem>
-                </form>
+                <DropdownMenuItem
+                  onClick={() => signOut({ redirectUrl: '/' })}
+                  className="cursor-pointer rounded-lg text-red-400 focus:text-red-400 focus:bg-red-500/10 transition-colors duration-200 flex items-center"
+                >
+                  <LogOut className="mr-2 size-4" />
+                  Sign Out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

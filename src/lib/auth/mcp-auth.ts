@@ -1,13 +1,33 @@
 /**
  * MCP Authentication Middleware
- * Supports both Supabase OAuth tokens and manual API keys
+ * Supports custom JWT API keys and optionally Supabase OAuth tokens
+ * Supabase is only used when NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set
  */
 
 import { createMcpHandler } from 'mcp-handler';
 import { jwtVerify, decodeJwt } from 'jose';
-import { createClient } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+/**
+ * Lazily create a Supabase admin client only when env vars are present.
+ * Returns null if Supabase is not configured (Neon + Clerk migration).
+ */
+function createSupabaseAdminClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceKey) return null;
+  try {
+    // Dynamic require to avoid build errors when @supabase/supabase-js is not installed
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createClient } = require('@supabase/supabase-js');
+    return createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  } catch {
+    return null;
+  }
+}
 
 // Debug flag - only enable with explicit env var
 const DEBUG_MCP_AUTH = process.env.NODE_ENV === 'development' && process.env.DEBUG_MCP_AUTH === 'true';
@@ -45,23 +65,15 @@ export interface AuthContext {
  * So we must decode the JWT to read project_id and mcp_role, not rely on getUser().
  */
 async function verifySupabaseToken(token: string): Promise<AuthContext | null> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   debugLog('[MCP Auth] Verifying Supabase token...');
 
-  if (!supabaseUrl || !supabaseServiceKey) {
-    console.error('[MCP Auth] Supabase configuration missing');
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    debugLog('[MCP Auth] Supabase not configured, skipping Supabase token verification');
     return null;
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
 
     // Verify token with Supabase (this validates the token is legitimate)
     debugLog('[MCP Auth] Calling supabase.auth.getUser...');
@@ -177,19 +189,10 @@ async function verifyCustomJwt(token: string): Promise<AuthContext | null> {
       return null;
     }
 
-    // Fetch available projects for multi-account support (same as Supabase OAuth)
+    // Fetch available projects for multi-account support (optional, requires Supabase)
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-      if (supabaseUrl && supabaseServiceKey) {
-        const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-          auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-          },
-        });
-
+      const supabase = createSupabaseAdminClient();
+      if (supabase) {
         const { data: projectMembers } = await supabase
           .from('project_members')
           .select(`
@@ -247,8 +250,12 @@ export async function verifyMcpApiKey(token: string): Promise<AuthContext | null
     return customAuth;
   }
 
-  // Fall back to Supabase verification
-  return verifySupabaseToken(token);
+  // Fall back to Supabase verification (only if configured)
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    return verifySupabaseToken(token);
+  }
+
+  return null;
 }
 
 /**

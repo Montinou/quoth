@@ -61,6 +61,10 @@ When prompted, select "Authenticate" from the `/mcp` menu. Your browser will ope
 
 ## Step 3: Initialize Your Knowledge Base
 
+<Callout type="info">
+  **Auto-memory is seamless.** After running `/quoth-init`, learnings are automatically captured and consolidated in the background. No manual steps needed.
+</Callout>
+
 Run Genesis to automatically document your codebase:
 
 ```
@@ -95,7 +99,7 @@ quoth_agent_register({
 This enables:
 - **Cross-instance messaging** — Agents on AWS, Mac, WSL2 can talk to each other
 - **Task assignment** — Create and assign tasks between agents
-- **Real-time delivery** — Supabase Realtime for instant notifications
+- **Real-time delivery** — Async message bus for instant notifications
 
 ## Step 5: Start Building
 
@@ -140,7 +144,7 @@ quoth_task_create({
   />
   <Card
     title="MCP Tools Reference"
-    description="Explore all 28 Quoth tools including the A2A Bus"
+    description="Explore all 18 MCP tools including the A2A Bus"
     icon="Wrench"
     href="/docs/reference/mcp-tools"
   />

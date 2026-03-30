@@ -2,17 +2,42 @@
  * Authenticated App Layout
  * Wraps all protected routes with sidebar navigation
  * Features: Seamless transitions, breadcrumb navigation, responsive design
+ *
+ * Redirects to /onboarding if user hasn't completed onboarding yet.
  */
 
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { cookies } from "next/headers";
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { getDb } from "@/db/connection";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Check onboarding status — redirect new users to onboarding
+  const { userId } = await auth();
+  if (userId) {
+    const db = getDb();
+    const [user] = await db
+      .select({ metadata: users.metadata })
+      .from(users)
+      .where(eq(users.clerkUserId, userId))
+      .limit(1);
+
+    if (user) {
+      const meta = (user.metadata ?? {}) as Record<string, unknown>;
+      if (meta.onboarding_completed !== true) {
+        redirect("/onboarding");
+      }
+    }
+  }
+
   // Read sidebar state from cookies for SSR
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";

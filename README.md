@@ -35,11 +35,24 @@ A Sonnet-powered memory interface that:
 
 | Tool | Description |
 |------|-------------|
-| `quoth_search_index` | Semantic search with Jina embeddings + Cohere reranking |
+| `quoth_search_index` | Semantic search with Vercel AI Gateway embeddings (text-embedding-3-small, 1536d) |
 | `quoth_read_doc` | Retrieve full document content by ID |
-| `quoth_propose_update` | Submit documentation updates with evidence |
+| `quoth_read_chunks` | Retrieve document chunks for granular access |
+| `quoth_memory_store` | Store a memory entry for the current agent/session |
+| `quoth_memory_search` | Semantic search over stored memories |
+| `quoth_memory_list` | List stored memory entries |
+| `quoth_memory_forget` | Delete a memory entry |
+| `quoth_agent_register` | Register an agent in the project |
+| `quoth_agent_list` | List registered agents |
+| `quoth_agent_assign` | Assign an agent to a task |
+| `quoth_agent_send_message` | Send a message to another agent |
+| `quoth_agent_inbox` | Read an agent's inbox |
+| `quoth_agent_tasks` | List tasks assigned to an agent |
+| `quoth_agent_task_reassign` | Reassign a task to a different agent |
+| `quoth_project_create` | Create a new Quoth project |
+| `quoth_project_invite` | Invite a collaborator to a project |
+| `quoth_token_generate` | Generate an MCP access token |
 | `quoth_genesis` | Bootstrap project documentation (minimal/standard/comprehensive) |
-| `quoth_guidelines` | Adaptive guidelines for code/review/document modes |
 
 ### 🪝 Hook-Enforced Documentation
 
@@ -117,12 +130,12 @@ With Quoth active:
 3. **After actions** → Logged to `.quoth/sessions/{id}/log.md`
 4. **Session ends** → Prompted to promote learnings
 
-### 4. Promote Knowledge
+### 4. Auto-Memory
 
-At session end, Quoth summarizes learnings:
+After init, session learnings are captured and consolidated automatically — no user action needed. On session end, Quoth silently extracts key insights and merges them into your `.quoth/*.md` files. Knowledge promotion to the remote index happens seamlessly in the background.
 
 ```
-Session complete. I captured these learnings:
+Session complete. Learnings auto-extracted and consolidated:
 
 **Decisions:**
 - Chose retry-with-backoff over circuit-breaker for token refresh
@@ -132,8 +145,6 @@ Session complete. I captured these learnings:
 
 **Errors:**
 - Auth header missing on redirect (fixed by preserving headers)
-
-Update local files? Upload to Quoth? Both? Skip?
 ```
 
 ## Local Folder Structure
@@ -204,10 +215,10 @@ Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types b
 
 | Variable | Description |
 |----------|-------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
-| `JINA_API_KEY` | Jina embeddings (512d vectors) |
-| `COHERE_API_KEY` | Cohere reranking (optional) |
+| `CLERK_SECRET_KEY` | Clerk authentication secret key |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (client-side) |
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` | Vercel AI Gateway — text-embedding-3-small (1536d vectors) |
 | `JWT_SECRET` | MCP token generation |
 | `RESEND_API_KEY` | Email delivery (optional) |
 

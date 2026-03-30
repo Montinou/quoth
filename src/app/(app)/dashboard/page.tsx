@@ -5,7 +5,9 @@
  */
 
 import { Suspense } from 'react';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { getDb } from '@/db/connection';
+import { sql } from 'drizzle-orm';
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
 import { ActivityCard } from '@/components/dashboard/ActivityCard';
@@ -38,39 +40,38 @@ function CardSkeleton() {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     redirect('/');
   }
 
-  // Fetch user's projects (required for projectIds)
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('*, project_members!inner(role)')
-    .eq('project_members.user_id', user.id);
+  const db = getDb();
 
-  const projectIds = projects?.map((p) => p.id) || [];
-  const firstProject = projects?.[0];
+  // Fetch user's projects with role (join through users table using clerk_user_id)
+  const projects = await db.execute(sql`
+    SELECT p.*, pm.role AS member_role
+    FROM public.projects p
+    INNER JOIN public.project_members pm ON pm.project_id = p.id
+    INNER JOIN public.users u ON u.id = pm.user_id
+    WHERE u.clerk_user_id = ${userId}
+  `).then(r => r.rows as any[]);
+
+  const projectIds = projects.map((p: any) => p.id);
+  const firstProject = projects[0];
 
   // Parallelize independent queries for ~50-60% latency reduction (3-4 RTTs → 2 RTTs)
   const [proposalResult, documentResult, coverageResult] = await Promise.all([
-    supabase
-      .from('document_proposals')
-      .select('*', { count: 'exact', head: true })
-      .in('project_id', projectIds),
-    supabase
-      .from('documents')
-      .select('*', { count: 'exact', head: true })
-      .in('project_id', projectIds),
+    projectIds.length > 0
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as any)?.count ?? 0)
+      : Promise.resolve(0),
+    projectIds.length > 0
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.documents WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as any)?.count ?? 0)
+      : Promise.resolve(0),
     firstProject ? getLatestCoverage(firstProject.id) : Promise.resolve(null),
   ]);
 
-  const proposalCount = proposalResult.count;
-  const documentCount = documentResult.count;
+  const proposalCount = proposalResult;
+  const documentCount = documentResult;
   const initialCoverage = coverageResult;
 
   // Stats data
@@ -233,7 +234,7 @@ export default async function DashboardPage() {
 
           <div className="space-y-4">
             {projects && projects.length > 0 ? (
-              projects.map((project, index) => (
+              projects.map((project: any, index: any) => (
                 <div
                   key={project.id}
                   className="glass-panel interactive-card rounded-2xl p-6 animate-stagger"
@@ -247,16 +248,16 @@ export default async function DashboardPage() {
                           <span
                             className={`
                               px-2.5 py-1 text-xs font-medium rounded-full border
-                              ${project.project_members[0]?.role === 'admin'
+                              ${project.member_role === 'admin'
                                 ? 'bg-violet-spectral/15 text-violet-ghost border-violet-spectral/30'
-                                : project.project_members[0]?.role === 'editor'
+                                : project.member_role === 'editor'
                                 ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                                 : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
                               }
                             `}
                           >
                             <Shield className="w-3 h-3 inline-block mr-1" />
-                            {project.project_members[0]?.role}
+                            {project.member_role}
                           </span>
                           {project.is_public && (
                             <span className="px-2.5 py-1 bg-emerald-muted/15 text-emerald-muted text-xs font-medium rounded-full border border-emerald-muted/30">

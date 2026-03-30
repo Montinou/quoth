@@ -1,74 +1,74 @@
 /**
- * Knowledge Base Document API
- * GET /api/knowledge-base/[id]
+ * GET /api/knowledge-base/{id}
+ *
+ * Fetch a single document from docs.documents by ID,
+ * scoped to the authenticated user's org.
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { supabase } from '@/lib/supabase';
+export const runtime = 'nodejs';
+
+import { NextRequest, NextResponse } from 'next/server';
+import { eq, and } from 'drizzle-orm';
+import { getAuthContext } from '@/lib/auth/clerk';
+import { getDb } from '@/db/connection';
+import { documents } from '@/db/schema';
+
+interface DocumentResponse {
+  id: string;
+  title: string;
+  content: string;
+  version: number;
+  lastUpdated: string;
+  path: string;
+  history: never[];
+}
 
 export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const authSupabase = await createServerSupabaseClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
-    
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Get document
-    const { data: doc, error: docError } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (docError || !doc) {
-      return Response.json({ error: 'Document not found' }, { status: 404 });
-    }
-
-    // Verify user has access to this project
-    const { data: membership } = await authSupabase
-      .from('project_members')
-      .select('role')
-      .eq('project_id', doc.project_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!membership) {
-      return Response.json({ error: 'Access denied' }, { status: 403 });
-    }
-
-    // Get version history
-    const { data: history } = await supabase
-      .from('document_history')
-      .select('id, version, content, title, archived_at')
-      .eq('document_id', id)
-      .order('version', { ascending: false });
-
-    return Response.json({
-      id: doc.id,
-      title: doc.title,
-      content: doc.content,
-      version: doc.version || 1,
-      lastUpdated: doc.last_updated,
-      path: doc.file_path,
-      history: (history || []).map(h => ({
-        id: h.id,
-        version: h.version,
-        content: h.content,
-        title: h.title,
-        archivedAt: h.archived_at
-      })),
-    });
-  } catch (error) {
-    console.error('Document fetch error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch document' },
-      { status: 500 }
-    );
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  // Auth check
+  const ctx = await getAuthContext();
+  if (!ctx) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const { id } = await params;
+
+  if (!id) {
+    return NextResponse.json({ error: 'Missing document id' }, { status: 400 });
+  }
+
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+      content: documents.content,
+      version: documents.version,
+      updatedAt: documents.updatedAt,
+      filePath: documents.filePath,
+    })
+    .from(documents)
+    .where(and(eq(documents.id, id), eq(documents.orgId, ctx.orgId)))
+    .limit(1);
+
+  if (rows.length === 0) {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+  }
+
+  const doc = rows[0];
+
+  const response: DocumentResponse = {
+    id: doc.id,
+    title: doc.title,
+    content: doc.content,
+    version: doc.version ?? 1,
+    lastUpdated: doc.updatedAt?.toISOString() ?? new Date().toISOString(),
+    path: doc.filePath,
+    history: [],
+  };
+
+  return NextResponse.json(response);
 }

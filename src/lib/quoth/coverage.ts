@@ -96,7 +96,7 @@ export async function calculateCoverage(projectId: string): Promise<CoverageResu
   // Step 3: Count distinct document_ids in document_embeddings (docs with embeddings)
   // Batch the query to avoid timeout with large document sets (Vercel 10s limit)
   const BATCH_SIZE = 20;
-  const docIds = (docs || []).map(d => d.id);
+  const docIds = (docs || []).map((d: any) => d.id);
   const docIdsWithEmbeddings = new Set<string>();
   let totalChunks = 0;
 
@@ -114,7 +114,7 @@ export async function calculateCoverage(projectId: string): Promise<CoverageResu
     }
 
     // Collect unique document IDs
-    (embeddingData || []).forEach(e => docIdsWithEmbeddings.add(e.document_id));
+    (embeddingData || []).forEach((e: any) => docIdsWithEmbeddings.add(e.document_id));
     totalChunks += embeddingData?.length || 0;
   }
 

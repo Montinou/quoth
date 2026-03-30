@@ -7,7 +7,8 @@
  */
 
 import { useState, useEffect, Suspense } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@clerk/nextjs';
+import { useProfile } from '@/contexts/AuthContext';
 import {
   BarChart3,
   Search,
@@ -32,7 +33,8 @@ interface UsageStats {
 }
 
 export function UsageAnalytics() {
-  const { profile, session } = useAuth();
+  const { profile } = useProfile();
+  const { getToken } = useAuth();
   const [period, setPeriod] = useState<Period>('7d');
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,7 +42,13 @@ export function UsageAnalytics() {
 
   useEffect(() => {
     async function fetchStats() {
-      if (!profile?.default_project_id || !session?.access_token) {
+      if (!profile?.defaultProjectId) {
+        setLoading(false);
+        return;
+      }
+
+      const authToken = await getToken();
+      if (!authToken) {
         setLoading(false);
         return;
       }
@@ -50,10 +58,10 @@ export function UsageAnalytics() {
 
       try {
         const res = await fetch(
-          `/api/analytics/usage?project_id=${profile.default_project_id}&period=${period}`,
+          `/api/analytics/usage?project_id=${profile.defaultProjectId}&period=${period}`,
           {
             headers: {
-              Authorization: `Bearer ${session.access_token}`,
+              Authorization: `Bearer ${authToken}`,
             },
           }
         );
@@ -74,7 +82,7 @@ export function UsageAnalytics() {
     }
 
     fetchStats();
-  }, [profile?.default_project_id, session?.access_token, period]);
+  }, [profile?.defaultProjectId, getToken, period]);
 
   const periodLabels: Record<Period, string> = {
     '7d': 'Last 7 days',
@@ -111,7 +119,7 @@ export function UsageAnalytics() {
   ];
 
   // No project available
-  if (!profile?.default_project_id) {
+  if (!profile?.defaultProjectId) {
     return (
       <div className="px-6 py-8 md:py-10">
         <div className="max-w-7xl mx-auto">
@@ -207,10 +215,10 @@ export function UsageAnalytics() {
             {/* Phase 3 Insights: Health Dashboard & Miss Rate Chart */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
               <Suspense fallback={<InsightCardSkeleton />}>
-                <HealthDashboard projectId={profile.default_project_id} />
+                <HealthDashboard projectId={profile.defaultProjectId} />
               </Suspense>
               <Suspense fallback={<InsightCardSkeleton />}>
-                <MissRateChart projectId={profile.default_project_id} />
+                <MissRateChart projectId={profile.defaultProjectId} />
               </Suspense>
             </div>
 
@@ -247,7 +255,7 @@ export function UsageAnalytics() {
 
             {/* Phase 3 Insights: Drift Timeline (Full Width) */}
             <Suspense fallback={<DriftTimelineSkeleton />}>
-              <DriftTimeline projectId={profile.default_project_id} />
+              <DriftTimeline projectId={profile.defaultProjectId} />
             </Suspense>
           </>
         )}

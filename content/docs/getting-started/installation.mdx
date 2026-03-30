@@ -6,6 +6,10 @@ order: 2
 
 Quoth can be connected to any MCP-compatible AI tool. This guide covers installation for popular platforms.
 
+<Callout type="info">
+  **Clerk authentication.** Quoth uses Clerk for authentication. Sign up at [quoth.triqual.dev](https://quoth.triqual.dev) to get started.
+</Callout>
+
 ## Claude Code (CLI)
 
 ### Plugin Installation (Recommended)
@@ -21,7 +25,7 @@ The Quoth Plugin bundles the MCP server, lightweight hooks (~60 tokens), and the
 ```
 
 This gives you:
-- **28 MCP tools** including 9 knowledge tools, 6 project management, 10 A2A Bus, 2 provisioning, 1 genesis
+- **18 MCP tools** including 9 knowledge tools, 6 project management, 10 A2A Bus, 2 provisioning, 1 genesis
 - Lightweight hooks that hint Claude to use Quoth patterns
 - Agent-to-agent communication across instances
 - 🪶 Badge transparency when Quoth is used
@@ -125,7 +129,7 @@ quoth_agent_register({
 Once registered, you can:
 - Send messages to agents on other instances (with HMAC signing)
 - Create tasks for other agents
-- Receive real-time notifications via Supabase Realtime
+- Receive real-time notifications via async message bus
 
 ## Verify Installation
 

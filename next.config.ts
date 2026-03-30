@@ -5,12 +5,18 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },
+  // Ensure tree-sitter packages are resolved server-side (not bundled)
+  // This lets the lazy-loader dynamically import them at runtime
+  serverExternalPackages: ['web-tree-sitter'],
   // Include WASM files in serverless function bundles for Vercel
+  // Language grammars are loaded on-demand by lazy-loader — all must be traced
   outputFileTracingIncludes: {
     // MCP routes that use AST chunking via search/sync
     "/api/mcp": ["./public/wasm/*.wasm"],
     "/api/mcp/*": ["./public/wasm/*.wasm"],
     "/api/\\[transport\\]": ["./public/wasm/*.wasm"],
+    // Sync endpoint also triggers chunking
+    "/api/sync": ["./public/wasm/*.wasm"],
   },
   // Empty turbopack config to silence warning about webpack migration
   turbopack: {},

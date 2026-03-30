@@ -1,57 +1,50 @@
 /**
- * MCP Token List API
- * Lists all API keys for the user's default project
+ * GET /api/mcp-token/list
+ *
+ * Returns all active (non-revoked) API keys for the authenticated user's org.
+ * Joins agents.api_keys with agents.registry filtered by org_id.
+ *
+ * Headers:
+ *   Authorization: Bearer {clerkToken}
+ *
+ * Response:
+ *   { keys: [{ id, key_prefix, label, created_at, expires_at, last_used_at }] }
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+export const runtime = 'nodejs';
 
-export async function GET(req: NextRequest) {
-  try {
-    const supabase = await createServerSupabaseClient();
+import { eq, and, isNull } from 'drizzle-orm';
+import { getAuthContext } from '@/lib/auth/clerk';
+import { getDb } from '@/db/connection';
+import { agentApiKeys, agentRegistry } from '@/db/schema';
 
-    // 1. Authenticate user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+export async function GET(): Promise<Response> {
+  const ctx = await getAuthContext();
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // 2. Get user's default project
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('default_project_id')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile?.default_project_id) {
-      return NextResponse.json({ keys: [] });
-    }
-
-    // 3. Fetch API keys for the project
-    const { data: keys, error: keysError } = await supabase
-      .from('project_api_keys')
-      .select('id, key_prefix, label, created_at, expires_at, last_used_at')
-      .eq('project_id', profile.default_project_id)
-      .order('created_at', { ascending: false });
-
-    if (keysError) {
-      console.error('Failed to fetch API keys:', keysError);
-      return NextResponse.json(
-        { error: 'Failed to fetch API keys' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ keys: keys || [] });
-  } catch (error) {
-    console.error('List keys error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+  if (!ctx) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: agentApiKeys.id,
+      key_prefix: agentApiKeys.keyPrefix,
+      label: agentApiKeys.label,
+      created_at: agentApiKeys.createdAt,
+      expires_at: agentApiKeys.expiresAt,
+      last_used_at: agentApiKeys.lastUsedAt,
+    })
+    .from(agentApiKeys)
+    .innerJoin(agentRegistry, eq(agentApiKeys.agentId, agentRegistry.id))
+    .where(
+      and(
+        eq(agentApiKeys.orgId, ctx.orgId),
+        isNull(agentApiKeys.revokedAt),
+      ),
+    )
+    .orderBy(agentApiKeys.createdAt);
+
+  return Response.json({ keys: rows });
 }

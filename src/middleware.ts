@@ -1,142 +1,116 @@
 /**
- * Next.js Middleware for Session Management and Route Protection
- * Uses Supabase SSR with getClaims() for proper JWT validation
+ * Next.js Middleware — Clerk Authentication + Route Protection
  *
- * Based on official Supabase proxy pattern:
- * https://supabase.com/docs/guides/auth/server-side/nextjs
+ * Replaces previous Supabase SSR middleware.
+ * Old middleware preserved at src/middleware.supabase.ts for reference.
+ *
+ * Public routes:
+ *   - /api/webhooks/clerk (Clerk webhook endpoint)
+ *   - /api/v1/health (health check)
+ *   - /api/mcp/* (MCP endpoints have their own auth layer)
+ *   - /landing, /manifesto, /protocol, /guide, /pricing (marketing pages)
+ *   - Static assets, favicons, .well-known
+ *
+ * Protected routes: everything else (Clerk session required)
  */
 
-import { type NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-// AI crawler user agents for GEO tracking
+// ─── Route Matchers ──────────────────────────────────────────────
+
+const isPublicRoute = createRouteMatcher([
+  // Webhooks & health
+  '/api/webhooks/clerk(.*)',
+  '/api/v1/health(.*)',
+  // MCP has its own auth (JWT / API key)
+  '/api/mcp(.*)',
+  // OAuth / auth flows
+  '/api/auth/(.*)',
+  '/api/oauth/(.*)',
+  '/auth/(.*)',
+  '/.well-known/(.*)',
+  // Marketing / public pages
+  '/',
+  '/landing(.*)',
+  '/manifesto(.*)',
+  '/protocol(.*)',
+  '/guide(.*)',
+  '/pricing(.*)',
+  // Sign-in / sign-up (Clerk hosted components)
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+]);
+
+// AI crawler user agents for GEO tracking (preserved from old middleware)
 const AI_CRAWLERS = ['GPTBot', 'ClaudeBot', 'CCBot', 'Perplexity', 'OAI-SearchBot', 'Google-Extended'];
 
-// Public pages that should be cached and indexed
+// Public pages for cache headers
 const PUBLIC_PAGES = ['/', '/landing', '/manifesto', '/protocol', '/guide', '/pricing'];
 
-// Protected paths that should not be indexed
-const PROTECTED_PATHS = ['/dashboard', '/api/', '/auth/', '/invitations/'];
+// Protected paths for X-Robots-Tag
+const NOINDEX_PATHS = ['/dashboard', '/api/', '/auth/', '/invitations/'];
 
-export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  })
+// ─── Middleware ──────────────────────────────────────────────────
 
-  // Create Supabase client with proper cookie handling
-  // IMPORTANT: Always create a new client on each request
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+export default clerkMiddleware(async (auth, request: NextRequest) => {
+  const { pathname } = request.nextUrl;
 
-  // IMPORTANT: Do not run code between createServerClient and getClaims()
-  // This ensures proper token refresh before any auth checks
-
-  // Use getUser() for now as getClaims() may not be available in current version
-  // getUser() validates the JWT with Supabase Auth server
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  // AI Bot Detection for GEO analytics
+  // ── AI Bot Detection (GEO analytics) ──────────────────────────
   const userAgent = request.headers.get('user-agent') || '';
-  const isAiBot = AI_CRAWLERS.some(bot => userAgent.includes(bot));
-
+  const isAiBot = AI_CRAWLERS.some((bot) => userAgent.includes(bot));
   if (isAiBot) {
-    // Log AI crawler access for analytics
-    console.log(`[AI-CRAWLER] ${userAgent.split('/')[0]} → ${request.nextUrl.pathname}`);
+    console.log(`[AI-CRAWLER] ${userAgent.split('/')[0]} -> ${pathname}`);
   }
 
-  // Add X-Robots-Tag for protected content
-  const isProtectedPath = PROTECTED_PATHS.some(path =>
-    request.nextUrl.pathname.startsWith(path)
-  );
-
-  if (isProtectedPath) {
-    supabaseResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  // ── H-03: Redirect authenticated users from / to /dashboard ───
+  // Must happen BEFORE the public route early return, otherwise
+  // the "/" match returns NextResponse.next() and this is unreachable.
+  if (pathname === '/') {
+    const { userId } = await auth.protect().catch(() => ({ userId: null }));
+    if (userId) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
   }
 
-  // Cache-Control for public pages (helps AI bot caching)
-  if (PUBLIC_PAGES.includes(request.nextUrl.pathname)) {
-    supabaseResponse.headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  // ── Public routes: no auth required ───────────────────────────
+  if (isPublicRoute(request)) {
+    const response = NextResponse.next();
+
+    // Cache headers for public marketing pages
+    if (PUBLIC_PAGES.includes(pathname)) {
+      response.headers.set(
+        'Cache-Control',
+        'public, max-age=3600, stale-while-revalidate=86400',
+      );
+    }
+
+    return response;
   }
 
-  // Protected routes that require authentication
-  const protectedRoutes = ['/dashboard', '/proposals', '/knowledge-base']
-  const isProtectedRoute = protectedRoutes.some((route) =>
-    request.nextUrl.pathname.startsWith(route)
-  )
+  // ── Protected routes: require Clerk session ───────────────────
+  await auth.protect();
 
-  // Public pages that should always be accessible (even for authenticated users)
-  const alwaysPublicRoutes = ['/landing', '/manifesto', '/protocol', '/guide', '/pricing']
-  const isAlwaysPublic = alwaysPublicRoutes.some((route) =>
-    request.nextUrl.pathname.startsWith(route)
-  )
+  const response = NextResponse.next();
 
-  // Redirect unauthenticated users to landing page
-  if (isProtectedRoute && !user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/landing'
-    return NextResponse.redirect(url)
+  // X-Robots-Tag for protected content
+  if (NOINDEX_PATHS.some((p) => pathname.startsWith(p))) {
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow');
   }
 
-  // Redirect authenticated users from root to dashboard (but not from /landing)
-  if (request.nextUrl.pathname === '/' && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
-
-  // Public pages are always accessible - no redirects
-  if (isAlwaysPublic) {
-    return supabaseResponse
-  }
-
-  // Redirect authenticated users away from auth pages (except specific pages)
-  const authExceptions = [
-    '/auth/mcp-login',
-    '/auth/cli',
-    '/auth/callback',
-    '/auth/verify-email'
-  ]
-  const isAuthException = authExceptions.some((path) =>
-    request.nextUrl.pathname.startsWith(path)
-  )
-
-  if (request.nextUrl.pathname.startsWith('/auth') && user && !isAuthException) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // The cookies have been properly set on this response object.
-  return supabaseResponse
-}
+  return response;
+});
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except:
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - api/mcp (MCP endpoints have their own auth)
-     * - .well-known (OAuth discovery)
+     * - favicon.ico
+     * - Static assets (images, etc.)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/mcp|api/auth/send-email|api/oauth|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
-}
+};

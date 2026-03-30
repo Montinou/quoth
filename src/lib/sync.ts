@@ -202,7 +202,7 @@ export async function indexDocumentAsync(
       .select("id, chunk_hash")
       .eq("document_id", docId);
 
-    const existingHashes = new Set((existingEmbeddings || []).map(e => e.chunk_hash));
+    const existingHashes = new Set((existingEmbeddings || []).map((e: any) => e.chunk_hash));
     const newHashes = new Set(chunkData.map(c => c.hash));
 
     // 4. Find chunks to embed (changed/new)
@@ -210,8 +210,8 @@ export async function indexDocumentAsync(
 
     // 5. Find orphaned embeddings (removed sections)
     const orphanedIds = (existingEmbeddings || [])
-      .filter(e => !newHashes.has(e.chunk_hash))
-      .map(e => e.id);
+      .filter((e: any) => !newHashes.has(e.chunk_hash))
+      .map((e: any) => e.id);
 
     // 6. Delete orphaned
     if (orphanedIds.length > 0) {
@@ -338,7 +338,7 @@ export async function getSyncStatus(projectId: string): Promise<{
   let lastSync: string | null = null;
 
   if (docs && docs.length > 0) {
-    const docIds = docs.map((d) => d.id);
+    const docIds = docs.map((d: any) => d.id);
 
     const { count } = await supabase
       .from("document_embeddings")

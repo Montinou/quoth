@@ -1,55 +1,43 @@
 /**
- * Single Invitation API
- * DELETE /api/projects/:projectId/invitations/:invitationId - Cancel invitation
+ * DELETE /api/projects/{projectId}/invitations/{invitationId} — Cancel invitation
+ *
+ * Note: There is no invitations table in the current schema.
+ * Returns 501 Not Implemented.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { supabase as serviceSupabase } from '@/lib/supabase';
+export const runtime = 'nodejs';
+
+import { eq, and } from 'drizzle-orm';
+import { getAuthContext } from '@/lib/auth/clerk';
+import { getDb } from '@/db/connection';
+import { projects } from '@/db/schema';
 
 export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; invitationId: string }> }
-) {
-  try {
-    const { projectId, invitationId } = await params;
-    const supabase = await createServerSupabaseClient();
+  _req: Request,
+  { params }: { params: Promise<{ projectId: string; invitationId: string }> },
+): Promise<Response> {
+  const ctx = await getAuthContext();
 
-    // 1. Authenticate and verify admin
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { data: membership } = await supabase
-      .from('project_members')
-      .select('role')
-      .eq('project_id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!membership || membership.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    // 2. Delete invitation using service role
-    const { error: deleteError } = await serviceSupabase
-      .from('project_invitations')
-      .delete()
-      .eq('id', invitationId)
-      .eq('project_id', projectId);
-
-    if (deleteError) {
-      console.error('Failed to cancel invitation:', deleteError);
-      return NextResponse.json({ error: 'Failed to cancel invitation' }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Invitation DELETE error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (!ctx) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const { projectId } = await params;
+  const db = getDb();
+
+  const [project] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.orgId, ctx.orgId)))
+    .limit(1);
+
+  if (!project) {
+    return Response.json({ error: 'Project not found' }, { status: 404 });
+  }
+
+  // Invitations table not yet implemented
+  return Response.json(
+    { error: 'Invitations not yet implemented' },
+    { status: 501 },
+  );
 }
