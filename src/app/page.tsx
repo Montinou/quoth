@@ -228,7 +228,7 @@ const GenesisDemo = () => {
                 <div className="mt-4 p-3 bg-gradient-to-r from-violet-500/10 to-violet-500/5 border-l-2 border-violet-spectral rounded-r-lg">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-violet-ghost text-lg">⚡</span>
-                    <span className="text-white font-medium">Realtime delivery via Supabase</span>
+                    <span className="text-white font-medium">Realtime delivery via Neon</span>
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     Agent receives instant push notification across instances
@@ -297,7 +297,7 @@ const Features = () => (
         <GlassCard
           iconName="network"
           title="Agent-to-Agent (A2A) Bus"
-          description="10 MCP tools for cross-instance agent communication. Real-time delivery via Supabase. HMAC-SHA256 signed messages. Priority levels: low, normal, high, urgent. Task management between agents on AWS, Mac, WSL2."
+          description="10 MCP tools for cross-instance agent communication. Real-time delivery via Neon. HMAC-SHA256 signed messages. Priority levels: low, normal, high, urgent. Task management between agents on AWS, Mac, WSL2."
           className="animate-fade-in-delay-2"
         />
         <GlassCard

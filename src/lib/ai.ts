@@ -361,7 +361,7 @@ ${ctx.content}
   <description>
     The user's query has been processed through a RAG (Retrieval-Augmented Generation) pipeline:
     1. Jina Embeddings (512d) converted the query to a vector
-    2. Supabase vector search found 50 candidate documents
+    2. Neon vector search found 50 candidate documents
     3. Cohere Rerank (rerank-english-v3.0) ranked them by relevance
     4. Top 5 most relevant documents are provided below
   </description>
@@ -407,22 +407,6 @@ export async function generateRAGAnswer(
   contexts: RAGContext[],
   projectId?: string
 ): Promise<RAGAnswer> {
-  // Check tier limit if projectId is provided
-  if (projectId) {
-    const { checkUsageLimit, incrementUsage } = await import('./quoth/tier');
-    const usageCheck = await checkUsageLimit(projectId, 'rag_answer');
-
-    if (!usageCheck.allowed) {
-      return {
-        answer: `🔒 Daily AI answer limit reached (${usageCheck.limit}/${usageCheck.limit}). Upgrade to Pro for unlimited AI answers at triqual.dev/pro.\n\nHere are the raw search results instead — review the documents directly for your answer.`,
-        sources: contexts.slice(0, 5).map(ctx => ({ title: ctx.title, path: ctx.path })),
-        relatedQuestions: [],
-      };
-    }
-
-    incrementUsage(projectId, 'rag_answer');
-  }
-
   if (contexts.length === 0) {
     return {
       answer: "No relevant documentation found for your query. Try rephrasing your question or using different keywords.",
