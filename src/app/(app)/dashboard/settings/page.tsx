@@ -5,12 +5,17 @@
 
 'use client';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { useUser } from '@clerk/nextjs';
+import { useProfile } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { User, Mail, Shield } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { user, profile } = useAuth();
+  const { user } = useUser();
+  const { profile } = useProfile();
+
+  const displayName = profile?.displayName || user?.fullName || 'User';
+  const userEmail = user?.primaryEmailAddress?.emailAddress;
 
   return (
     <div className="px-6 py-8 md:pt-8">
@@ -24,15 +29,19 @@ export default function SettingsPage() {
         <div className="glass-panel p-6 mb-8">
           <div className="flex items-center gap-4 mb-6">
             <div className="w-16 h-16 rounded-full bg-violet-spectral/20 flex items-center justify-center border border-violet-spectral/30">
-              <span className="text-violet-spectral font-bold text-2xl">
-                {profile?.username?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
-              </span>
+              {user?.imageUrl ? (
+                <img src={user.imageUrl} alt={displayName} className="w-16 h-16 rounded-full" />
+              ) : (
+                <span className="text-violet-spectral font-bold text-2xl">
+                  {displayName[0]?.toUpperCase() || 'U'}
+                </span>
+              )}
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">
-                {profile?.full_name || profile?.username || 'User'}
+                {displayName}
               </h2>
-              <p className="text-gray-400">@{profile?.username || 'username'}</p>
+              <p className="text-gray-400">{userEmail || 'No email'}</p>
             </div>
           </div>
 
@@ -40,8 +49,8 @@ export default function SettingsPage() {
             <div className="flex items-start gap-3 p-4 bg-charcoal/50 rounded-lg border border-graphite">
               <User className="w-5 h-5 text-violet-spectral mt-0.5" />
               <div className="flex-1">
-                <label className="text-sm font-medium text-gray-400">Username</label>
-                <p className="text-white">{profile?.username || 'Not set'}</p>
+                <label className="text-sm font-medium text-gray-400">Display Name</label>
+                <p className="text-white">{displayName}</p>
               </div>
             </div>
 
@@ -49,7 +58,7 @@ export default function SettingsPage() {
               <Mail className="w-5 h-5 text-violet-spectral mt-0.5" />
               <div className="flex-1">
                 <label className="text-sm font-medium text-gray-400">Email</label>
-                <p className="text-white">{user?.email || 'Not set'}</p>
+                <p className="text-white">{userEmail || 'Not set'}</p>
               </div>
             </div>
 
@@ -58,14 +67,10 @@ export default function SettingsPage() {
               <div className="flex-1">
                 <label className="text-sm font-medium text-gray-400">Account Status</label>
                 <div className="flex items-center gap-2">
-                  <p className="text-white">
-                    {user?.email_confirmed_at ? 'Verified' : 'Pending Verification'}
-                  </p>
-                  {user?.email_confirmed_at && (
-                    <span className="px-2 py-0.5 text-xs bg-green-500/10 text-green-400 rounded-full border border-green-500/20">
-                      Verified
-                    </span>
-                  )}
+                  <p className="text-white">Verified</p>
+                  <span className="px-2 py-0.5 text-xs bg-green-500/10 text-green-400 rounded-full border border-green-500/20">
+                    Verified
+                  </span>
                 </div>
               </div>
             </div>
@@ -73,11 +78,11 @@ export default function SettingsPage() {
         </div>
 
         {/* Project Section */}
-        {profile?.default_project_id && (
+        {profile?.defaultProjectId && (
           <div className="glass-panel p-6 mb-8">
             <h2 className="text-xl font-bold mb-4">Default Project</h2>
             <div className="p-4 bg-charcoal/50 rounded-lg border border-graphite">
-              <p className="text-white font-medium">{profile.username}-knowledge-base</p>
+              <p className="text-white font-medium">Knowledge Base</p>
               <p className="text-sm text-gray-400 mt-1">
                 Your personal knowledge base for Quoth documentation
               </p>

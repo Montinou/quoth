@@ -7,14 +7,15 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useUser, useAuth } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import { Navbar } from '@/components/quoth/Navbar';
 
 function AcceptInvitationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, session } = useAuth();
+  const { user } = useUser();
+  const { getToken } = useAuth();
   const token = searchParams.get('token');
 
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'auth-required'>(
@@ -36,16 +37,17 @@ function AcceptInvitationContent() {
     }
 
     acceptInvitation();
-  }, [token, user, session]);
+  }, [token, user]);
 
   async function acceptInvitation() {
-    if (!session?.access_token || !token) return;
+    const authToken = await getToken();
+    if (!authToken || !token) return;
 
     try {
       const res = await fetch('/api/invitations/accept', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ token }),

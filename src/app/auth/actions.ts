@@ -1,27 +1,15 @@
-'use server'
+'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 
 export async function signOutAction() {
-  const supabase = await createServerSupabaseClient()
-
-  // Only call Supabase signOut if client is configured
-  if (supabase) {
-    await supabase.auth.signOut()
-  }
-
-  // Explicitly clear Supabase auth cookies
-  const cookieStore = await cookies()
-  const allCookies = cookieStore.getAll()
-
-  // Clear all Supabase auth cookies (they start with 'sb-')
-  for (const cookie of allCookies) {
+  // Clear any legacy Supabase cookies
+  const cookieStore = await cookies();
+  for (const cookie of cookieStore.getAll()) {
     if (cookie.name.startsWith('sb-')) {
-      cookieStore.delete(cookie.name)
+      cookieStore.delete(cookie.name);
     }
   }
-
-  redirect('/')
+  redirect('/');
 }

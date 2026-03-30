@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useUser, useAuth } from '@clerk/nextjs';
 import { useToast } from '@/contexts/ToastContext';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
@@ -26,7 +26,8 @@ export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [label, setLabel] = useState('Claude Desktop');
-  const { session, user } = useAuth();
+  const { user } = useUser();
+  const { getToken } = useAuth();
   const { success, error: showError } = useToast();
   const router = useRouter();
 
@@ -39,13 +40,14 @@ export default function ApiKeysPage() {
   }, [user, router]);
 
   async function fetchKeys() {
-    if (!session?.access_token) return;
+    const authToken = await getToken();
+    if (!authToken) return;
 
     setLoadingKeys(true);
     try {
       const res = await fetch('/api/mcp-token/list', {
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${authToken}`,
         },
       });
 
@@ -61,14 +63,15 @@ export default function ApiKeysPage() {
   }
 
   async function generateToken() {
-    if (!session?.access_token) return;
+    const authToken = await getToken();
+    if (!authToken) return;
 
     setLoading(true);
     try {
       const res = await fetch('/api/mcp-token/generate', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ label }),

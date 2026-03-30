@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useUser, useAuth } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 
 interface Member {
@@ -35,7 +35,8 @@ interface Invitation {
 export default function TeamPage() {
   const params = useParams();
   const router = useRouter();
-  const { session, user } = useAuth();
+  const { user } = useUser();
+  const { getToken } = useAuth();
   const projectSlug = params.projectSlug as string;
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -62,12 +63,13 @@ export default function TeamPage() {
   }, [user, projectSlug]);
 
   async function fetchProjectAndData() {
-    if (!session?.access_token) return;
+    const authToken = await getToken();
+    if (!authToken) return;
 
     try {
       // First get project ID from slug
       const projectRes = await fetch(`/api/projects/by-slug/${projectSlug}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
 
       if (!projectRes.ok) {
@@ -82,7 +84,7 @@ export default function TeamPage() {
 
       // Fetch team members
       const teamRes = await fetch(`/api/projects/${project.id}/team`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
 
       if (teamRes.ok) {
@@ -94,7 +96,7 @@ export default function TeamPage() {
       // Fetch invitations (admin only)
       if (project.userRole === 'admin') {
         const invitesRes = await fetch(`/api/projects/${project.id}/invitations`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          headers: { Authorization: `Bearer ${authToken}` },
         });
 
         if (invitesRes.ok) {
@@ -112,7 +114,8 @@ export default function TeamPage() {
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
-    if (!projectId || !session?.access_token) return;
+    const authToken = await getToken();
+    if (!projectId || !authToken) return;
 
     setInviting(true);
     setError('');
@@ -121,7 +124,7 @@ export default function TeamPage() {
       const res = await fetch(`/api/projects/${projectId}/invitations`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
@@ -144,13 +147,14 @@ export default function TeamPage() {
   }
 
   async function handleUpdateRole(memberId: string, newRole: string) {
-    if (!projectId || !session?.access_token) return;
+    const authToken = await getToken();
+    if (!projectId || !authToken) return;
 
     try {
       const res = await fetch(`/api/projects/${projectId}/team/${memberId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ role: newRole }),
@@ -168,13 +172,14 @@ export default function TeamPage() {
   }
 
   async function handleRemoveMember(memberId: string) {
-    if (!projectId || !session?.access_token) return;
+    const authToken = await getToken();
+    if (!projectId || !authToken) return;
     if (!confirm('Are you sure you want to remove this member?')) return;
 
     try {
       const res = await fetch(`/api/projects/${projectId}/team/${memberId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
 
       if (res.ok) {
@@ -189,12 +194,13 @@ export default function TeamPage() {
   }
 
   async function handleCancelInvitation(invitationId: string) {
-    if (!projectId || !session?.access_token) return;
+    const authToken = await getToken();
+    if (!projectId || !authToken) return;
 
     try {
       const res = await fetch(`/api/projects/${projectId}/invitations/${invitationId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
 
       if (res.ok) {
