@@ -1,10 +1,10 @@
 /**
  * POST /api/v1/admin/setup-schedules — One-time QStash schedule setup.
  *
- * Creates QStash schedules that replace Vercel Cron (which requires Pro plan).
- * Call this once after deployment with the app's base URL.
+ * Creates QStash schedules for memory consolidation and cache cleanup.
+ * Call once after deployment. QStash signs its own requests — no CRON_SECRET needed.
  *
- * Auth: Bearer CRON_SECRET header (same as cron routes).
+ * Auth: Clerk (must be authenticated user).
  *
  * Body: { "baseUrl": "https://quoth.example.com" }
  *
@@ -12,6 +12,7 @@
  */
 
 import { NextRequest } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import {
   setupQstashSchedules,
   removeQstashSchedules,
@@ -19,23 +20,16 @@ import {
 
 export const runtime = "nodejs";
 
-function authorize(req: NextRequest): Response | null {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    return Response.json(
-      { error: "CRON_SECRET not configured" },
-      { status: 500 },
-    );
-  }
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${cronSecret}`) {
+async function authorize(): Promise<Response | null> {
+  const { userId } = await auth();
+  if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
 }
 
 export async function POST(req: NextRequest) {
-  const authError = authorize(req);
+  const authError = await authorize();
   if (authError) return authError;
 
   let body: { baseUrl?: string };
@@ -71,8 +65,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
-  const authError = authorize(req);
+export async function DELETE(_req: NextRequest) {
+  const authError = await authorize();
   if (authError) return authError;
 
   try {

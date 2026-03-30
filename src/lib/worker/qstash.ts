@@ -38,23 +38,17 @@ export async function setupQstashSchedules(
   baseUrl: string,
 ): Promise<ScheduleResult> {
   const client = getClient();
-  const cronSecret = process.env.CRON_SECRET;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (cronSecret) {
-    headers["Authorization"] = `Bearer ${cronSecret}`;
-  }
 
   // Remove existing schedules first (ignore errors if they don't exist)
   await removeQstashSchedules().catch(() => {});
 
-  // Schedule 1: Consolidation — every hour
+  // QStash signs requests automatically — no CRON_SECRET headers needed.
+  // The cron endpoints verify via Upstash-Signature header.
+
+  // Schedule 1: Consolidation — every hour (decay, promote, cleanup, drift)
   const consolidation = await client.schedules.create({
     destination: `${baseUrl}/api/v1/cron/consolidate`,
     cron: "0 * * * *",
-    headers,
     retries: 2,
   });
 
@@ -62,7 +56,6 @@ export async function setupQstashSchedules(
   const cleanup = await client.schedules.create({
     destination: `${baseUrl}/api/v1/cron/cleanup-cache`,
     cron: "0 3 * * *",
-    headers,
     retries: 2,
   });
 
