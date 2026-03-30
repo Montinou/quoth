@@ -6,7 +6,7 @@
  * close their browser and resume where they left off.
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 import { getDb } from '@/db/connection';
 import {
   users,
@@ -19,6 +19,21 @@ import {
 } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
+
+/**
+ * Sync user metadata to Clerk so JWT template can include project_id/tier.
+ * Fire-and-forget — never blocks onboarding flow.
+ */
+async function syncToClerk(clerkUserId: string, meta: Record<string, unknown>) {
+  try {
+    const client = await clerkClient();
+    await client.users.updateUserMetadata(clerkUserId, {
+      publicMetadata: meta,
+    });
+  } catch (err) {
+    console.error('[onboarding] Failed to sync metadata to Clerk:', err);
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -239,6 +254,11 @@ export async function POST(req: Request) {
         }
 
         await db.update(users).set(updateSet).where(eq(users.id, user.id));
+
+        // Sync default_project_id to Clerk so JWT template includes it
+        if (isFirst) {
+          void syncToClerk(userId, { default_project_id: projectId });
+        }
 
         return Response.json({ success: true, step: 1, data: meta.onboarding_data });
       }
