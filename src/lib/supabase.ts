@@ -73,10 +73,15 @@ export const supabase: any = new Proxy({} as any, {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (!url || !key) {
-        throw new Error(
-          `[Supabase] NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required. ` +
-          `Supabase service client cannot be used without configuration.`
-        );
+        // Return a no-op proxy instead of crashing — Supabase is legacy,
+        // the app now uses Neon + Drizzle. This prevents import-chain crashes
+        // from quoth/*.ts modules that still import { supabase }.
+        console.warn('[Supabase] Not configured — returning no-op client. Use Neon/Drizzle instead.');
+        const noopChain: any = new Proxy(() => Promise.resolve({ data: null, error: null, count: 0 }), {
+          get: () => noopChain,
+          apply: () => Promise.resolve({ data: null, error: null, count: 0 }),
+        });
+        return noopChain;
       }
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { createClient } = require('@supabase/supabase-js');

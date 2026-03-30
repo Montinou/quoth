@@ -35,6 +35,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Logo } from "@/components/quoth/Logo";
 import { useToast } from "@/contexts/ToastContext";
 import { cn } from "@/lib/utils";
@@ -812,37 +818,40 @@ function StepDone({
   loading,
   savedData,
 }: StepComponentProps) {
-  const nextSteps = [
-    {
-      title: "Connect via MCP",
-      description: "Set up the MCP server in Claude Code",
-    },
-    {
-      title: "Explore Dashboard",
-      description: "View agents, documents, and analytics",
-    },
-    {
-      title: "Read Docs",
-      description: "Learn about Quoth's capabilities",
-    },
+  const docSections = [
+    { title: "Quick Start", href: "/docs/getting-started/quick-start" },
+    { title: "Installation", href: "/docs/getting-started/installation" },
+    { title: "Genesis Guide", href: "/docs/guides/genesis" },
+    { title: "Personas", href: "/docs/guides/personas" },
+    { title: "MCP Tools Reference", href: "/docs/reference/mcp-tools" },
+    { title: "Dashboard Overview", href: "/docs/dashboard/overview" },
   ];
+
+  const [copied, setCopied] = useState(false);
+  const mcpCommand = "claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp";
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(mcpCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <OnboardingStepLayout>
       <LeftPanel
         title="You're all set!"
-        description="Your workspace is ready. Here's a summary:"
+        description="Your workspace is ready. Here's how to get started:"
         currentStep={currentStep}
         totalSteps={totalSteps}
         goBack={goBack}
       >
-        <div className="flex h-full flex-col justify-between gap-8">
-          <div className="space-y-6">
+        <div className="flex h-full flex-col justify-between gap-6">
+          <div className="space-y-4">
             {/* Summary */}
-            <div className="space-y-3 rounded-lg border border-zinc-700/50 bg-zinc-800/30 p-4">
+            <div className="space-y-2 rounded-lg border border-zinc-700/50 bg-zinc-800/30 p-3">
               {savedData.orgId && (
                 <div className="flex items-center gap-2 text-sm">
-                  <Layers className="size-4 text-violet-400" />
+                  <Check className="size-3.5 text-emerald-400" />
                   <span className="text-gray-400">Organization created</span>
                 </div>
               )}
@@ -852,7 +861,7 @@ function StepDone({
                   : savedData.projectId ? 1 : 0;
                 return projectCount > 0 ? (
                   <div className="flex items-center gap-2 text-sm">
-                    <FileText className="size-4 text-violet-400" />
+                    <Check className="size-3.5 text-emerald-400" />
                     <span className="text-gray-400">
                       {projectCount} {projectCount === 1 ? "project" : "projects"} created
                     </span>
@@ -865,7 +874,7 @@ function StepDone({
                   : savedData.agentId ? 1 : 0;
                 return agentCount > 0 ? (
                   <div className="flex items-center gap-2 text-sm">
-                    <Bot className="size-4 text-violet-400" />
+                    <Check className="size-3.5 text-emerald-400" />
                     <span className="text-gray-400">
                       {agentCount} {agentCount === 1 ? "agent" : "agents"} registered
                     </span>
@@ -874,24 +883,91 @@ function StepDone({
               })()}
             </div>
 
-            {/* Next steps */}
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-gray-300">Next steps:</p>
-              {nextSteps.map((step, i) => (
-                <div
-                  key={i}
-                  className="flex items-start gap-3 rounded-lg border border-zinc-700/30 bg-zinc-800/20 px-4 py-3"
-                >
-                  <ChevronRight className="mt-0.5 size-4 shrink-0 text-violet-400" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-200">
-                      {step.title}
-                    </p>
-                    <p className="text-xs text-gray-500">{step.description}</p>
+            {/* Expandable Next Steps */}
+            <Accordion type="multiple" className="space-y-2">
+              {/* MCP Install */}
+              <AccordionItem value="mcp" className="rounded-lg border border-zinc-700/40 bg-zinc-800/20 px-4">
+                <AccordionTrigger className="py-3 text-sm font-medium text-gray-200 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-4 text-violet-400" />
+                    Connect via MCP
                   </div>
-                </div>
-              ))}
-            </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4 space-y-3">
+                  <p className="text-xs text-gray-400">Run this in your terminal to connect Claude Code:</p>
+                  <div className="relative group">
+                    <pre className="rounded-md bg-zinc-900 border border-zinc-700/50 p-3 text-xs text-gray-300 font-mono overflow-x-auto">
+                      {mcpCommand}
+                    </pre>
+                    <button
+                      onClick={handleCopy}
+                      className="absolute top-2 right-2 px-2 py-1 text-[10px] rounded bg-zinc-700/80 text-gray-300 hover:bg-violet-600 hover:text-white transition-colors"
+                    >
+                      {copied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500">Then restart Claude Code to activate the 18 MCP tools.</p>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Plugin Install */}
+              <AccordionItem value="plugin" className="rounded-lg border border-zinc-700/40 bg-zinc-800/20 px-4">
+                <AccordionTrigger className="py-3 text-sm font-medium text-gray-200 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <Layers className="size-4 text-violet-400" />
+                    Install Plugin
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4 space-y-3">
+                  <p className="text-xs text-gray-400">Install the Quoth plugin for auto-memory and session hooks:</p>
+                  <pre className="rounded-md bg-zinc-900 border border-zinc-700/50 p-3 text-xs text-gray-300 font-mono">
+                    /plugin install quoth@quoth-marketplace
+                  </pre>
+                  <p className="text-xs text-gray-500">Then run <code className="text-violet-400">/quoth-init</code> in your project to configure local memory.</p>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Docs */}
+              <AccordionItem value="docs" className="rounded-lg border border-zinc-700/40 bg-zinc-800/20 px-4">
+                <AccordionTrigger className="py-3 text-sm font-medium text-gray-200 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <FileText className="size-4 text-violet-400" />
+                    Read Docs
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4">
+                  <div className="space-y-1">
+                    {docSections.map((doc) => (
+                      <a
+                        key={doc.href}
+                        href={doc.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-zinc-700/30 transition-colors"
+                      >
+                        <ChevronRight className="size-3 text-violet-400/60" />
+                        {doc.title}
+                      </a>
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Dashboard */}
+              <AccordionItem value="dashboard" className="rounded-lg border border-zinc-700/40 bg-zinc-800/20 px-4">
+                <AccordionTrigger className="py-3 text-sm font-medium text-gray-200 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <Bot className="size-4 text-violet-400" />
+                    Explore Dashboard
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4">
+                  <p className="text-xs text-gray-400">
+                    Your dashboard includes agent management, knowledge base search, proposals review, analytics, and API key management.
+                  </p>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
 
           <Button
@@ -905,22 +981,7 @@ function StepDone({
         </div>
       </LeftPanel>
       <RightPanel className="bg-gradient-to-b from-transparent to-violet-600/5">
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-          className="flex flex-col items-center gap-4"
-        >
-          <div className="size-24 rounded-2xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
-            <Sparkles className="size-12 text-violet-400" />
-          </div>
-          <p
-            className="text-2xl font-medium text-gray-300 italic"
-            style={{ fontFamily: "var(--font-cormorant), serif" }}
-          >
-            Nevermore forget.
-          </p>
-        </motion.div>
+        <GeometricPattern icon={<Sparkles className="size-10 text-violet-400/80" />} />
       </RightPanel>
     </OnboardingStepLayout>
   );
