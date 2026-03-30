@@ -10,6 +10,31 @@ import { redirect } from 'next/navigation';
 import { AgentProjectGraph } from '@/components/agents/AgentProjectGraph';
 export const revalidate = 60;
 
+interface UserRow {
+  id: string;
+  default_org_id: string | null;
+}
+
+interface GraphAgentRow {
+  id: string;
+  agent_name: string;
+  display_name: string | null;
+  instance: string;
+  status: string;
+}
+
+interface GraphProjectRow {
+  id: string;
+  slug: string;
+  is_public: boolean;
+}
+
+interface GraphAssignmentRow {
+  agent_id: string;
+  project_id: string;
+  role: 'contributor' | 'owner' | 'readonly';
+}
+
 export default async function AgentGraphPage() {
   const { userId } = await auth();
   if (!userId) {
@@ -20,7 +45,7 @@ export default async function AgentGraphPage() {
   const pooledDb = getDb();
   const userRow = await pooledDb.execute(sql`
     SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as UserRow | undefined);
 
   if (!userRow?.default_org_id) {
     return (
@@ -41,7 +66,7 @@ export default async function AgentGraphPage() {
     FROM agents.registry
     WHERE org_id = ${organizationId}
     ORDER BY agent_name
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as GraphAgentRow[]);
 
   // Fetch projects
   const projects = await db.execute(sql`
@@ -49,17 +74,17 @@ export default async function AgentGraphPage() {
     FROM public.projects
     WHERE org_id = ${organizationId}
     ORDER BY slug
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as GraphProjectRow[]);
 
   // Fetch agent-project assignments
-  const agentIds = agents.map((a: any) => a.id);
-  const projectIds = projects.map((p: any) => p.id);
-  const assignments = (agentIds.length > 0 && projectIds.length > 0)
+  const agentIds = agents.map((a) => a.id);
+  const projectIds = projects.map((p) => p.id);
+  const assignments: GraphAssignmentRow[] = (agentIds.length > 0 && projectIds.length > 0)
     ? await db.execute(sql`
         SELECT agent_id, project_id, role
         FROM agents.agent_projects
         WHERE agent_id = ANY(${agentIds}) AND project_id = ANY(${projectIds})
-      `).then(r => r.rows as any[])
+      `).then(r => r.rows as unknown as GraphAssignmentRow[])
     : [];
 
   return (

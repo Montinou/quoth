@@ -12,6 +12,22 @@ import { Bot, Circle, Clock, Server, FolderOpen, Network } from 'lucide-react';
 import { AgentProjectGraphMini } from '@/components/agents/AgentProjectGraphMini';
 export const revalidate = 60;
 
+interface UserRow {
+  id: string;
+  default_org_id: string | null;
+}
+
+interface AgentProjectRow {
+  id: string;
+  slug: string;
+}
+
+interface AssignmentRow {
+  agent_id: string;
+  project_id: string;
+  role: 'contributor' | 'owner' | 'readonly';
+}
+
 interface Agent {
   id: string;
   agent_name: string;
@@ -35,7 +51,7 @@ export default async function AgentsPage() {
   const pooledDb = getDb();
   const userRow = await pooledDb.execute(sql`
     SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as UserRow | undefined);
 
   const organizationId = userRow?.default_org_id;
 
@@ -51,30 +67,31 @@ export default async function AgentsPage() {
 
   const db = await getSecureDb(organizationId, userRow.id);
 
-  // Fetch all agents in organization with project count
+  // Fetch all agents in organization with project count (LEFT JOIN eliminates N+1)
   const agents = await db.execute(sql`
-    SELECT r.*,
-      COALESCE((SELECT COUNT(*)::int FROM agents.agent_projects ap WHERE ap.agent_id = r.id), 0) AS project_count
+    SELECT r.*, COUNT(DISTINCT ap.project_id)::int AS project_count
     FROM agents.registry r
+    LEFT JOIN agents.agent_projects ap ON ap.agent_id = r.id
     WHERE r.org_id = ${organizationId}
+    GROUP BY r.id
     ORDER BY r.created_at DESC
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as Agent[]);
 
-  const agentList = agents as Agent[];
+  const agentList = agents;
 
   // Fetch projects and assignments for graph
   const projects = await db.execute(sql`
     SELECT id, slug FROM public.projects
     WHERE org_id = ${organizationId}
     ORDER BY slug
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as AgentProjectRow[]);
 
   const agentIds = agentList.map(a => a.id);
-  const assignments = agentIds.length > 0
+  const assignments: AssignmentRow[] = agentIds.length > 0
     ? await db.execute(sql`
         SELECT agent_id, project_id, role FROM agents.agent_projects
         WHERE agent_id = ANY(${agentIds})
-      `).then(r => r.rows as any[])
+      `).then(r => r.rows as unknown as AssignmentRow[])
     : [];
 
   // Status badge component

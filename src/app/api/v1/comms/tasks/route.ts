@@ -104,7 +104,7 @@ export const GET = createApiHandler(
     >;
 
     const taskList = await listTasks(ctx!.agentId, {
-      status: status as any,
+      status,
       projectId,
       limit,
       offset,

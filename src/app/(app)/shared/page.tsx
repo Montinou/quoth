@@ -11,6 +11,26 @@ import Link from 'next/link';
 import { Globe, FileText, Clock, FolderOpen, Search } from 'lucide-react';
 export const revalidate = 60;
 
+interface UserRow {
+  id: string;
+  default_org_id: string | null;
+}
+
+interface SharedDocRow {
+  id: string;
+  title: string;
+  file_path: string;
+  project_id: string;
+  version: number;
+  last_updated: string;
+  doc_type: string | null;
+  tags: string[] | null;
+  agent_id: string | null;
+  project_slug: string;
+  agent_name: string | null;
+  agent_display_name: string | null;
+}
+
 interface SharedDocument {
   id: string;
   title: string;
@@ -40,7 +60,7 @@ export default async function SharedKnowledgePage() {
   const pooledDb = getDb();
   const userRow = await pooledDb.execute(sql`
     SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as UserRow | undefined);
 
   const organizationId = userRow?.default_org_id;
 
@@ -67,10 +87,10 @@ export default async function SharedKnowledgePage() {
     LEFT JOIN agents.registry r ON r.id = d.agent_id
     WHERE d.visibility = 'shared' AND p.org_id = ${organizationId}
     ORDER BY d.updated_at DESC
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as SharedDocRow[]);
 
   // Transform to match SharedDocument shape
-  const documents: SharedDocument[] = sharedDocs.map((doc: any) => ({
+  const documents: SharedDocument[] = sharedDocs.map((doc) => ({
     id: doc.id,
     title: doc.title,
     file_path: doc.file_path,

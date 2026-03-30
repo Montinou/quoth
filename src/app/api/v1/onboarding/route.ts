@@ -6,6 +6,7 @@
  * close their browser and resume where they left off.
  */
 
+import { z } from 'zod';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { getDb } from '@/db/connection';
 import {
@@ -122,12 +123,23 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { step, data } = body as { step: number; data: Record<string, unknown> };
-
-  if (typeof step !== 'number' || step < 0 || step > 4) {
-    return Response.json({ error: 'Invalid step' }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+
+  const OnboardingInput = z.object({
+    step: z.number().int().min(0).max(4),
+    data: z.record(z.unknown()),
+  });
+
+  const parsed = OnboardingInput.safeParse(body);
+  if (!parsed.success) {
+    return Response.json({ error: 'Invalid input' }, { status: 400 });
+  }
+  const { step, data } = parsed.data;
 
   const db = getDb();
 

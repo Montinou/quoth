@@ -11,6 +11,35 @@ import Link from 'next/link';
 import { Bot, ArrowLeft, Circle, Server, Cpu, FolderOpen, Calendar } from 'lucide-react';
 export const revalidate = 60;
 
+interface UserRow {
+  id: string;
+  default_org_id: string | null;
+}
+
+interface AgentRow {
+  id: string;
+  agent_name: string;
+  display_name: string | null;
+  instance: string;
+  model: string | null;
+  role: string | null;
+  status: 'active' | 'inactive' | 'archived';
+  last_seen_at: string | null;
+  created_at: string;
+  capabilities: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+}
+
+interface AgentProjectJoinRow {
+  project_id: string;
+  role: string;
+  assigned_at: string;
+  assigned_by: string | null;
+  proj_id: string;
+  slug: string;
+  is_public: boolean;
+}
+
 interface AgentWithProjects {
   id: string;
   agent_name: string;
@@ -21,8 +50,8 @@ interface AgentWithProjects {
   status: 'active' | 'inactive' | 'archived';
   last_seen_at: string | null;
   created_at: string;
-  capabilities: Record<string, any> | null;
-  metadata: Record<string, any> | null;
+  capabilities: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
   agent_projects: Array<{
     project_id: string;
     role: string;
@@ -46,7 +75,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
   const pooledDb = getDb();
   const userRow = await pooledDb.execute(sql`
     SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as UserRow | undefined);
 
   if (!userRow?.default_org_id) {
     notFound();
@@ -59,7 +88,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
   const agentRow = await db.execute(sql`
     SELECT * FROM agents.registry
     WHERE org_id = ${organizationId} AND agent_name = ${params.name}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as AgentRow | undefined);
 
   if (!agentRow) {
     notFound();
@@ -72,11 +101,11 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
     FROM agents.agent_projects ap
     INNER JOIN public.projects p ON p.id = ap.project_id
     WHERE ap.agent_id = ${agentRow.id}
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as AgentProjectJoinRow[]);
 
   const agentData: AgentWithProjects = {
     ...agentRow,
-    agent_projects: agentProjectRows.map((row: any) => ({
+    agent_projects: agentProjectRows.map((row) => ({
       project_id: row.project_id,
       role: row.role,
       assigned_at: row.assigned_at,

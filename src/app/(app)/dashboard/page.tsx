@@ -28,6 +28,25 @@ import {
   Globe,
 } from 'lucide-react';
 
+/* ── Typed interfaces for raw SQL query results ────────────────────────── */
+
+interface UserRow {
+  id: string;
+  default_org_id: string | null;
+}
+
+interface ProjectRow {
+  id: string;
+  slug: string;
+  github_repo: string | null;
+  is_public: boolean;
+  member_role: string;
+}
+
+interface CountRow {
+  count: number;
+}
+
 /**
  * Skeleton component for card loading states
  * Used as Suspense fallback for progressive loading
@@ -51,7 +70,7 @@ export default async function DashboardPage() {
   const pooledDb = getDb();
   const userRow = await pooledDb.execute(sql`
     SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${userId}
-  `).then(r => r.rows[0] as any);
+  `).then(r => r.rows[0] as unknown as UserRow | undefined);
 
   if (!userRow?.default_org_id) {
     return (
@@ -72,18 +91,18 @@ export default async function DashboardPage() {
     INNER JOIN public.project_members pm ON pm.project_id = p.id
     INNER JOIN public.users u ON u.id = pm.user_id
     WHERE u.clerk_user_id = ${userId}
-  `).then(r => r.rows as any[]);
+  `).then(r => r.rows as unknown as ProjectRow[]);
 
-  const projectIds = projects.map((p: any) => p.id);
+  const projectIds = projects.map((p) => p.id);
   const firstProject = projects[0];
 
   // Parallelize independent queries for ~50-60% latency reduction (3-4 RTTs → 2 RTTs)
   const [proposalCount, documentCount, initialCoverage] = await Promise.all([
     projectIds.length > 0
-      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as any)?.count ?? 0)
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
       : Promise.resolve(0),
     projectIds.length > 0
-      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.documents WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as any)?.count ?? 0)
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.documents WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
       : Promise.resolve(0),
     firstProject ? getLatestCoverage(firstProject.id) : Promise.resolve(null),
   ]);
@@ -248,7 +267,7 @@ export default async function DashboardPage() {
 
           <div className="space-y-4">
             {projects && projects.length > 0 ? (
-              projects.map((project: any, index: any) => (
+              projects.map((project, index) => (
                 <div
                   key={project.id}
                   className="glass-panel interactive-card rounded-2xl p-6 animate-stagger"
