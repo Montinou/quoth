@@ -13,6 +13,9 @@ fi
 if [ -f "$LIB_DIR/config-schema.sh" ]; then
     source "$LIB_DIR/config-schema.sh"
 fi
+if [ -f "$COMMON_SCRIPT_DIR/auto-memory.sh" ]; then
+    source "$COMMON_SCRIPT_DIR/auto-memory.sh"
+fi
 
 # ============================================================================
 # CONSTANTS
