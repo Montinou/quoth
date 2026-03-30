@@ -23,14 +23,35 @@ export default async function OnboardingPage() {
   }
 
   const db = getDb();
-  const [user] = await db
+  let [user] = await db
     .select({ metadata: users.metadata })
     .from(users)
     .where(eq(users.clerkUserId, userId))
     .limit(1);
 
+  // User may not exist yet if Clerk webhook hasn't fired.
+  // Create a minimal user record so onboarding can proceed.
   if (!user) {
-    redirect('/auth/cli');
+    await db
+      .insert(users)
+      .values({
+        clerkUserId: userId,
+        email: '',
+        metadata: { onboarding_step: 0, onboarding_completed: false, onboarding_data: {} },
+      })
+      .onConflictDoNothing();
+
+    // Re-fetch to get the inserted row
+    [user] = await db
+      .select({ metadata: users.metadata })
+      .from(users)
+      .where(eq(users.clerkUserId, userId))
+      .limit(1);
+
+    if (!user) {
+      // Shouldn't happen, but prevent infinite redirect
+      return <OnboardingFlow initialStep={0} initialData={{}} />;
+    }
   }
 
   const meta = (user.metadata ?? {}) as Record<string, unknown>;
