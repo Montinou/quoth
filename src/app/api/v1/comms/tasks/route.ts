@@ -2,6 +2,7 @@
  * POST  /api/v1/comms/tasks -- Create a task
  * GET   /api/v1/comms/tasks -- List tasks for the authenticated agent
  * PATCH /api/v1/comms/tasks -- Update task status (claim, complete, fail)
+ * PUT   /api/v1/comms/tasks -- Reassign a task to a different agent
  */
 
 import { z } from 'zod';
@@ -12,6 +13,8 @@ import {
   completeTask,
   failTask,
   listTasks,
+  reassignTask,
+  getTask,
 } from '@/lib/comms/tasks';
 import { forbidden, notFound, badRequest } from '@/lib/api/errors';
 
@@ -41,6 +44,11 @@ const updateTaskBody = z.object({
   action: z.enum(['claim', 'complete', 'fail']),
   result: z.record(z.unknown()).optional(),
   error: z.string().max(2000).optional(),
+});
+
+const reassignTaskBody = z.object({
+  taskId: z.string().uuid(),
+  newAgentId: z.string().uuid(),
 });
 
 // ---------------------------------------------------------------------------
@@ -143,5 +151,48 @@ export const PATCH = createApiHandler(
     }
 
     return Response.json({ data: task });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PUT -- Reassign task to a different agent
+// ---------------------------------------------------------------------------
+
+export const PUT = createApiHandler(
+  {
+    auth: 'required',
+    rateLimit: { rpm: 30 },
+    validate: { body: reassignTaskBody },
+  },
+  async (req, ctx) => {
+    if (!ctx!.isAgent || !ctx!.agentId) {
+      throw forbidden('Only agents can reassign tasks.');
+    }
+
+    const body = req.validatedBody as z.infer<typeof reassignTaskBody>;
+
+    // Auth: admin role or the agent who created the task
+    const task = await getTask(body.taskId, ctx!.orgId);
+    if (!task) {
+      throw notFound('Task not found.');
+    }
+
+    const isAdmin = ctx!.role === 'admin' || ctx!.role === 'owner';
+    const isCreator = task.createdBy === ctx!.agentId;
+
+    if (!isAdmin && !isCreator) {
+      throw forbidden('Only admins or the task creator can reassign tasks.');
+    }
+
+    const success = await reassignTask(body.taskId, body.newAgentId, ctx!.agentId);
+    if (!success) {
+      throw badRequest(
+        'Task could not be reassigned. It may already be done, failed, or cancelled.',
+      );
+    }
+
+    return Response.json({
+      data: { reassigned: true, taskId: body.taskId, newAgentId: body.newAgentId },
+    });
   },
 );

@@ -14,6 +14,7 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { getDb } from "@/db/connection";
 import { tasks } from "@/db/schema";
+import { verifyProjectAccess } from "./utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,6 +75,11 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRow> {
   if (priority < 1 || priority > 10) {
     throw new Error("Priority must be between 1 and 10");
   }
+
+  // Cross-project isolation: verify both creator and assignee have project access.
+  const projectId = input.projectId ?? null;
+  await verifyProjectAccess(input.createdBy, projectId);
+  await verifyProjectAccess(input.assignedTo, projectId);
 
   const [row] = await db
     .insert(tasks)
@@ -236,4 +242,59 @@ export async function getTask(
     .limit(1);
 
   return (row as TaskRow) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-fail overdue tasks (called by consolidation cron)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fail tasks whose deadline has passed and are still pending or in_progress.
+ * Returns the number of affected rows.
+ */
+export async function autoFailOverdueTasks(): Promise<number> {
+  const db = getDb();
+  const result = await db.execute(
+    sql`
+      UPDATE comms.tasks
+      SET status = 'failed',
+          result = jsonb_build_object('error', 'Auto-failed: deadline exceeded'),
+          completed_at = now(),
+          updated_at = now()
+      WHERE status IN ('pending', 'in_progress')
+        AND deadline IS NOT NULL
+        AND deadline < now()
+      RETURNING id
+    `,
+  );
+  return result.rows.length;
+}
+
+// ---------------------------------------------------------------------------
+// Reassign task
+// ---------------------------------------------------------------------------
+
+/**
+ * Reassign a task to a different agent. Only pending or in_progress tasks
+ * can be reassigned. Resets status to pending so the new agent can claim it.
+ */
+export async function reassignTask(
+  taskId: string,
+  newAgentId: string,
+  reassignedBy: string,
+): Promise<boolean> {
+  const db = getDb();
+  const result = await db.execute(
+    sql`
+      UPDATE comms.tasks
+      SET assigned_to = ${newAgentId},
+          status = 'pending',
+          started_at = NULL,
+          updated_at = now()
+      WHERE id = ${taskId}::uuid
+        AND status IN ('pending', 'in_progress')
+      RETURNING id
+    `,
+  );
+  return result.rows.length > 0;
 }

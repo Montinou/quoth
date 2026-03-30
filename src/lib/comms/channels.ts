@@ -15,6 +15,7 @@ import {
   channelSubscriptions,
   agentRegistry,
 } from "@/db/schema";
+import { verifyProjectAccess } from "./utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -135,6 +136,16 @@ export async function subscribeAgent(
   agentId: string,
 ): Promise<void> {
   const db = getDb();
+
+  // Cross-project isolation: if channel has a project_id, verify agent access.
+  const [ch] = await db
+    .select({ projectId: channels.projectId })
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .limit(1);
+  if (ch) {
+    await verifyProjectAccess(agentId, ch.projectId);
+  }
 
   await db
     .insert(channelSubscriptions)

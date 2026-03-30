@@ -14,6 +14,7 @@ import { getDb } from "@/db/connection";
 import { sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { verifyCronAuth } from "@/lib/worker/verify";
+import { autoFailOverdueTasks } from "@/lib/comms/tasks";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     consolidated: number;
     cleaned: number;
     driftEvents: number;
+    overdueFailed: number;
     durationMs: number;
     errors: string[];
   } = {
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
     consolidated: 0,
     cleaned: 0,
     driftEvents: 0,
+    overdueFailed: 0,
     durationMs: 0,
     errors: [],
   };
@@ -116,6 +119,15 @@ export async function POST(req: NextRequest) {
     results.errors.push(`drift: ${msg}`);
   }
 
+  // ── Task 5: Auto-fail overdue tasks ────────────────────────────
+  try {
+    results.overdueFailed = await autoFailOverdueTasks();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[cron/consolidate] Auto-fail overdue tasks failed:", msg);
+    results.errors.push(`overdueFailed: ${msg}`);
+  }
+
   // ── Log to analytics ────────────────────────────────────────────
   results.durationMs = Date.now() - start;
 
@@ -136,6 +148,7 @@ export async function POST(req: NextRequest) {
           consolidated: results.consolidated,
           cleaned: results.cleaned,
           driftEvents: results.driftEvents,
+          overdueFailed: results.overdueFailed,
           errors: results.errors,
         })}::jsonb,
         ${results.durationMs}

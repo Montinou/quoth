@@ -1,13 +1,14 @@
 /**
  * Agent Management MCP Tools — QUOTH-08
  *
- * 6 tools:
+ * 7 tools:
  *   - quoth_agent_register      — register agent in agents.registry
  *   - quoth_agent_list          — list agents in org
  *   - quoth_agent_assign        — assign agent to project
  *   - quoth_agent_send_message  — send message via comms
  *   - quoth_agent_inbox         — read agent inbox
  *   - quoth_agent_tasks         — list/claim/complete tasks
+ *   - quoth_agent_task_reassign — reassign task to different agent (admin only)
  *
  * All queries run against the `agents` and `comms` schemas via Drizzle ORM.
  */
@@ -71,6 +72,11 @@ const SendMessageInput = z.object({
 const InboxInput = z.object({
   status: z.enum(['pending', 'delivered', 'read']).default('pending'),
   limit: z.number().int().min(1).max(100).default(20),
+});
+
+const TaskReassignInput = z.object({
+  task_id: z.string().uuid().describe('Task UUID to reassign'),
+  new_agent_id: z.string().uuid().describe('UUID of the agent to reassign the task to'),
 });
 
 const TasksInput = z.object({
@@ -579,6 +585,79 @@ export function registerAgentTools(server: McpServer, authContext: AuthContext) 
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Tasks failed: ${sanitizeError(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── quoth_agent_task_reassign ──────────────────────────────────────────────
+  server.registerTool(
+    'quoth_agent_task_reassign',
+    {
+      description:
+        'Reassign a task to a different agent. Resets the task to pending status. ' +
+        'Requires admin or owner role.',
+      inputSchema: TaskReassignInput,
+    },
+    async (args) => {
+      try {
+        if (authContext.role !== 'admin' && authContext.role !== 'owner') {
+          return {
+            content: [{ type: 'text' as const, text: 'Insufficient permissions. Requires admin or owner role.' }],
+            isError: true,
+          };
+        }
+
+        const input = TaskReassignInput.parse(args);
+        const db = getDb();
+
+        const result = await db.execute(
+          sql`
+            UPDATE comms.tasks
+            SET assigned_to = ${input.new_agent_id},
+                status = 'pending',
+                started_at = NULL,
+                updated_at = now()
+            WHERE id = ${input.task_id}::uuid
+              AND status IN ('pending', 'in_progress')
+            RETURNING id, title
+          `,
+        );
+
+        if (result.rows.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: 'Task not found or not in a reassignable state (must be pending or in_progress).',
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const row = result.rows[0];
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  reassigned: true,
+                  task_id: row.id,
+                  title: row.title,
+                  new_agent_id: input.new_agent_id,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Reassign failed: ${sanitizeError(err)}` }],
           isError: true,
         };
       }

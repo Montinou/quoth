@@ -22,7 +22,8 @@
 
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { getDb } from "@/db/connection";
-import { messages, agentRegistry } from "@/db/schema";
+import { messages, channels, agentRegistry } from "@/db/schema";
+import { verifyProjectAccess } from "./utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,6 +100,19 @@ export async function sendMessage(
   }
   if (input.toAgentId && input.channelId) {
     throw new Error("Cannot specify both toAgentId and channelId");
+  }
+
+  // Cross-project isolation: if sending to a channel with a project_id,
+  // verify the sender has access to that project.
+  if (input.channelId) {
+    const [ch] = await db
+      .select({ projectId: channels.projectId })
+      .from(channels)
+      .where(eq(channels.id, input.channelId))
+      .limit(1);
+    if (ch) {
+      await verifyProjectAccess(fromAgentId, ch.projectId);
+    }
   }
 
   const [row] = await db
@@ -273,4 +287,36 @@ export async function getMessage(
     .limit(1);
 
   return (row as MessageRow) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Thread retrieval
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the full thread for a message using recursive CTE.
+ * Walks UP the reply_to chain to find root, then DOWN to collect all replies.
+ */
+export async function getThread(messageId: string, limit: number = 50) {
+  const db = getDb();
+  const result = await db.execute(sql`
+    WITH RECURSIVE thread AS (
+      SELECT * FROM comms.messages WHERE id = ${messageId}::uuid
+      UNION ALL
+      SELECT m.* FROM comms.messages m
+      JOIN thread t ON t.reply_to = m.id
+      WHERE t.reply_to IS NOT NULL
+    ),
+    root AS (
+      SELECT id FROM thread ORDER BY created_at ASC LIMIT 1
+    ),
+    full_thread AS (
+      SELECT m.* FROM comms.messages m WHERE m.id = (SELECT id FROM root)
+      UNION ALL
+      SELECT m.* FROM comms.messages m
+      JOIN full_thread ft ON m.reply_to = ft.id
+    )
+    SELECT * FROM full_thread ORDER BY created_at ASC LIMIT ${limit}
+  `);
+  return result.rows;
 }
