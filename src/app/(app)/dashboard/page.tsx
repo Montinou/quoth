@@ -8,6 +8,8 @@ import { Suspense } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
+
+export const revalidate = 60; // Revalidate dashboard data every 60 seconds
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
 import { ActivityCard } from '@/components/dashboard/ActivityCard';

@@ -14,27 +14,37 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/connection";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
+
+/** Cached onboarding check — avoids DB query on every page navigation. */
+const getOnboardingStatus = unstable_cache(
+  async (clerkUserId: string) => {
+    const db = getDb();
+    const [user] = await db
+      .select({ metadata: users.metadata })
+      .from(users)
+      .where(eq(users.clerkUserId, clerkUserId))
+      .limit(1);
+
+    if (!user) return { completed: false };
+    const meta = (user.metadata ?? {}) as Record<string, unknown>;
+    return { completed: meta.onboarding_completed === true };
+  },
+  ["onboarding-status"],
+  { revalidate: 300, tags: ["onboarding"] },
+);
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Check onboarding status — redirect new users to onboarding
+  // Check onboarding status — cached for 5 minutes per user
   const { userId } = await auth();
   if (userId) {
-    const db = getDb();
-    const [user] = await db
-      .select({ metadata: users.metadata })
-      .from(users)
-      .where(eq(users.clerkUserId, userId))
-      .limit(1);
-
-    if (user) {
-      const meta = (user.metadata ?? {}) as Record<string, unknown>;
-      if (meta.onboarding_completed !== true) {
-        redirect("/onboarding");
-      }
+    const { completed } = await getOnboardingStatus(userId);
+    if (!completed) {
+      redirect("/onboarding");
     }
   }
 
