@@ -122,7 +122,7 @@ function OnboardingStepLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex w-full flex-col-reverse gap-10 rounded-2xl border border-zinc-800 bg-zinc-900/80 backdrop-blur-xl md:min-h-[85dvh] md:flex-row">
+    <div className="flex w-full max-w-5xl mx-auto flex-col-reverse gap-0 rounded-3xl border border-zinc-700/50 bg-gradient-to-br from-zinc-900/90 via-zinc-900/70 to-zinc-950/90 backdrop-blur-2xl shadow-2xl shadow-violet-900/10 md:min-h-[70dvh] md:flex-row overflow-hidden">
       {children}
     </div>
   );
@@ -144,8 +144,8 @@ function LeftPanel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-1/2 justify-center pr-10 sm:py-10 sm:pb-10 sm:pl-10 md:py-20 lg:justify-start lg:pr-0 lg:pl-24">
-      <div className="flex h-full w-full max-w-sm shrink-0 flex-col gap-6 md:max-w-md">
+    <div className="flex flex-1 justify-center p-8 sm:p-10 md:p-16 lg:p-20">
+      <div className="flex h-full w-full max-w-md shrink-0 flex-col gap-6">
         <OnboardingStepHeader
           title={title}
           description={description}
@@ -169,7 +169,7 @@ function RightPanel({
   return (
     <div
       className={cn(
-        "hidden flex-1/2 overflow-hidden sm:pt-10 md:pt-20 lg:flex items-center justify-center",
+        "hidden flex-1 overflow-hidden lg:flex items-center justify-center border-l border-zinc-700/30 bg-gradient-to-br from-zinc-800/20 to-violet-950/10",
         className,
       )}
     >
@@ -214,61 +214,58 @@ function FormField({
   );
 }
 
-// ── Dashboard Illustration (dark themed) ─────────────────────────────────────
+// ── Geometric Pattern (right panel visual) ───────────────────────────────────
 
-function DashboardIllustration({
-  title = "Quoth",
-  icon,
-}: {
-  title?: string;
-  icon?: React.ReactNode;
-}) {
+function GeometricPattern({ icon }: { icon?: React.ReactNode }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
-      className="flex h-80 w-full max-w-md overflow-hidden rounded-xl border border-zinc-700/50 bg-zinc-800/30"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.8, ease: "easeOut" }}
+      className="relative w-full h-full flex items-center justify-center"
     >
-      <div className="h-full w-1/3 shrink-0 overflow-hidden bg-zinc-800/60 border-r border-zinc-700/50">
-        <div className="flex items-center gap-2 border-b border-zinc-700/50 p-4">
-          <div className="size-7 shrink-0 rounded-md bg-violet-600/30 flex items-center justify-center">
-            {icon ?? <Sparkles className="size-3.5 text-violet-400" />}
-          </div>
-          <p className="truncate text-sm font-semibold text-gray-300">
-            {title}
-          </p>
-        </div>
-        <ul className="space-y-2 p-3">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <li
-              key={`sb-${i}`}
-              className="h-7 rounded-lg border border-zinc-700/30 bg-zinc-800/40"
-            />
-          ))}
-        </ul>
-      </div>
-      <div className="flex flex-1 flex-col justify-between p-4">
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="size-8 rounded-lg border border-zinc-700/40 bg-zinc-800/40" />
-            <div className="h-8 w-40 rounded-lg border border-zinc-700/40 bg-zinc-800/40" />
-          </div>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={`row-${i}`}
-              className="h-8 rounded-lg border border-zinc-700/20 bg-zinc-800/20"
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={`btn-${i}`}
-              className="size-7 rounded-lg border border-zinc-700/30 bg-zinc-800/40"
-            />
-          ))}
-        </div>
+      {/* Radial gradient background */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(124,58,237,0.08)_0%,transparent_70%)]" />
+
+      {/* Geometric grid */}
+      <div className="absolute inset-0 opacity-[0.04]" style={{
+        backgroundImage: `
+          linear-gradient(rgba(124,58,237,0.5) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(124,58,237,0.5) 1px, transparent 1px)
+        `,
+        backgroundSize: '40px 40px',
+      }} />
+
+      {/* Diagonal lines */}
+      <svg className="absolute inset-0 w-full h-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="diag" width="60" height="60" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="60" stroke="rgb(139,92,246)" strokeWidth="1"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#diag)" />
+      </svg>
+
+      {/* Floating geometric shapes */}
+      <div className="relative z-10 flex flex-col items-center gap-8">
+        {/* Central icon */}
+        <motion.div
+          animate={{ y: [-4, 4, -4] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="size-20 rounded-2xl bg-gradient-to-br from-violet-600/20 to-violet-800/10 border border-violet-500/20 flex items-center justify-center backdrop-blur-sm shadow-lg shadow-violet-900/20"
+        >
+          {icon ?? <Sparkles className="size-10 text-violet-400/80" />}
+        </motion.div>
+
+        {/* Decorative rings */}
+        <div className="absolute size-40 rounded-full border border-violet-500/[0.06] -z-10" />
+        <div className="absolute size-64 rounded-full border border-violet-500/[0.04] -z-10" />
+        <div className="absolute size-96 rounded-full border border-violet-500/[0.02] -z-10" />
+
+        {/* Corner accents */}
+        <div className="absolute top-8 right-8 size-3 rounded-full bg-violet-500/20" />
+        <div className="absolute bottom-12 left-12 size-2 rounded-full bg-violet-400/15" />
+        <div className="absolute top-1/3 left-8 size-1.5 rounded-full bg-violet-300/10" />
       </div>
     </motion.div>
   );
@@ -347,7 +344,7 @@ function StepOrganization({
         </form>
       </LeftPanel>
       <RightPanel>
-        <DashboardIllustration icon={<Layers className="size-3.5 text-violet-400" />} />
+        <GeometricPattern icon={<Layers className="size-8 text-violet-400/80" />} />
       </RightPanel>
     </OnboardingStepLayout>
   );
@@ -493,10 +490,7 @@ function StepProject({
         </div>
       </LeftPanel>
       <RightPanel>
-        <DashboardIllustration
-          title={projectName || (createdProjects[0]?.name ?? "Your Project")}
-          icon={<Layers className="size-3.5 text-violet-400" />}
-        />
+        <GeometricPattern icon={<Layers className="size-8 text-violet-400/80" />} />
       </RightPanel>
     </OnboardingStepLayout>
   );
@@ -709,10 +703,7 @@ function StepAgent({
         </div>
       </LeftPanel>
       <RightPanel>
-        <DashboardIllustration
-          title={displayName || "Agent"}
-          icon={<Bot className="size-3.5 text-violet-400" />}
-        />
+        <GeometricPattern icon={<Bot className="size-8 text-violet-400/80" />} />
       </RightPanel>
     </OnboardingStepLayout>
   );
@@ -805,10 +796,7 @@ function StepGenesis({
         </div>
       </LeftPanel>
       <RightPanel>
-        <DashboardIllustration
-          title="Genesis"
-          icon={<FileText className="size-3.5 text-violet-400" />}
-        />
+        <GeometricPattern icon={<FileText className="size-8 text-violet-400/80" />} />
       </RightPanel>
     </OnboardingStepLayout>
   );
@@ -999,8 +987,12 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
   const StepComponent = STEPS[currentStep] ?? STEPS[0];
 
   return (
-    <section className="min-h-screen bg-[#0a0a0a] py-12 md:py-20">
-      <div className="container flex flex-col items-center gap-12 md:gap-16">
+    <section className="min-h-screen bg-gradient-to-b from-[#0a0a0a] via-[#0d0d12] to-[#0a0a0a] py-12 md:py-20 relative overflow-hidden">
+      {/* Background texture */}
+      <div className="absolute inset-0 grid-bg opacity-20 pointer-events-none" />
+      <div className="absolute top-0 left-1/3 w-[500px] h-[500px] bg-violet-600/5 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-violet-900/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="container relative z-10 flex flex-col items-center gap-10 md:gap-14">
         <Logo size="lg" />
 
         {/* Step indicator dots */}
