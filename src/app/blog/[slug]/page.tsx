@@ -9,6 +9,8 @@ import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Calendar, Clock, ArrowLeft } from 'lucide-react';
 
+export const revalidate = 3600;
+
 interface Props {
   params: Promise<{ slug: string }>;
 }

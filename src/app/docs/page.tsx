@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { getDocsSidebar } from '@/lib/content/docs';
 import { BookOpen, Zap, Code, BarChart, ArrowRight } from 'lucide-react';
 
+export const revalidate = 3600;
+
 export const metadata: Metadata = {
   title: 'Documentation | Quoth',
   description: 'Learn how to use Quoth - the documentation layer for AI-native development',

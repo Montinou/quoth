@@ -10,6 +10,8 @@ import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, ArrowLeft, Circle, Server, Cpu, FolderOpen, Calendar } from 'lucide-react';
 
+export const revalidate = 60;
+
 interface AgentWithProjects {
   id: string;
   agent_name: string;

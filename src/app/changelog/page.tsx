@@ -7,6 +7,8 @@ import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Rss } from 'lucide-react';
 
+export const revalidate = 3600;
+
 export const metadata: Metadata = {
   title: 'Changelog | Quoth',
   description: 'Track the evolution of Quoth - new features, improvements, and fixes',

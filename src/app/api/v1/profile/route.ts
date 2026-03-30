@@ -29,13 +29,16 @@ export async function GET() {
     return Response.json({ error: 'Profile not found' }, { status: 404 });
   }
 
-  return Response.json({
-    id: row.id,
-    clerkUserId: row.clerkUserId,
-    email: row.email,
-    displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
-    defaultOrgId: row.defaultOrgId,
-    defaultProjectId: row.defaultProjectId,
-  });
+  return Response.json(
+    {
+      id: row.id,
+      clerkUserId: row.clerkUserId,
+      email: row.email,
+      displayName: row.displayName,
+      avatarUrl: row.avatarUrl,
+      defaultOrgId: row.defaultOrgId,
+      defaultProjectId: row.defaultProjectId,
+    },
+    { headers: { 'Cache-Control': 'private, s-maxage=300, stale-while-revalidate=600' } },
+  );
 }

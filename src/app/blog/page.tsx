@@ -7,6 +7,8 @@ import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
 import { Calendar, Clock, ArrowRight } from 'lucide-react';
 
+export const revalidate = 3600;
+
 export const metadata: Metadata = {
   title: 'Blog | Quoth',
   description: 'Announcements, tutorials, and thoughts on AI-native documentation',

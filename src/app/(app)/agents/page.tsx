@@ -11,6 +11,8 @@ import Link from 'next/link';
 import { Bot, Circle, Clock, Server, FolderOpen, Network } from 'lucide-react';
 import { AgentProjectGraphMini } from '@/components/agents/AgentProjectGraphMini';
 
+export const revalidate = 60;
+
 interface Agent {
   id: string;
   agent_name: string;

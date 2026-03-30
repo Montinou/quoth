@@ -8,6 +8,8 @@ import { MDXContent } from '@/components/mdx';
 import { TableOfContents } from '@/components/docs/TableOfContents';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
+export const revalidate = 3600;
+
 interface Props {
   params: Promise<{ slug: string[] }>;
 }
