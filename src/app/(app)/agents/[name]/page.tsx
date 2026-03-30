@@ -6,7 +6,6 @@
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
-import { cacheTag, cacheLife } from 'next/cache';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, ArrowLeft, Circle, Server, Cpu, FolderOpen, Calendar } from 'lucide-react';
@@ -36,10 +35,11 @@ interface AgentWithProjects {
   }>;
 }
 
-async function getAgentDetailData(userId: string, name: string) {
-  'use cache'
-  cacheTag('agent-detail')
-  cacheLife('minutes')
+export default async function AgentDetailPage({ params }: { params: { name: string } }) {
+  const { userId } = await auth();
+  if (!userId) {
+    redirect('/');
+  }
 
   // Get user's organization (self-lookup, no RLS needed)
   const pooledDb = getDb();
@@ -48,7 +48,7 @@ async function getAgentDetailData(userId: string, name: string) {
   `).then(r => r.rows[0] as any);
 
   if (!userRow?.default_org_id) {
-    return null;
+    notFound();
   }
 
   const organizationId = userRow.default_org_id;
@@ -57,11 +57,11 @@ async function getAgentDetailData(userId: string, name: string) {
   // Fetch agent by name
   const agentRow = await db.execute(sql`
     SELECT * FROM agents.registry
-    WHERE org_id = ${organizationId} AND agent_name = ${name}
+    WHERE org_id = ${organizationId} AND agent_name = ${params.name}
   `).then(r => r.rows[0] as any);
 
   if (!agentRow) {
-    return null;
+    notFound();
   }
 
   // Fetch agent's project assignments with project details
@@ -87,21 +87,6 @@ async function getAgentDetailData(userId: string, name: string) {
       },
     })),
   };
-
-  return agentData;
-}
-
-export default async function AgentDetailPage({ params }: { params: { name: string } }) {
-  const { userId } = await auth();
-  if (!userId) {
-    redirect('/');
-  }
-
-  const agentData = await getAgentDetailData(userId, params.name);
-
-  if (!agentData) {
-    notFound();
-  }
 
   const isOnline = agentData.last_seen_at &&
     new Date(agentData.last_seen_at).getTime() > Date.now() - 5 * 60 * 1000;

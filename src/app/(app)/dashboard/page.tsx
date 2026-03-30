@@ -8,7 +8,6 @@ import { Suspense } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { getDb, getSecureDb } from '@/db/connection';
 import { sql } from 'drizzle-orm';
-import { cacheTag, cacheLife } from 'next/cache';
 
 import { getLatestCoverage } from '@/lib/quoth/coverage';
 import { CoverageCard } from '@/components/dashboard/CoverageCard';
@@ -41,10 +40,11 @@ function CardSkeleton() {
   );
 }
 
-async function getDashboardData(userId: string) {
-  'use cache'
-  cacheTag('dashboard')
-  cacheLife('minutes')
+export default async function DashboardPage() {
+  const { userId } = await auth();
+  if (!userId) {
+    redirect('/');
+  }
 
   // Look up user's org with pooled connection (self-lookup, no RLS needed)
   const pooledDb = getDb();
@@ -53,7 +53,13 @@ async function getDashboardData(userId: string) {
   `).then(r => r.rows[0] as any);
 
   if (!userRow?.default_org_id) {
-    return { userRow: null, projects: [], proposalCount: 0, documentCount: 0, initialCoverage: null };
+    return (
+      <div className="px-6 py-8">
+        <div className="max-w-7xl mx-auto">
+          <p className="text-gray-400">No organization found. Complete onboarding first.</p>
+        </div>
+      </div>
+    );
   }
 
   const db = await getSecureDb(userRow.default_org_id, userRow.id);
@@ -71,7 +77,7 @@ async function getDashboardData(userId: string) {
   const firstProject = projects[0];
 
   // Parallelize independent queries for ~50-60% latency reduction (3-4 RTTs → 2 RTTs)
-  const [proposalResult, documentResult, coverageResult] = await Promise.all([
+  const [proposalCount, documentCount, initialCoverage] = await Promise.all([
     projectIds.length > 0
       ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as any)?.count ?? 0)
       : Promise.resolve(0),
@@ -80,35 +86,6 @@ async function getDashboardData(userId: string) {
       : Promise.resolve(0),
     firstProject ? getLatestCoverage(firstProject.id) : Promise.resolve(null),
   ]);
-
-  return {
-    userRow,
-    projects,
-    proposalCount: proposalResult,
-    documentCount: documentResult,
-    initialCoverage: coverageResult,
-  };
-}
-
-export default async function DashboardPage() {
-  const { userId } = await auth();
-  if (!userId) {
-    redirect('/');
-  }
-
-  const { userRow, projects, proposalCount, documentCount, initialCoverage } = await getDashboardData(userId);
-
-  if (!userRow?.default_org_id) {
-    return (
-      <div className="px-6 py-8">
-        <div className="max-w-7xl mx-auto">
-          <p className="text-gray-400">No organization found. Complete onboarding first.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const firstProject = projects[0];
 
   // Stats data
   const stats = [
