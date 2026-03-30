@@ -1,3 +1,13 @@
+> **Note:** This whitepaper describes Quoth v1.0 architecture. The current version (v2.0+) uses a different tech stack:
+> - **Database:** Neon PostgreSQL (not Supabase)
+> - **Auth:** Clerk (not Supabase Auth)
+> - **Embeddings:** Vercel AI Gateway / text-embedding-3-small (not Jina)
+> - **Memory:** Seamless auto-memory with local-first storage (not manual RAG)
+>
+> See README.md and the docs at quoth.triqual.dev for current documentation.
+
+---
+
 Quoth: AI-Driven Technical Documentation MCP Strategy
 
 > **Note:** This is the original Quoth v1 whitepaper. For v2.0 "AI Memory" architecture with local-first storage, quoth-memory subagent, and session logging, see [docs/memory-v2/2026-01-28-quoth-v2-ai-memory-design.md](docs/memory-v2/2026-01-28-quoth-v2-ai-memory-design.md).

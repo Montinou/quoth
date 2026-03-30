@@ -135,6 +135,18 @@ It returns concise answers without bloating your context.
 - Edit `.quoth/config.json`
 - Change `strictness` to `"reminder"` or `"off"`
 
+## Auto-Memory
+
+Once initialized with `/quoth-init`, Quoth automatically:
+- **Captures** significant events during your session (errors, edits to key files)
+- **Extracts** learnings when the session ends
+- **Consolidates** into `.quoth/*.md` files (decisions, patterns, errors, knowledge)
+- **Injects context** at the start of each new session
+
+No manual steps needed — memory just works.
+
+To disable: set `"auto_memory": false` in `.quoth/config.json`.
+
 ## Next Steps
 
 - **Customize types**: Add project-specific `.quoth/{type}.md` files
