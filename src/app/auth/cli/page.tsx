@@ -1,44 +1,29 @@
 /**
  * CLI Authentication Page
  * Shows generated token for user to copy and paste into terminal
- * Similar to Claude Code's authentication flow
+ * Uses Clerk for authentication
  */
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { useUser } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { Copy, Check, Terminal, ExternalLink } from 'lucide-react';
 
 export default function CLIAuthPage() {
-  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const { user, isLoaded, isSignedIn } = useUser();
   const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
-  const supabase = createClient();
 
   useEffect(() => {
-    async function checkAuth() {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        // Redirect to login with return URL
-        router.push('/auth/login?redirectTo=/auth/cli');
-        return;
-      }
-
-      setUser({ id: user.id, email: user.email || '' });
-      setLoading(false);
+    if (isLoaded && !isSignedIn) {
+      window.location.href = '/auth/login?redirectTo=/auth/cli';
     }
-
-    checkAuth();
-  }, [router, supabase.auth]);
+  }, [isLoaded, isSignedIn]);
 
   async function generateToken() {
     setGenerating(true);
@@ -75,7 +60,7 @@ export default function CLIAuthPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (loading) {
+  if (!isLoaded || !isSignedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-obsidian to-charcoal">
         <div className="text-gray-400">Loading...</div>
@@ -100,7 +85,7 @@ export default function CLIAuthPage() {
         {/* User Info */}
         <div className="bg-charcoal/50 rounded-lg p-4 mb-6 border border-graphite/30">
           <p className="text-sm text-gray-400 mb-1">Authenticated as</p>
-          <p className="text-white font-medium">{user?.email}</p>
+          <p className="text-white font-medium">{user?.primaryEmailAddress?.emailAddress}</p>
         </div>
 
         {error && (
@@ -180,13 +165,13 @@ export default function CLIAuthPage() {
                 Paste this token in your terminal when prompted:
               </p>
               <code className="block bg-obsidian rounded px-3 py-2 text-sm font-mono text-violet-ghost">
-                Paste your token here: █
+                Paste your token here:
               </code>
             </div>
 
             {/* Security Notice */}
             <div className="mt-6 text-center text-xs text-gray-500">
-              <p>⚠️ This token will only be shown once.</p>
+              <p>This token will only be shown once.</p>
               <p>Store it securely or generate a new one if lost.</p>
             </div>
 

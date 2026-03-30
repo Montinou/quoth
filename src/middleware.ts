@@ -1,8 +1,7 @@
 /**
  * Next.js Middleware — Clerk Authentication + Route Protection
  *
- * Replaces previous Supabase SSR middleware.
- * Old middleware preserved at src/middleware.supabase.ts for reference.
+ * Clerk auth middleware.
  *
  * Public routes:
  *   - /api/webhooks/clerk (Clerk webhook endpoint)

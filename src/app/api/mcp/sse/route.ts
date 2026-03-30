@@ -8,37 +8,53 @@
  * - Query param: /api/mcp/sse?token=YOUR_TOKEN (for EventSource)
  * - OR Header: Authorization: Bearer YOUR_TOKEN
  * - Returns 401 with WWW-Authenticate for OAuth discovery
- *
- * Features:
- * - 3 Tools: quoth_search_index, quoth_read_doc, quoth_propose_update
- * - 3 Prompts: quoth_architect, quoth_auditor, quoth_documenter
  */
 
 import { createMcpHandler } from 'mcp-handler';
-import { verifySseToken, createSseAuthErrorResponse } from '@/lib/auth/sse-auth';
-import { registerQuothTools } from '@/lib/quoth/tools';
+import { verifySseToken } from '@/lib/auth/sse-auth';
+import { registerAllTools } from '@/lib/mcp/register';
 import { getArchitectPrompt, getAuditorPrompt, getDocumenterPrompt } from '@/lib/quoth/prompts';
 import type { NextRequest } from 'next/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { AuthContext } from '@/lib/auth/mcp-auth';
+import type { AuthContext as LegacyAuthContext } from '@/lib/auth/mcp-auth';
+import type { AuthContext } from '@/lib/auth/types';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://quoth.triqual.dev';
+
+/**
+ * Map legacy AuthContext to v2 AuthContext
+ */
+function toV2AuthContext(legacy: LegacyAuthContext): AuthContext {
+  const roleMap: Record<string, AuthContext['role']> = {
+    admin: 'admin',
+    editor: 'editor',
+    viewer: 'viewer',
+  };
+
+  return {
+    userId: legacy.user_id,
+    clerkUserId: null,
+    orgId: '',
+    projectId: legacy.project_id,
+    role: roleMap[legacy.role] || 'viewer',
+    tier: 'free',
+    isAgent: false,
+  };
+}
 
 /**
  * Setup MCP server with tools and prompts
  */
 function setupServer(server: McpServer, authContext: AuthContext) {
-  registerQuothTools(server, authContext);
+  registerAllTools(server, authContext);
 
   // Register Prompts (Personas)
-  // IMPORTANT: Prompts are activated with /prompt command in Claude Code, NOT by calling them like tools
   server.registerPrompt(
     'quoth_architect',
     {
       description:
-        "🏗️ Code Generation Persona - Activate with '/prompt quoth_architect' in Claude Code. " +
-        "Enforces 'Single Source of Truth' rules by searching Quoth before generating any code. " +
-        "Use BEFORE writing code/tests to ensure patterns follow documented standards.",
+        "Code Generation Persona - Activate with '/prompt quoth_architect' in Claude Code. " +
+        "Enforces 'Single Source of Truth' rules by searching Quoth before generating any code.",
     },
     async () => getArchitectPrompt()
   );
@@ -47,9 +63,8 @@ function setupServer(server: McpServer, authContext: AuthContext) {
     'quoth_auditor',
     {
       description:
-        "🔍 Code Review Persona - Activate with '/prompt quoth_auditor' in Claude Code. " +
-        "Reviews existing code against documented standards. Distinguishes VIOLATIONS (code breaking rules) " +
-        "from UPDATES_NEEDED (new patterns to document). Use DURING code review.",
+        "Code Review Persona - Activate with '/prompt quoth_auditor' in Claude Code. " +
+        "Reviews existing code against documented standards.",
     },
     async () => getAuditorPrompt()
   );
@@ -58,9 +73,8 @@ function setupServer(server: McpServer, authContext: AuthContext) {
     'quoth_documenter',
     {
       description:
-        "📝 Incremental Documentation Persona - Activate with '/prompt quoth_documenter' in Claude Code. " +
-        "Documents new code immediately after implementation. Fetches templates, follows structure, " +
-        "and submits proposals. Use WHILE building features. Say 'document this [code]' after activation.",
+        "Incremental Documentation Persona - Activate with '/prompt quoth_documenter' in Claude Code. " +
+        "Documents new code immediately after implementation.",
     },
     async () => getDocumenterPrompt()
   );
@@ -105,13 +119,14 @@ function createOAuthAuthErrorResponse(): Response {
  * GET handler for SSE connections
  */
 export async function GET(req: NextRequest) {
-  const authContext = await verifySseToken(req);
-  
-  if (!authContext) {
+  const legacyContext = await verifySseToken(req);
+
+  if (!legacyContext) {
     return createOAuthAuthErrorResponse();
   }
 
-  const handler = createAuthenticatedHandler(authContext);
+  const v2Context = toV2AuthContext(legacyContext);
+  const handler = createAuthenticatedHandler(v2Context);
   return handler(req);
 }
 
@@ -119,12 +134,13 @@ export async function GET(req: NextRequest) {
  * POST handler for SSE message endpoint
  */
 export async function POST(req: NextRequest) {
-  const authContext = await verifySseToken(req);
-  
-  if (!authContext) {
+  const legacyContext = await verifySseToken(req);
+
+  if (!legacyContext) {
     return createOAuthAuthErrorResponse();
   }
 
-  const handler = createAuthenticatedHandler(authContext);
+  const v2Context = toV2AuthContext(legacyContext);
+  const handler = createAuthenticatedHandler(v2Context);
   return handler(req);
 }

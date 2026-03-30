@@ -203,7 +203,7 @@ const GENESIS_MINIMAL_PROMPT = `<genesis_protocol version="3.0" depth="minimal">
       **Summary:** Primary language configuration.
 
       ## Database (Storage, Persistence)
-      - **Provider**: [Supabase/PostgreSQL/etc]
+      - **Provider**: [Neon/PostgreSQL/etc]
       - **ORM**: [Drizzle/Prisma/none]
       **Summary:** Database layer.
 

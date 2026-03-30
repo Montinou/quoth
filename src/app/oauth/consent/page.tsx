@@ -1,14 +1,13 @@
 /**
  * OAuth Consent Screen
  * Displays authorization request details and allows user to approve/deny
- * Uses server-side API route to avoid React StrictMode/AuthContext conflicts
+ * Uses server-side API routes for all operations
  */
 
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Check, X, AlertCircle, Loader2 } from 'lucide-react';
@@ -54,15 +53,10 @@ function ConsentForm() {
       }
 
       try {
-        // Use server-side API route to avoid React StrictMode/AuthContext conflicts
-        console.log('[Consent] Fetching authorization details via API for:', authorizationId);
-
         const response = await fetch(`/api/oauth/consent?authorization_id=${encodeURIComponent(authorizationId)}`);
         const data = await response.json();
 
         if (!mounted) return;
-
-        console.log('[Consent] API response:', data);
 
         // Handle not authenticated - redirect to login
         if (data.error === 'not_authenticated') {
@@ -109,36 +103,31 @@ function ConsentForm() {
     setError(null);
 
     try {
-      // Call Supabase directly from browser - this triggers the redirect automatically
-      const supabase = createClient();
-      console.log('[Consent] Calling approveAuthorization directly from browser');
+      const response = await fetch('/api/oauth/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authorization_id: authorizationId, action: 'approve' }),
+      });
 
-      const { error } = await supabase.auth.oauth.approveAuthorization(authorizationId);
+      const data = await response.json();
 
-      if (error) {
-        console.error('[Consent] Approve error:', error);
-        setError(error.message);
+      if (data.redirect_uri) {
+        window.location.href = data.redirect_uri;
+        return;
+      }
+
+      if (data.error) {
+        setError(data.error);
         setProcessing(false);
         return;
       }
 
-      // If we get here without a redirect, Supabase should have redirected
-      // Wait a moment then show message
-      console.log('[Consent] Approval successful, waiting for redirect...');
+      // Fallback
       setTimeout(() => {
         setError('Authorization approved. If not redirected, please close this window.');
         setProcessing(false);
       }, 3000);
     } catch (err) {
-      // Ignore AbortError - it might happen but the approval could still work
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.log('[Consent] AbortError during approve (may still succeed)');
-        setTimeout(() => {
-          setError('Authorization may have succeeded. If not redirected, please try again.');
-          setProcessing(false);
-        }, 2000);
-        return;
-      }
       setError(err instanceof Error ? err.message : 'Failed to approve authorization');
       setProcessing(false);
     }
@@ -151,31 +140,21 @@ function ConsentForm() {
     setError(null);
 
     try {
-      // Call Supabase directly from browser - this triggers the redirect automatically
-      const supabase = createClient();
-      console.log('[Consent] Calling denyAuthorization directly from browser');
+      const response = await fetch('/api/oauth/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authorization_id: authorizationId, action: 'deny' }),
+      });
 
-      const { error } = await supabase.auth.oauth.denyAuthorization(authorizationId);
+      const data = await response.json();
 
-      if (error) {
-        console.error('[Consent] Deny error:', error);
-        setError(error.message);
-        setProcessing(false);
+      if (data.redirect_uri) {
+        window.location.href = data.redirect_uri;
         return;
       }
 
-      // If we get here without a redirect, go to dashboard
-      console.log('[Consent] Denial successful, waiting for redirect...');
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 2000);
+      router.push('/dashboard');
     } catch (err) {
-      // Ignore AbortError
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.log('[Consent] AbortError during deny');
-        router.push('/dashboard');
-        return;
-      }
       setError(err instanceof Error ? err.message : 'Failed to deny authorization');
       setProcessing(false);
     }

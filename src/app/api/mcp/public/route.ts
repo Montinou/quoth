@@ -1,266 +1,331 @@
 /**
  * Quoth MCP Server - Public Demo Endpoint
- * Read-only MCP endpoint without authentication for demo/trial purposes
+ * Read-only MCP endpoint that serves Quoth's own documentation.
+ * No authentication required. No database queries. No user data.
  *
  * Endpoint: /api/mcp/public
  *
- * Features:
- * - No authentication required
- * - Read-only access (search and read only)
- * - Hardcoded to public demo project (quoth-knowledge-base)
- * - Stricter rate limits than authenticated endpoints
+ * Tools exposed:
+ * - quoth_search_index  — simple text search across MDX content
+ * - quoth_read_doc      — return full content of a specific doc by path
  */
 
 import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 import type { NextRequest } from 'next/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { searchDocuments, readDocument, buildSearchIndex } from '@/lib/quoth/search';
-import { checkRateLimit } from '@/lib/rate-limit';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
-// Public demo project ID
-const PUBLIC_PROJECT_ID = 'quoth-knowledge-base';
+// ---------------------------------------------------------------------------
+// Rate limiting — 100 requests per day per IP (public endpoint, no auth)
+// ---------------------------------------------------------------------------
 
-/**
- * Register read-only tools for public access
- */
-function registerPublicTools(server: McpServer) {
-  // Tool 1: quoth_search_index (Read-only semantic search)
-  server.registerTool(
-    'quoth_search_index',
-    {
-      title: 'Search Quoth Documentation (Public)',
-      description:
-        'Performs semantic search across the public Quoth documentation. ' +
-        'Returns relevant document chunks ranked by similarity. ' +
-        'Note: This is a public demo - authenticate for full access.',
-      inputSchema: {
-        query: z
-          .string()
-          .max(500)
-          .describe(
-            'Natural language search query (max 500 chars)'
-          ),
-      },
-    },
-    async ({ query }) => {
-      try {
-        const results = await searchDocuments(query, PUBLIC_PROJECT_ID);
+let _publicLimiter: Ratelimit | null = null;
 
-        if (results.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `No documents found matching "${query}".\n\nThis is the public demo. Sign up for full access to private knowledge bases.`,
-              },
-            ],
-          };
-        }
-
-        const formattedResults = results
-          .slice(0, 10) // Limit to 10 results for public
-          .map((doc, index) => {
-            const similarity = Math.round((doc.relevance || 0) * 100);
-            let trustLevel = 'LOW';
-            if (doc.relevance! > 0.8) trustLevel = 'HIGH';
-            else if (doc.relevance! > 0.6) trustLevel = 'MEDIUM';
-
-            return `
-<chunk index="${index + 1}" trust="${trustLevel}" relevance="${similarity}%">
-  <document>
-    <title>${doc.title}</title>
-    <path>${doc.path}</path>
-    <type>${doc.type}</type>
-  </document>
-  <content>
-    ${(doc.snippet || '(No content snippet)').slice(0, 500)}
-  </content>
-</chunk>`;
-          })
-          .join('\n');
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `<search_results query="${query}" count="${Math.min(results.length, 10)}" mode="public">
-${formattedResults}
-</search_results>
-
-**Public Demo Mode**
-- Results limited to 10 matches
-- Sign up at https://quoth.triqual.dev for full access`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error searching documents: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            },
-          ],
-        };
-      }
-    }
-  );
-
-  // Tool 2: quoth_read_doc (Read-only document retrieval)
-  server.registerTool(
-    'quoth_read_doc',
-    {
-      title: 'Read Quoth Document (Public)',
-      description:
-        'Retrieves the content of a documentation file from the public knowledge base.',
-      inputSchema: {
-        doc_id: z
-          .string()
-          .max(200)
-          .describe(
-            'The document title or file path'
-          ),
-      },
-    },
-    async ({ doc_id }) => {
-      try {
-        const doc = await readDocument(doc_id, PUBLIC_PROJECT_ID);
-
-        if (!doc) {
-          const index = await buildSearchIndex(PUBLIC_PROJECT_ID);
-          const suggestions = index.documents
-            .filter(
-              (d) =>
-                d.id.toLowerCase().includes(doc_id.toLowerCase()) ||
-                doc_id.toLowerCase().includes(d.id.toLowerCase()) ||
-                d.path.toLowerCase().includes(doc_id.toLowerCase())
-            )
-            .slice(0, 3);
-
-          let suggestionText = '';
-          if (suggestions.length > 0) {
-            suggestionText = `\n\nDid you mean one of these?\n${suggestions.map((s) => `- ${s.id} (${s.path})`).join('\n')}`;
-          }
-
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Document "${doc_id}" not found.${suggestionText}\n\nUse \`quoth_search_index\` to find available documents.`,
-              },
-            ],
-          };
-        }
-
-        // Format frontmatter
-        const frontmatterYaml = Object.entries(doc.frontmatter)
-          .map(
-            ([key, value]) =>
-              `${key}: ${Array.isArray(value) ? `[${value.join(', ')}]` : value}`
-          )
-          .join('\n');
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `## Document: ${doc.title}\n\n**Path:** \`${doc.path}\`\n\n**Metadata:**\n\`\`\`yaml\n${frontmatterYaml}\n\`\`\`\n\n**Content:**\n\n${doc.content}\n\n---\n*Public demo - sign up for write access and private knowledge bases*`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error reading document: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-/**
- * Create MCP handler for public access
- */
-function createPublicHandler() {
-  return createMcpHandler(
-    (server: McpServer) => registerPublicTools(server),
-    {},
-    {
-      basePath: '/api/mcp',
-      maxDuration: 30, // Shorter timeout for public
-      verboseLogs: false,
-    }
-  );
-}
-
-/**
- * Rate limit middleware for public endpoint
- */
-async function withPublicRateLimit(
-  req: NextRequest,
-  handler: (req: NextRequest) => Promise<Response>
-): Promise<Response> {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ||
-             req.headers.get('x-real-ip') ||
-             'anonymous';
-
-  const rateLimitResult = checkRateLimit(`public:${ip}`, {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 10, // 10 requests per minute for public
+function getPublicLimiter(): Ratelimit | null {
+  if (_publicLimiter) return _publicLimiter;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  const redis = new Redis({ url, token });
+  _publicLimiter = new Ratelimit({
+    redis,
+    limiter: Ratelimit.fixedWindow(100, '1 d'),
+    prefix: 'rl:public-mcp',
   });
+  return _publicLimiter;
+}
 
-  if (!rateLimitResult.allowed) {
-    return new Response(
-      JSON.stringify({
-        error: 'rate_limit_exceeded',
-        error_description: 'Too many requests. Please wait before trying again.',
-        retry_after: Math.ceil(rateLimitResult.resetIn / 1000),
-      }),
+async function checkPublicRateLimit(req: NextRequest): Promise<Response | null> {
+  const limiter = getPublicLimiter();
+  if (!limiter) return null; // No Redis = no limit (dev mode)
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+  const { success, remaining, reset } = await limiter.limit(ip);
+  if (!success) {
+    return Response.json(
+      { error: 'Rate limit exceeded. 100 requests per day allowed.' },
       {
         status: 429,
         headers: {
-          'Content-Type': 'application/json',
-          'Retry-After': String(Math.ceil(rateLimitResult.resetIn / 1000)),
-          'X-RateLimit-Limit': '10',
-          'X-RateLimit-Remaining': String(rateLimitResult.remaining),
-          'X-RateLimit-Reset': String(Math.ceil(Date.now() / 1000 + rateLimitResult.resetIn / 1000)),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(reset),
+          'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)),
         },
-      }
+      },
     );
   }
-
-  const response = await handler(req);
-
-  // Add rate limit headers to response
-  const headers = new Headers(response.headers);
-  headers.set('X-RateLimit-Limit', '10');
-  headers.set('X-RateLimit-Remaining', String(rateLimitResult.remaining));
-  headers.set('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000 + rateLimitResult.resetIn / 1000)));
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return null;
 }
 
-const publicHandler = createPublicHandler();
+// ---------------------------------------------------------------------------
+// Doc index — built once at module load time (cached in memory)
+// ---------------------------------------------------------------------------
+
+interface DocEntry {
+  /** Relative path from content/docs/, e.g. "getting-started/quick-start.mdx" */
+  filePath: string;
+  title: string;
+  description: string;
+  content: string;
+}
+
+const DOCS_DIR = path.join(process.cwd(), 'content', 'docs');
 
 /**
- * GET handler for public MCP endpoint
+ * Recursively collect all .mdx files under a directory.
  */
+function collectMdxFiles(dir: string, base: string = dir): string[] {
+  let results: string[] = [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results = results.concat(collectMdxFiles(full, base));
+    } else if (entry.isFile() && entry.name.endsWith('.mdx')) {
+      results.push(path.relative(base, full));
+    }
+  }
+  return results;
+}
+
+/**
+ * Parse the frontmatter title/description from MDX content.
+ * Handles simple YAML frontmatter between --- delimiters.
+ */
+function parseFrontmatter(raw: string): { title: string; description: string; body: string } {
+  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+  if (!match) {
+    return { title: '', description: '', body: raw };
+  }
+  const yaml = match[1];
+  const body = match[2];
+
+  const titleMatch = yaml.match(/^title\s*:\s*["']?(.+?)["']?\s*$/m);
+  const descMatch = yaml.match(/^description\s*:\s*["']?(.+?)["']?\s*$/m);
+
+  return {
+    title: titleMatch ? titleMatch[1].trim() : '',
+    description: descMatch ? descMatch[1].trim() : '',
+    body,
+  };
+}
+
+/**
+ * Build the in-memory doc index by reading all MDX files from disk.
+ */
+function buildDocIndex(): DocEntry[] {
+  const files = collectMdxFiles(DOCS_DIR);
+  const docs: DocEntry[] = [];
+
+  for (const relPath of files) {
+    const absPath = path.join(DOCS_DIR, relPath);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(absPath, 'utf-8');
+    } catch {
+      continue;
+    }
+    const { title, description, body } = parseFrontmatter(raw);
+    docs.push({
+      filePath: relPath,
+      title: title || relPath,
+      description: description || '',
+      content: raw,
+      // body is included in content (full raw); kept separately for search
+    });
+    void body; // suppress unused warning — body is part of raw/content
+  }
+
+  return docs;
+}
+
+// Build the index once at module load.
+const DOC_INDEX: DocEntry[] = buildDocIndex();
+
+// ---------------------------------------------------------------------------
+// Tool helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple case-insensitive text search across docs.
+ * Returns docs that contain the query string in title, description, or body.
+ */
+function searchDocs(query: string): Array<{ filePath: string; title: string; description: string; snippet: string }> {
+  const q = query.toLowerCase();
+  const results: Array<{ filePath: string; title: string; description: string; snippet: string; score: number }> = [];
+
+  for (const doc of DOC_INDEX) {
+    const haystack = `${doc.title} ${doc.description} ${doc.content}`.toLowerCase();
+    if (!haystack.includes(q)) continue;
+
+    // Build a small snippet around the first match in content
+    const idx = doc.content.toLowerCase().indexOf(q);
+    let snippet = '';
+    if (idx !== -1) {
+      const start = Math.max(0, idx - 100);
+      const end = Math.min(doc.content.length, idx + 300);
+      snippet = doc.content.slice(start, end).replace(/\n+/g, ' ').trim();
+      if (start > 0) snippet = '...' + snippet;
+      if (end < doc.content.length) snippet = snippet + '...';
+    }
+
+    // Rudimentary score: title/description hits weight more
+    let score = 0;
+    if (doc.title.toLowerCase().includes(q)) score += 3;
+    if (doc.description.toLowerCase().includes(q)) score += 2;
+    if (doc.content.toLowerCase().includes(q)) score += 1;
+
+    results.push({ filePath: doc.filePath, title: doc.title, description: doc.description, snippet, score });
+  }
+
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map(({ filePath, title, description, snippet }) => ({ filePath, title, description, snippet }));
+}
+
+/**
+ * Sanitize a doc path to prevent directory traversal.
+ */
+function sanitizeDocPath(input: string): string {
+  // Normalise and strip any leading slashes/dots
+  const normalised = path.normalize(input).replace(/^(\.\.[/\\])+/, '');
+  return normalised;
+}
+
+// ---------------------------------------------------------------------------
+// MCP tool registration
+// ---------------------------------------------------------------------------
+
+function registerPublicTools(server: McpServer) {
+  // Tool 1: quoth_search_index
+  server.registerTool(
+    'quoth_search_index',
+    {
+      title: 'Search Quoth Documentation',
+      description:
+        'Performs a simple text search across the Quoth documentation. ' +
+        'Returns up to 10 relevant documents with a content snippet. ' +
+        'No authentication required — this endpoint serves Quoth\'s own docs as a public demo.',
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe('Search query (plain text, max 500 chars)'),
+      },
+    },
+    async ({ query }) => {
+      const results = searchDocs(query);
+
+      if (results.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No documentation found matching "${query}".`,
+            },
+          ],
+        };
+      }
+
+      const formatted = results
+        .map((doc, i) =>
+          `<result index="${i + 1}">
+  <path>${doc.filePath}</path>
+  <title>${doc.title}</title>
+  <description>${doc.description}</description>
+  <snippet>${doc.snippet}</snippet>
+</result>`
+        )
+        .join('\n\n');
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `<search_results query="${query}" count="${results.length}">\n${formatted}\n</search_results>`,
+          },
+        ],
+      };
+    }
+  );
+
+  // Tool 2: quoth_read_doc
+  server.registerTool(
+    'quoth_read_doc',
+    {
+      title: 'Read Quoth Documentation File',
+      description:
+        'Returns the full MDX content of a specific documentation file. ' +
+        'Use the filePath value returned by quoth_search_index, e.g. "getting-started/quick-start.mdx".',
+      inputSchema: {
+        filePath: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe('Relative path to the doc file, e.g. "getting-started/quick-start.mdx"'),
+      },
+    },
+    async ({ filePath }) => {
+      const safe = sanitizeDocPath(filePath);
+      const doc = DOC_INDEX.find((d) => d.filePath === safe);
+
+      if (!doc) {
+        // List available paths to help the caller
+        const available = DOC_INDEX.map((d) => d.filePath).join('\n');
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Document not found: "${safe}".\n\nAvailable documents:\n${available}`,
+            },
+          ],
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `# ${doc.title}\n\n**Path:** ${doc.filePath}\n\n---\n\n${doc.content}`,
+          },
+        ],
+      };
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Handler & route exports
+// ---------------------------------------------------------------------------
+
+const publicHandler = createMcpHandler(
+  (server: McpServer) => registerPublicTools(server),
+  {},
+  {
+    basePath: '/api/mcp',
+    maxDuration: 30,
+    verboseLogs: false,
+  }
+);
+
 export async function GET(req: NextRequest) {
-  return withPublicRateLimit(req, publicHandler);
+  const limited = await checkPublicRateLimit(req);
+  if (limited) return limited;
+  return publicHandler(req);
 }
 
-/**
- * POST handler for public MCP endpoint
- */
 export async function POST(req: NextRequest) {
-  return withPublicRateLimit(req, publicHandler);
+  const limited = await checkPublicRateLimit(req);
+  if (limited) return limited;
+  return publicHandler(req);
 }
