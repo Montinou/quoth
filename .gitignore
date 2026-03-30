@@ -55,3 +55,4 @@ supabase/.temp/
 .agent/
 .quoth/sessions/
 .claude
+docs/evidence-to-delete-later/

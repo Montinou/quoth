@@ -16,6 +16,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { NextRequest } from 'next/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
+
+// ---------------------------------------------------------------------------
+// Rate limiting — 100 requests per day per IP (public endpoint, no auth)
+// ---------------------------------------------------------------------------
+
+let _publicLimiter: Ratelimit | null = null;
+
+function getPublicLimiter(): Ratelimit | null {
+  if (_publicLimiter) return _publicLimiter;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  const redis = new Redis({ url, token });
+  _publicLimiter = new Ratelimit({
+    redis,
+    limiter: Ratelimit.fixedWindow(100, '1 d'),
+    prefix: 'rl:public-mcp',
+  });
+  return _publicLimiter;
+}
+
+async function checkPublicRateLimit(req: NextRequest): Promise<Response | null> {
+  const limiter = getPublicLimiter();
+  if (!limiter) return null; // No Redis = no limit (dev mode)
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+  const { success, remaining, reset } = await limiter.limit(ip);
+  if (!success) {
+    return Response.json(
+      { error: 'Rate limit exceeded. 100 requests per day allowed.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(reset),
+          'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)),
+        },
+      },
+    );
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Doc index — built once at module load time (cached in memory)
@@ -276,9 +319,13 @@ const publicHandler = createMcpHandler(
 );
 
 export async function GET(req: NextRequest) {
+  const limited = await checkPublicRateLimit(req);
+  if (limited) return limited;
   return publicHandler(req);
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await checkPublicRateLimit(req);
+  if (limited) return limited;
   return publicHandler(req);
 }
