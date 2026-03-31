@@ -30,12 +30,13 @@ export async function getClerkAuthContext(): Promise<AuthContext | null> {
 
   const claims = (sessionClaims ?? {}) as unknown as ClerkJwtClaims;
 
-  // project_id comes from user.public_metadata.default_project_id via JWT template
+  // project_id and org_id from user.public_metadata via JWT template
   let projectId = claims.project_id ?? '';
+  let resolvedOrgId = orgId ?? claims.org_id ?? '';
 
   // Fallback: if JWT template is not configured or user hasn't synced metadata,
-  // look up default_project_id from the users table
-  if (!projectId) {
+  // look up default_project_id and default_org_id from the users table
+  if (!projectId || !resolvedOrgId) {
     try {
       const { getDb } = await import('@/db/connection');
       const db = getDb();
@@ -46,9 +47,10 @@ export async function getClerkAuthContext(): Promise<AuthContext | null> {
         LIMIT 1
       `);
       const row = rows.rows[0] as { default_project_id: string | null; default_org_id: string | null } | undefined;
-      projectId = row?.default_project_id ?? '';
+      if (!projectId) projectId = row?.default_project_id ?? '';
+      if (!resolvedOrgId) resolvedOrgId = row?.default_org_id ?? '';
     } catch {
-      // DB lookup failed — proceed without project_id
+      // DB lookup failed — proceed with whatever we have
     }
   }
 
@@ -70,7 +72,7 @@ export async function getClerkAuthContext(): Promise<AuthContext | null> {
   return {
     userId,
     clerkUserId: userId,
-    orgId: orgId ?? claims.org_id ?? '',
+    orgId: resolvedOrgId,
     projectId,
     role,
     tier,

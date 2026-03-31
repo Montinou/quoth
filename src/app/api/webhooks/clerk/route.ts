@@ -82,12 +82,13 @@ async function syncClerkMetadata(clerkUserId: string) {
       if (proj) tier = proj.tier;
     }
 
-    if (!projectId) return; // No project yet — will sync on next update
+    if (!projectId && !user.defaultOrgId) return; // Nothing to sync yet
 
     const client = await clerkClient();
     await client.users.updateUserMetadata(clerkUserId, {
       publicMetadata: {
-        default_project_id: projectId,
+        default_project_id: projectId ?? undefined,
+        default_org_id: user.defaultOrgId ?? undefined,
         tier,
       },
     });

@@ -261,6 +261,9 @@ export async function POST(req: Request) {
         })
         .where(eq(users.id, user.id));
 
+      // Sync org_id to Clerk so JWT claims include it
+      void syncToClerk(userId, { default_org_id: orgId });
+
       return Response.json({ success: true, step: 1, data: meta.onboarding_data });
     }
 
@@ -322,9 +325,13 @@ export async function POST(req: Request) {
 
         await db.update(users).set(updateSet).where(eq(users.id, user.id));
 
-        // Sync default_project_id to Clerk so JWT template includes it
+        // Sync default_project_id + org_id to Clerk so JWT claims include them
         if (isFirst) {
-          void syncToClerk(userId, { default_project_id: projectId });
+          void syncToClerk(userId, {
+            default_project_id: projectId,
+            default_org_id: orgId,
+            tier: 'free',
+          });
         }
 
         return Response.json({ success: true, step: 1, data: meta.onboarding_data });
@@ -437,6 +444,18 @@ export async function POST(req: Request) {
         .update(users)
         .set({ metadata: { ...meta }, updatedAt: new Date() })
         .where(eq(users.id, user.id));
+
+      // Final comprehensive sync to Clerk — ensure all claims are populated
+      const orgId = meta.onboarding_data.orgId;
+      const projectId = meta.onboarding_data.projectIds[0];
+      if (orgId || projectId) {
+        void syncToClerk(userId, {
+          default_org_id: orgId,
+          default_project_id: projectId,
+          tier: 'free',
+          onboarding_completed: true,
+        });
+      }
 
       return Response.json({ success: true, step: 4, data: meta.onboarding_data });
     }
