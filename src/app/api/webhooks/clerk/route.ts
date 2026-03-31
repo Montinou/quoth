@@ -13,8 +13,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Webhook } from 'svix';
 import { eq, and } from 'drizzle-orm';
+import { clerkClient } from '@clerk/nextjs/server';
 import { getDb } from '@/db/connection';
-import { organizations, users, orgMembers } from '@/db/schema';
+import { organizations, users, orgMembers, projects } from '@/db/schema';
 
 // Clerk webhook secret for signature verification
 const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -28,6 +29,74 @@ interface WebhookEvent {
 /** L-05: Normalize slug to match schema CHECK (slug ~ '^[a-z0-9-]+$') */
 function normalizeSlug(raw: string | undefined | null): string {
   return (raw ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unnamed';
+}
+
+// ─── Clerk Metadata Sync ─────────────────────────────────────────
+// Fire-and-forget: ensures Clerk publicMetadata always has project_id + tier
+// so the session token claims are populated for every request.
+
+async function syncClerkMetadata(clerkUserId: string) {
+  try {
+    const db = getDb();
+
+    // Find the user's DB record
+    const [user] = await db
+      .select({
+        defaultProjectId: users.defaultProjectId,
+        defaultOrgId: users.defaultOrgId,
+      })
+      .from(users)
+      .where(eq(users.clerkUserId, clerkUserId))
+      .limit(1);
+
+    if (!user) return;
+
+    let projectId = user.defaultProjectId;
+    let tier = 'free';
+
+    // If no default project, find the first project via org membership
+    if (!projectId && user.defaultOrgId) {
+      const [firstProject] = await db
+        .select({ id: projects.id, tier: projects.tier })
+        .from(projects)
+        .where(eq(projects.orgId, user.defaultOrgId))
+        .limit(1);
+
+      if (firstProject) {
+        projectId = firstProject.id;
+        tier = firstProject.tier;
+
+        // Also persist the default in the DB for future use
+        await db
+          .update(users)
+          .set({ defaultProjectId: projectId })
+          .where(eq(users.clerkUserId, clerkUserId));
+      }
+    } else if (projectId) {
+      // Fetch the project tier
+      const [proj] = await db
+        .select({ tier: projects.tier })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+      if (proj) tier = proj.tier;
+    }
+
+    if (!projectId) return; // No project yet — will sync on next update
+
+    const client = await clerkClient();
+    await client.users.updateUserMetadata(clerkUserId, {
+      publicMetadata: {
+        default_project_id: projectId,
+        tier,
+      },
+    });
+
+    console.log(`[Clerk Webhook] Synced metadata for ${clerkUserId}: project=${projectId}, tier=${tier}`);
+  } catch (err) {
+    // Fire-and-forget: log but don't fail the webhook
+    console.error(`[Clerk Webhook] Failed to sync metadata for ${clerkUserId}:`, err);
+  }
 }
 
 // ─── User Handlers ───────────────────────────────────────────────
@@ -65,6 +134,9 @@ async function handleUserCreated(data: Record<string, any>) {
     });
 
   console.log(`[Clerk Webhook] user.created: ${data.id} (${email})`);
+
+  // Fire-and-forget: sync project_id + tier to Clerk publicMetadata
+  void syncClerkMetadata(data.id);
 }
 
 async function handleUserUpdated(data: Record<string, any>) {
@@ -82,6 +154,9 @@ async function handleUserUpdated(data: Record<string, any>) {
     .where(eq(users.clerkUserId, data.id));
 
   console.log(`[Clerk Webhook] user.updated: ${data.id}`);
+
+  // Fire-and-forget: sync project_id + tier to Clerk publicMetadata
+  void syncClerkMetadata(data.id);
 }
 
 async function handleUserDeleted(data: Record<string, any>) {
@@ -192,6 +267,12 @@ async function handleMembershipCreated(data: Record<string, any>) {
   console.log(
     `[Clerk Webhook] membership.created: user=${resolved.userId} org=${resolved.orgId} role=${data.role}`,
   );
+
+  // New org membership might give the user access to projects — sync metadata
+  const userClerkId = data.public_user_data?.user_id ?? data.user_id;
+  if (userClerkId) {
+    void syncClerkMetadata(userClerkId);
+  }
 }
 
 async function handleMembershipDeleted(data: Record<string, any>) {
