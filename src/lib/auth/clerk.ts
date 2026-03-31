@@ -10,12 +10,14 @@
 
 import { auth } from '@clerk/nextjs/server';
 import { headers } from 'next/headers';
+import { sql } from 'drizzle-orm';
 import type { AuthContext, ClerkJwtClaims } from './types';
 import { verifyAgentApiKey } from './agent-keys';
 
 /**
  * Extract AuthContext from the current Clerk session.
  * Reads session claims injected by the "quoth-mcp" JWT template.
+ * Falls back to DB lookup for project_id when JWT claim is missing.
  *
  * Returns null when no active Clerk session exists.
  */
@@ -29,12 +31,25 @@ export async function getClerkAuthContext(): Promise<AuthContext | null> {
   const claims = (sessionClaims ?? {}) as unknown as ClerkJwtClaims;
 
   // project_id comes from user.public_metadata.default_project_id via JWT template
-  const projectId = claims.project_id;
+  let projectId = claims.project_id ?? '';
+
+  // Fallback: if JWT template is not configured or user hasn't synced metadata,
+  // look up default_project_id from the users table
   if (!projectId) {
-    console.warn(
-      '[Clerk Auth] Session missing project_id claim. Ensure the quoth-mcp JWT template is configured.',
-    );
-    return null;
+    try {
+      const { getDb } = await import('@/db/connection');
+      const db = getDb();
+      const rows = await db.execute<{ default_project_id: string | null; default_org_id: string | null }>(sql`
+        SELECT default_project_id, default_org_id
+        FROM public.users
+        WHERE clerk_user_id = ${userId}
+        LIMIT 1
+      `);
+      const row = rows.rows[0] as { default_project_id: string | null; default_org_id: string | null } | undefined;
+      projectId = row?.default_project_id ?? '';
+    } catch {
+      // DB lookup failed — proceed without project_id
+    }
   }
 
   const roleMap: Record<string, AuthContext['role']> = {
