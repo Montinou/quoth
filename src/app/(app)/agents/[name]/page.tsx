@@ -65,7 +65,8 @@ interface AgentWithProjects {
   }>;
 }
 
-export default async function AgentDetailPage({ params }: { params: { name: string } }) {
+export default async function AgentDetailPage({ params }: { params: Promise<{ name: string }> }) {
+  const { name } = await params;
   const { userId } = await auth();
   if (!userId) {
     redirect('/');
@@ -87,7 +88,7 @@ export default async function AgentDetailPage({ params }: { params: { name: stri
   // Fetch agent by name
   const agentRow = await db.execute(sql`
     SELECT * FROM agents.registry
-    WHERE org_id = ${organizationId} AND agent_name = ${params.name}
+    WHERE org_id = ${organizationId} AND agent_name = ${name}
   `).then(r => r.rows[0] as unknown as AgentRow | undefined);
 
   if (!agentRow) {
