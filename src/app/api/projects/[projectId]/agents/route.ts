@@ -1,13 +1,67 @@
 /**
- * POST /api/projects/:projectId/agents — Assign an agent to a project
+ * GET    /api/projects/:projectId/agents — List agents assigned to a project
+ * POST   /api/projects/:projectId/agents — Assign an agent to a project
  * DELETE /api/projects/:projectId/agents — Remove an agent from a project
  *
- * Body: { agentId: string, role?: 'owner' | 'contributor' | 'readonly' }
+ * Body (POST/DELETE): { agentId: string, role?: 'owner' | 'contributor' | 'readonly' }
  */
 
 import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { createApiHandler } from '@/lib/api/handler';
+
+export const GET = createApiHandler(
+  { auth: 'required', rateLimit: { rpm: 60 } },
+  async (_req, ctx, params) => {
+    const projectId = params.projectId;
+    if (!ctx) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { getDb } = await import('@/db/connection');
+    const db = getDb();
+
+    const clerkId = ctx.clerkUserId ?? ctx.userId;
+    const userRow = await db.execute<{ id: string; default_org_id: string }>(sql`
+      SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${clerkId} LIMIT 1
+    `);
+    const user = userRow.rows[0] as { id: string; default_org_id: string } | undefined;
+    if (!user) return Response.json({ error: 'User not found' }, { status: 404 });
+
+    const orgId = ctx.orgId || user.default_org_id;
+
+    // Verify the project belongs to this org
+    const projectCheck = await db.execute(sql`
+      SELECT 1 FROM public.projects WHERE id = ${projectId}::uuid AND org_id = ${orgId}::uuid LIMIT 1
+    `);
+    if (!projectCheck.rows.length) {
+      return Response.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const rows = await db.execute<{
+      agent_id: string;
+      role: string;
+      assigned_at: string;
+      agent_name: string;
+      display_name: string | null;
+      instance: string;
+      status: string;
+    }>(sql`
+      SELECT
+        ap.agent_id,
+        ap.role,
+        ap.assigned_at,
+        r.agent_name,
+        r.display_name,
+        r.instance,
+        r.status
+      FROM agents.agent_projects ap
+      JOIN agents.registry r ON r.id = ap.agent_id
+      WHERE ap.project_id = ${projectId}::uuid
+      ORDER BY ap.assigned_at DESC
+    `);
+
+    return Response.json({ agents: rows.rows });
+  },
+);
 
 const AssignBody = z.object({
   agentId: z.string().uuid(),
