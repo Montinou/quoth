@@ -34,6 +34,10 @@ yarn-error.log*
 #quoth agent tools
 .quoth/
 .*
+!.npmrc
+!.gitignore
+!.env.example
+!.github
 
 # env files (can opt-in for committing if needed)
 .env.local
