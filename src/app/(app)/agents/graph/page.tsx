@@ -79,11 +79,13 @@ export default async function AgentGraphPage() {
   // Fetch agent-project assignments
   const agentIds = agents.map((a) => a.id);
   const projectIds = projects.map((p) => p.id);
+  const pgAgentIds = `{${agentIds.join(',')}}`;
+  const pgProjectIds = `{${projectIds.join(',')}}`;
   const assignments: GraphAssignmentRow[] = (agentIds.length > 0 && projectIds.length > 0)
     ? await db.execute(sql`
         SELECT agent_id, project_id, role
         FROM agents.agent_projects
-        WHERE agent_id = ANY(${agentIds}) AND project_id = ANY(${projectIds})
+        WHERE agent_id = ANY(${pgAgentIds}::uuid[]) AND project_id = ANY(${pgProjectIds}::uuid[])
       `).then(r => r.rows as unknown as GraphAssignmentRow[])
     : [];
 

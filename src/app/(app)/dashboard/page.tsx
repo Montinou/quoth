@@ -95,14 +95,16 @@ export default async function DashboardPage() {
 
   const projectIds = projects.map((p) => p.id);
   const firstProject = projects[0];
+  // Format as Postgres array literal for ANY() — Drizzle sends JS arrays as plain strings
+  const pgProjectIds = `{${projectIds.join(',')}}`;
 
   // Parallelize independent queries for ~50-60% latency reduction (3-4 RTTs → 2 RTTs)
   const [proposalCount, documentCount, initialCoverage] = await Promise.all([
     projectIds.length > 0
-      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.proposals WHERE project_id = ANY(${pgProjectIds}::uuid[])`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
       : Promise.resolve(0),
     projectIds.length > 0
-      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.documents WHERE project_id = ANY(${projectIds})`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
+      ? db.execute(sql`SELECT COUNT(*)::int AS count FROM docs.documents WHERE project_id = ANY(${pgProjectIds}::uuid[])`).then(r => (r.rows[0] as unknown as CountRow | undefined)?.count ?? 0)
       : Promise.resolve(0),
     firstProject ? getLatestCoverage(firstProject.id) : Promise.resolve(null),
   ]);

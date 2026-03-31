@@ -87,10 +87,11 @@ export default async function AgentsPage() {
   `).then(r => r.rows as unknown as AgentProjectRow[]);
 
   const agentIds = agentList.map(a => a.id);
+  const pgAgentIds = `{${agentIds.join(',')}}`;
   const assignments: AssignmentRow[] = agentIds.length > 0
     ? await db.execute(sql`
         SELECT agent_id, project_id, role FROM agents.agent_projects
-        WHERE agent_id = ANY(${agentIds})
+        WHERE agent_id = ANY(${pgAgentIds}::uuid[])
       `).then(r => r.rows as unknown as AssignmentRow[])
     : [];
 

@@ -413,6 +413,7 @@ export function registerAgentTools(server: McpServer, authContext: AuthContext) 
         // Mark fetched messages as delivered (fire-and-forget)
         if (rows.length > 0 && status === 'pending') {
           const messageIds = rows.map((r) => r.id);
+          const pgMessageIds = `{${messageIds.join(',')}}`;
           void db
             .update(messages)
             .set({ status: 'delivered', deliveredAt: new Date() })
@@ -420,7 +421,7 @@ export function registerAgentTools(server: McpServer, authContext: AuthContext) 
               and(
                 eq(messages.toAgentId, agentId),
                 eq(messages.status, 'pending'),
-                sql`${messages.id} = ANY(${messageIds})`,
+                sql`${messages.id} = ANY(${pgMessageIds}::uuid[])`,
               ),
             )
             .then(() => {});
