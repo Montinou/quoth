@@ -100,7 +100,7 @@ export async function setCachedResults(
         ${chunkIds},
         ${scores},
         ${reranked},
-        now() + ${sql.raw(`INTERVAL '${Math.max(1, Math.floor(ttlMinutes))} minutes'`)}
+        now() + (${Math.max(1, Math.floor(ttlMinutes))} * interval '1 minute')
       )
       ON CONFLICT (project_id, query_hash, embedding_model)
       DO UPDATE SET

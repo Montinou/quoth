@@ -76,7 +76,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Cosine similarity search over docs.chunks, scoped to org
   // 1 - cosine_distance = cosine similarity
-  const embeddingLiteral = `'[${queryEmbedding.join(',')}]'::vector`;
+  // Validate embedding values are all finite numbers to prevent injection via sql.raw
+  if (!queryEmbedding.every(v => typeof v === 'number' && Number.isFinite(v))) {
+    return NextResponse.json({ error: 'Invalid embedding values' }, { status: 502 });
+  }
+  const embeddingVector = `[${queryEmbedding.join(',')}]`;
 
   const rows = await db.execute(sql`
     SELECT
@@ -86,13 +90,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       c.file_path,
       c.content,
       d.doc_type,
-      1 - (c.embedding <=> ${sql.raw(embeddingLiteral)}) AS similarity
+      1 - (c.embedding <=> ${embeddingVector}::vector) AS similarity
     FROM docs.chunks c
     JOIN docs.documents d ON d.id = c.document_id
     WHERE
       d.org_id = ${ctx.orgId}::uuid
       AND c.embedding IS NOT NULL
-    ORDER BY c.embedding <=> ${sql.raw(embeddingLiteral)}
+    ORDER BY c.embedding <=> ${embeddingVector}::vector
     LIMIT 10
   `);
 

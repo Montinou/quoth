@@ -196,9 +196,9 @@ function searchDocs(query: string): Array<{ filePath: string; title: string; des
  * Sanitize a doc path to prevent directory traversal.
  */
 function sanitizeDocPath(input: string): string {
-  // Normalise and strip any leading slashes/dots
-  const normalised = path.normalize(input).replace(/^(\.\.[/\\])+/, '');
-  return normalised;
+  // Strip any path traversal sequences before normalizing
+  const stripped = input.replace(/\.\./g, '').replace(/[/\\]+/g, '/');
+  return path.normalize(stripped).replace(/^[/\\]+/, '');
 }
 
 // ---------------------------------------------------------------------------

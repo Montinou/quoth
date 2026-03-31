@@ -130,6 +130,39 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  const Step0Data = z.object({
+    orgName: z.string().min(1).max(100).optional(),
+    orgSlug: z.string().min(1).max(100).optional(),
+  }).passthrough();
+
+  const Step1Data = z.object({
+    action: z.enum(['add', 'continue']).optional(),
+    projectName: z.string().min(1).max(100).optional(),
+    projectSlug: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+  }).passthrough();
+
+  const Step2Data = z.object({
+    action: z.enum(['add', 'continue', 'skip']).optional(),
+    agentName: z.string().min(1).max(100).optional(),
+    displayName: z.string().min(1).max(100).optional(),
+    model: z.string().max(100).optional(),
+    role: z.string().max(50).optional(),
+    projectId: z.string().uuid().optional(),
+  }).passthrough();
+
+  const Step3Data = z.object({
+    genesisDepth: z.enum(['skip', 'minimal', 'standard', 'comprehensive']).optional(),
+  }).passthrough();
+
+  const stepDataSchemas: Record<number, z.ZodSchema> = {
+    0: Step0Data,
+    1: Step1Data,
+    2: Step2Data,
+    3: Step3Data,
+    4: z.record(z.unknown()),
+  };
+
   const OnboardingInput = z.object({
     step: z.number().int().min(0).max(4),
     data: z.record(z.unknown()),
@@ -140,6 +173,15 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid input' }, { status: 400 });
   }
   const { step, data } = parsed.data;
+
+  // Validate step-specific data shape
+  const stepSchema = stepDataSchemas[step];
+  if (stepSchema) {
+    const stepParsed = stepSchema.safeParse(data);
+    if (!stepParsed.success) {
+      return Response.json({ error: 'Invalid data for this step' }, { status: 400 });
+    }
+  }
 
   const db = getDb();
 
@@ -176,6 +218,20 @@ export async function POST(req: Request) {
       let orgId: string;
 
       if (existing) {
+        // Verify the current user is already a member of this org
+        const [membership] = await db
+          .select({ orgId: orgMembers.orgId })
+          .from(orgMembers)
+          .where(and(eq(orgMembers.orgId, existing.id), eq(orgMembers.userId, user.id)))
+          .limit(1);
+
+        if (!membership) {
+          return Response.json(
+            { error: 'Organization slug is already taken. Please choose a different name.' },
+            { status: 409 },
+          );
+        }
+
         orgId = existing.id;
       } else {
         const [created] = await db
@@ -388,7 +444,6 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid step' }, { status: 400 });
   } catch (err) {
     console.error('[onboarding] step', step, err);
-    const message = err instanceof Error ? err.message : 'An unexpected error occurred';
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: 'An unexpected error occurred' }, { status: 500 });
   }
 }

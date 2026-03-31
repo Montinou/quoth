@@ -68,6 +68,17 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
   };
 }
 
+/**
+ * Drizzle Neon HTTP execute returns an array-like object with a `.rows` property.
+ * This helper creates a mock result that satisfies both `result[0]` and `result.rows`.
+ */
+function dbResult(rows: Record<string, unknown>[]): Record<string, unknown>[] & { rows: Record<string, unknown>[], rowCount: number } {
+  const result = [...rows] as Record<string, unknown>[] & { rows: Record<string, unknown>[], rowCount: number };
+  result.rows = rows;
+  result.rowCount = rows.length;
+  return result;
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -80,7 +91,9 @@ beforeEach(() => {
 describe("storeMemory", () => {
   it("generates embedding and inserts with correct fields", async () => {
     const row = makeRow();
-    mockExecute.mockResolvedValueOnce([row]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent ownership check
+      .mockResolvedValueOnce(dbResult([row])); // INSERT RETURNING
 
     const result = await storeMemory(AGENT_ID, ORG_ID, {
       key: "test-key",
@@ -91,7 +104,7 @@ describe("storeMemory", () => {
     });
 
     expect(mockGenerateEmbedding).toHaveBeenCalledWith("test value");
-    expect(mockExecute).toHaveBeenCalledOnce();
+    expect(mockExecute).toHaveBeenCalledTimes(2); // agent check + INSERT
 
     // Verify returned MemoryEntry shape
     expect(result).toMatchObject({
@@ -110,7 +123,9 @@ describe("storeMemory", () => {
   it("upserts on conflict (same agent+namespace+key)", async () => {
     // First insert
     const row1 = makeRow({ value: "original" });
-    mockExecute.mockResolvedValueOnce([row1]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([row1]));
 
     await storeMemory(AGENT_ID, ORG_ID, {
       key: "test-key",
@@ -119,14 +134,16 @@ describe("storeMemory", () => {
 
     // Second insert with same key — upsert
     const row2 = makeRow({ value: "updated", tier: "working" });
-    mockExecute.mockResolvedValueOnce([row2]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([row2]));
 
     const result = await storeMemory(AGENT_ID, ORG_ID, {
       key: "test-key",
       value: "updated",
     });
 
-    expect(mockExecute).toHaveBeenCalledTimes(2);
+    expect(mockExecute).toHaveBeenCalledTimes(4); // 2 agent checks + 2 INSERTs
     expect(result.value).toBe("updated");
     // ON CONFLICT resets tier to 'working'
     expect(result.tier).toBe("working");
@@ -134,7 +151,9 @@ describe("storeMemory", () => {
 
   it("sets expires_at when ttlSeconds provided", async () => {
     const row = makeRow({ expires_at: "2026-03-30T12:00:00.000Z" });
-    mockExecute.mockResolvedValueOnce([row]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([row]));
 
     const result = await storeMemory(AGENT_ID, ORG_ID, {
       key: "ttl-key",
@@ -144,13 +163,14 @@ describe("storeMemory", () => {
 
     expect(result.expiresAt).toBeInstanceOf(Date);
     expect(result.expiresAt).not.toBeNull();
-    // The SQL includes make_interval(secs => ttlSeconds) — we verify the mock was called
-    expect(mockExecute).toHaveBeenCalledOnce();
+    expect(mockExecute).toHaveBeenCalledTimes(2); // agent check + INSERT
   });
 
   it("accepts non-string metadata and serializes to JSON", async () => {
     const row = makeRow({ metadata: { nested: { deep: true }, count: 42 } });
-    mockExecute.mockResolvedValueOnce([row]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([row]));
 
     const result = await storeMemory(AGENT_ID, ORG_ID, {
       key: "meta-key",
@@ -165,7 +185,9 @@ describe("storeMemory", () => {
     // Simulate an entry that was previously promoted to 'persistent'
     // After upsert, the ON CONFLICT clause resets tier to 'working'
     const row = makeRow({ tier: "working" });
-    mockExecute.mockResolvedValueOnce([row]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([row]));
 
     const result = await storeMemory(AGENT_ID, ORG_ID, {
       key: "test-key",
@@ -180,9 +202,11 @@ describe("storeMemory", () => {
 
 describe("searchMemory", () => {
   it("generates query embedding", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([])); // search query
 
-    await searchMemory(AGENT_ID, { query: "find something" });
+    await searchMemory(AGENT_ID, ORG_ID, { query: "find something" });
 
     expect(mockGenerateEmbedding).toHaveBeenCalledWith("find something");
   });
@@ -193,12 +217,12 @@ describe("searchMemory", () => {
       makeRow({ similarity: 0.85, key: "result-2", id: "dddddddd-1111-2222-3333-444444444444" }),
     ];
     mockExecute
-      .mockResolvedValueOnce(rows)  // search query
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult(rows))  // search query
       .mockResolvedValueOnce({});   // trackAccess
 
-    const results = await searchMemory(AGENT_ID, { query: "test query" });
+    const results = await searchMemory(AGENT_ID, ORG_ID, { query: "test query" });
 
-    // execute called at least once for the search query (trackAccess may also fire)
     expect(mockExecute).toHaveBeenCalled();
     expect(results).toHaveLength(2);
     expect(results[0].similarity).toBe(0.92);
@@ -207,33 +231,35 @@ describe("searchMemory", () => {
 
   it("boosts relevance on accessed results (fire-and-forget)", async () => {
     const rows = [makeRow({ similarity: 0.9 })];
-    // First call: search_memory, second call: trackAccess UPDATE
     mockExecute
-      .mockResolvedValueOnce(rows)   // search query
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult(rows))   // search query
       .mockResolvedValueOnce({});    // access tracking UPDATE
 
-    await searchMemory(AGENT_ID, { query: "boost test" });
+    await searchMemory(AGENT_ID, ORG_ID, { query: "boost test" });
 
     // trackAccess fires asynchronously — give it a tick
     await vi.waitFor(() => {
-      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(mockExecute).toHaveBeenCalledTimes(3); // agent check + search + trackAccess
     });
   });
 
   it("respects threshold and limit defaults", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([])); // search query
 
-    await searchMemory(AGENT_ID, { query: "defaults" });
+    await searchMemory(AGENT_ID, ORG_ID, { query: "defaults" });
 
-    // The SQL function is called with default limit=10, threshold=0.3
-    // We verify execute was called (the SQL template contains these values)
-    expect(mockExecute).toHaveBeenCalledOnce();
+    expect(mockExecute).toHaveBeenCalledTimes(2); // agent check + search
   });
 
   it("passes custom threshold and limit", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute
+      .mockResolvedValueOnce(dbResult([{ "?column?": 1 }])) // agent check
+      .mockResolvedValueOnce(dbResult([])); // search query
 
-    await searchMemory(AGENT_ID, {
+    await searchMemory(AGENT_ID, ORG_ID, {
       query: "custom params",
       limit: 5,
       threshold: 0.7,
@@ -241,7 +267,7 @@ describe("searchMemory", () => {
       tier: "persistent",
     });
 
-    expect(mockExecute).toHaveBeenCalledOnce();
+    expect(mockExecute).toHaveBeenCalledTimes(2); // agent check + search
   });
 });
 
@@ -262,7 +288,7 @@ describe("getMemory", () => {
   });
 
   it("returns null for non-existent key", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute.mockResolvedValueOnce(dbResult([]));
 
     const result = await getMemory(AGENT_ID, "default", "missing-key");
 
@@ -272,7 +298,7 @@ describe("getMemory", () => {
   it("filters expired entries (SQL WHERE clause)", async () => {
     // Expired entries are filtered by the SQL query itself.
     // An empty result set means the entry was expired or missing.
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute.mockResolvedValueOnce(dbResult([]));
 
     const result = await getMemory(AGENT_ID, "default", "expired-key");
 
@@ -303,7 +329,7 @@ describe("listMemory", () => {
       makeRow({ key: "a", namespace: "notes" }),
       makeRow({ key: "b", namespace: "notes", id: "dddddddd-1111-2222-3333-444444444444" }),
     ];
-    mockExecute.mockResolvedValueOnce(rows);
+    mockExecute.mockResolvedValueOnce(dbResult(rows));
 
     const results = await listMemory(AGENT_ID, { namespace: "notes" });
 
@@ -313,7 +339,7 @@ describe("listMemory", () => {
 
   it("filters by tier", async () => {
     const rows = [makeRow({ tier: "persistent" })];
-    mockExecute.mockResolvedValueOnce(rows);
+    mockExecute.mockResolvedValueOnce(dbResult(rows));
 
     const results = await listMemory(AGENT_ID, { tier: "persistent" });
 
@@ -322,7 +348,7 @@ describe("listMemory", () => {
   });
 
   it("paginates with limit and offset", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute.mockResolvedValueOnce(dbResult([]));
 
     await listMemory(AGENT_ID, { limit: 20, offset: 40 });
 
@@ -330,7 +356,7 @@ describe("listMemory", () => {
   });
 
   it("uses default limit=50 and offset=0", async () => {
-    mockExecute.mockResolvedValueOnce([]);
+    mockExecute.mockResolvedValueOnce(dbResult([]));
 
     await listMemory(AGENT_ID);
 
@@ -342,7 +368,7 @@ describe("listMemory", () => {
       makeRow({ key: "high", relevance_score: 0.9 }),
       makeRow({ key: "low", relevance_score: 0.3, id: "dddddddd-1111-2222-3333-444444444444" }),
     ];
-    mockExecute.mockResolvedValueOnce(rows);
+    mockExecute.mockResolvedValueOnce(dbResult(rows));
 
     const results = await listMemory(AGENT_ID);
 

@@ -20,9 +20,13 @@ import {
 
 
 async function authorize(): Promise<Response | null> {
-  const { userId } = await auth();
+  const { userId, orgRole } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Only org admins/owners can manage QStash schedules
+  if (orgRole !== 'org:admin' && orgRole !== 'org:owner') {
+    return Response.json({ error: "Forbidden: admin role required" }, { status: 403 });
   }
   return null;
 }
@@ -58,9 +62,8 @@ export async function POST(req: NextRequest) {
         "QStash schedules created. Consolidation runs hourly, cache cleanup runs daily at 03:00 UTC.",
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[admin/setup-schedules] Failed:", msg);
-    return Response.json({ error: msg }, { status: 500 });
+    console.error("[admin/setup-schedules] Failed:", err);
+    return Response.json({ error: "Failed to create schedules" }, { status: 500 });
   }
 }
 
@@ -75,8 +78,7 @@ export async function DELETE(_req: NextRequest) {
       message: "All QStash schedules removed.",
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[admin/setup-schedules] Remove failed:", msg);
-    return Response.json({ error: msg }, { status: 500 });
+    console.error("[admin/setup-schedules] Remove failed:", err);
+    return Response.json({ error: "Failed to remove schedules" }, { status: 500 });
   }
 }
