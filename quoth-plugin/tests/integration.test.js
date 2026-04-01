@@ -61,4 +61,33 @@ describe('integration: db + pipeline', () => {
     const content = JSON.parse(callResult.result.content[0].text)
     expect(content.running).toBe(false)
   })
+
+  it('quoth_propose_update returns error when pattern not found', () => {
+    const messages = [
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}',
+      '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"quoth_propose_update","arguments":{"patternId":"nonexistent-id"}}}'
+    ].join('\n')
+
+    const result = execSync(
+      `printf '%s\\n' ${messages.split('\n').map(m => `'${m}'`).join(' ')} | QUOTH_HOME=${tmpDir} node ${join(__dirname, '../mcp/quoth-learning-server.js')}`,
+      { encoding: 'utf8', timeout: 10000 }
+    )
+
+    const lines = result.trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
+    const toolResponse = lines.find(l => l.id === 2)
+    expect(toolResponse.result).toBeDefined()
+    const parsed = JSON.parse(toolResponse.result.content[0].text)
+    expect(parsed).toHaveProperty('error')
+  })
+
+  it('tools/list includes quoth_propose_update', () => {
+    const result = execSync(
+      `printf '%s\\n%s\\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | QUOTH_HOME=${tmpDir} node ${join(__dirname, '../mcp/quoth-learning-server.js')}`,
+      { encoding: 'utf8', timeout: 5000 }
+    )
+    const lines = result.trim().split('\n').map(l => JSON.parse(l))
+    const toolsListResponse = lines.find(l => l.id === 2)
+    const toolNames = toolsListResponse.result.tools.map(t => t.name)
+    expect(toolNames).toContain('quoth_propose_update')
+  })
 })

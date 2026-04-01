@@ -6,6 +6,7 @@ const path = require('path')
 const os = require('os')
 const readline = require('readline')
 const { spawnSync } = require('child_process')
+const { promotePattern } = require(path.join(__dirname, '../daemon/lib/promote.js'))
 
 const JSONRPC_VERSION = '2.0'
 const MCP_PROTOCOL_VERSION = '2024-11-05'
@@ -50,12 +51,13 @@ const TOOLS = [
   },
   {
     name: 'quoth_top_patterns',
-    description: 'Get top-N patterns by confidence score, optionally filtered by tags',
+    description: 'Get top-N patterns by confidence score, optionally filtered by tags and reranked by Jina',
     inputSchema: {
       type: 'object',
       properties: {
         limit: { type: 'number', default: 5 },
-        tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags' }
+        tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags' },
+        query: { type: 'string', description: 'Optional semantic query — triggers Jina reranking if JINA_API_KEY is set' }
       }
     }
   },
@@ -74,10 +76,21 @@ const TOOLS = [
     name: 'quoth_daemon_status',
     description: 'Check if the Quoth learning daemon is running',
     inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'quoth_propose_update',
+    description: 'Manually promote a high-confidence local pattern to the Quoth cloud index without waiting for the nightly cycle',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        patternId: { type: 'string', description: 'Local pattern ID to promote' }
+      },
+      required: ['patternId']
+    }
   }
 ]
 
-function handleTool(name, args) {
+async function handleTool(name, args) {
   const db = getDb()
   switch (name) {
     case 'quoth_log_outcome': {
@@ -92,6 +105,13 @@ function handleTool(name, args) {
     }
     case 'quoth_top_patterns': {
       const patterns = db.getTopPatterns(args.limit || 5, args.tags || [])
+      if (args.query && process.env.JINA_API_KEY && patterns.length > 0) {
+        try {
+          const { rerankPatterns } = require(path.join(__dirname, '../daemon/lib/rerank.js'))
+          const reranked = await rerankPatterns(args.query, patterns)
+          return { patterns: reranked }
+        } catch {}
+      }
       return { patterns }
     }
     case 'quoth_seed_from_exolar': {
@@ -130,6 +150,14 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
         return { running: false, stalePid: pid }
       }
     }
+    case 'quoth_propose_update': {
+      const pattern = db.getPattern(args.patternId)
+      if (!pattern) return { error: `Pattern '${args.patternId}' not found in local DB` }
+      const result = await promotePattern(pattern)
+      if (!result) return { error: 'Promotion failed — check QUOTH_API_KEY and daemon logs' }
+      db.markPromoted(pattern.id, result.documentId, pattern.confidence)
+      return { promoted: true, documentId: result.documentId, version: result.version, status: result.status }
+    }
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -139,7 +167,7 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
 function send(obj) { process.stdout.write(JSON.stringify(obj) + '\n') }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
-rl.on('line', (line) => {
+rl.on('line', async (line) => {
   let msg
   try { msg = JSON.parse(line) } catch { return }
 
@@ -157,7 +185,7 @@ rl.on('line', (line) => {
       return
     }
     try {
-      const result = handleTool(msg.params.name, msg.params.arguments || {})
+      const result = await handleTool(msg.params.name, msg.params.arguments || {})
       send({ jsonrpc: JSONRPC_VERSION, id: msg.id, result: {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
       }})
