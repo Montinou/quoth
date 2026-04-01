@@ -203,9 +203,11 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autono
 - Debug: `QUOTH_DEBUG=true`
 
 ### New MCP Tools (quoth-learning)
-- `quoth_log_outcome` — record pattern success/failure
-- `quoth_top_patterns` — get top-N scored patterns
-- `quoth_daemon_status` — check daemon health
+- `quoth_log_outcome` — record pattern success/failure (+0.03/-0.03 confidence delta)
+- `quoth_score_pattern` — manually adjust a pattern's confidence score
+- `quoth_top_patterns` — get top-N scored patterns (optionally filtered by tags)
+- `quoth_seed_from_exolar` — import Exolar clustered failures as pattern candidates
+- `quoth_daemon_status` — check daemon health (running, PID, last log lines)
 
 ### Skills
 - `/patterns` — browse confidence-scored pattern library
