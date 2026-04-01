@@ -8,6 +8,7 @@ const { createDb } = require('./db.js')
 const { judge } = require('./pipeline/judge.js')
 const { distill } = require('./pipeline/distill.js')
 const { consolidate } = require('./pipeline/consolidate.js')
+const { promotePattern } = require('./lib/promote.js')
 
 // --- Paths ---
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
@@ -129,8 +130,11 @@ async function processEntry({ entry, filePath, line }) {
       return
     }
 
-    const distilled = distill(entry)
-    const similarPatterns = db.getTopPatterns(3, distilled.tags.length > 0 ? distilled.tags : [])
+    const distilled = await distill(entry)
+    const similarTags = distilled.tags.length > 0 ? distilled.tags : []
+    const similarPatterns = distilled.embedding
+      ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
+      : db.getTopPatterns(3, similarTags)
     const consolidation = consolidate(distilled, similarPatterns)
 
     if (consolidation.action === 'strengthen' && consolidation.targetId) {
@@ -145,7 +149,8 @@ async function processEntry({ entry, filePath, line }) {
         action: distilled.pattern,
         confidence: 0.5,
         tags: distilled.tags,
-        source: 'distilled'
+        source: 'distilled',
+        embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
       })
       log('info', 'New pattern', { id: distilled.id })
     }
@@ -191,14 +196,16 @@ function scheduleDeepConsolidate() {
   const msUntil = next3am - now
 
   deepConsolidateTimer = setTimeout(() => {
-    runDeepConsolidate()
-    setInterval(runDeepConsolidate, 24 * 60 * 60 * 1000)
+    runDeepConsolidate().catch(err => log('error', 'runDeepConsolidate failed', { error: err.message }))
+    setInterval(() => {
+      runDeepConsolidate().catch(err => log('error', 'runDeepConsolidate failed', { error: err.message }))
+    }, 24 * 60 * 60 * 1000)
   }, msUntil)
 
   log('info', `Deep consolidation in ${Math.round(msUntil / 60000)}m`)
 }
 
-function runDeepConsolidate() {
+async function runDeepConsolidate() {
   log('info', 'Starting deep consolidation')
   try {
     const patterns = db.getTopPatterns(20)
@@ -230,6 +237,31 @@ Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives"
       db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(merge.archive)
     }
     log('info', 'Deep consolidation done', { merged: (result.merges||[]).length, archived: (result.archives||[]).length })
+
+    // Promote high-confidence patterns to Quoth cloud
+    try {
+      const candidates = db.getPromotionCandidates()
+      log('info', `Found ${candidates.length} promotion candidates`)
+
+      for (const pattern of candidates) {
+        const needsPromotion = !pattern.promoted_at ||
+          (pattern.confidence - (pattern.promoted_confidence || 0)) > 0.1
+        if (!needsPromotion) continue
+
+        const result = await promotePattern(pattern)
+        if (result) {
+          db.markPromoted(pattern.id, result.documentId, pattern.confidence)
+          log('info', 'Pattern promoted to cloud', {
+            id: pattern.id,
+            documentId: result.documentId,
+            version: result.version,
+            status: result.status
+          })
+        }
+      }
+    } catch (err) {
+      log('error', 'Promotion phase failed', { error: err.message })
+    }
   } catch (err) {
     log('error', 'Deep consolidation failed', { error: err.message })
   }
