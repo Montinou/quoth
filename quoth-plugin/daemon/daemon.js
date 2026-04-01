@@ -262,6 +262,18 @@ Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives"
     } catch (err) {
       log('error', 'Promotion phase failed', { error: err.message })
     }
+
+    // Exolar cross-validation placeholder
+    // Full cross-validation requires MCP context (daemon runs outside Claude Code).
+    // The actual validation happens when triqual_load_context runs and compares
+    // Exolar failure rates against pattern confidence.
+    // Future: daemon HTTP calls to Exolar API directly.
+    try {
+      const candidates = db.getPromotionCandidates()
+      log('info', `Exolar cross-validation: ${candidates.length} patterns eligible for validation`)
+    } catch (err) {
+      log('debug', 'Exolar cross-validation skipped', { error: err.message })
+    }
   } catch (err) {
     log('error', 'Deep consolidation failed', { error: err.message })
   }
