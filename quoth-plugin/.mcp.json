@@ -2,7 +2,7 @@
   "mcpServers": {
     "quoth": {
       "type": "http",
-      "url": "https://quoth.triqual.dev/api/mcp/sse"
+      "url": "https://quoth.triqual.dev/api/mcp"
     }
   }
 }

@@ -9,6 +9,7 @@
  */
 
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
+import { verifyToken as clerkVerifyToken } from '@clerk/backend';
 import { registerAllTools } from '@/lib/mcp/register';
 import { verifyAgentApiKey } from '@/lib/auth/agent-keys';
 import { getArchitectPrompt, getAuditorPrompt, getDocumenterPrompt } from '@/lib/quoth/prompts';
@@ -43,7 +44,6 @@ async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInf
         tier: 'team',
         isAgent: true,
         agentId: payload.agent_id,
-        scopes: payload.scopes,
       } satisfies AuthContext,
     };
   }
@@ -53,7 +53,6 @@ async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInf
   if (!secretKey) return undefined;
 
   try {
-    const { verifyToken: clerkVerifyToken } = await import('@clerk/backend');
     const clerkPayload = await clerkVerifyToken(bearerToken, { secretKey });
     if (!clerkPayload?.sub) return undefined;
 
@@ -70,7 +69,8 @@ async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInf
       member: 'editor',
       owner: 'owner',
     };
-    const role: AuthContext['role'] = roleMap[(claims.org_role as string) ?? ''] ?? 'viewer';
+    const rawRole = (claims.org_role as string) ?? '';
+    const role: AuthContext['role'] = roleMap[rawRole] ?? 'viewer';
     const tier = (['free', 'pro', 'team', 'enterprise'].includes((claims.tier as string) ?? '')
       ? claims.tier
       : 'free') as AuthContext['tier'];
@@ -104,15 +104,7 @@ function getAuthContext(req: Request): AuthContext {
   if (authInfo?.extra) {
     return authInfo.extra as AuthContext;
   }
-  return {
-    userId: 'anonymous',
-    clerkUserId: null,
-    orgId: '',
-    projectId: '',
-    role: 'viewer',
-    tier: 'free',
-    isAgent: false,
-  };
+  throw new Error('[MCP] Missing auth context on authenticated route — withMcpAuth misconfigured');
 }
 
 function setupServer(server: McpServer, authContext: AuthContext) {
