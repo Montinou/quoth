@@ -5,7 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const readline = require('readline')
-const { execSync } = require('child_process')
+const { spawnSync } = require('child_process')
 
 const JSONRPC_VERSION = '2.0'
 const MCP_PROTOCOL_VERSION = '2024-11-05'
@@ -103,10 +103,13 @@ For each cluster, write a JSON line to: ${trajFile}
 Format: {"event":"exolar_seed","session":"${sessionId}","task":"<cluster description>","outcome":"failure","pattern_used":"<error type>","agent":"exolar-importer"}
 One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar_data tool.`
       try {
-        execSync(
-          `echo ${JSON.stringify(prompt)} | claude -p --model claude-haiku-4-5-20251001 --output-format text`,
-          { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'ignore'], detached: false }
-        )
+        fs.mkdirSync(TRAJECTORIES_DIR, { recursive: true })
+        spawnSync('claude', ['-p', '--model', 'claude-haiku-4-5-20251001', '--output-format', 'text'], {
+          input: prompt,
+          encoding: 'utf8',
+          timeout: 60000,
+          stdio: ['pipe', 'pipe', 'ignore']
+        })
         return { seeded: true, trajectoryFile: trajFile }
       } catch (err) {
         return { seeded: false, error: err.message }
@@ -149,6 +152,10 @@ rl.on('line', (line) => {
   } else if (msg.method === 'tools/list') {
     send({ jsonrpc: JSONRPC_VERSION, id: msg.id, result: { tools: TOOLS } })
   } else if (msg.method === 'tools/call') {
+    if (!msg.params || !msg.params.name) {
+      send({ jsonrpc: JSONRPC_VERSION, id: msg.id, error: { code: -32602, message: 'Invalid params' } })
+      return
+    }
     try {
       const result = handleTool(msg.params.name, msg.params.arguments || {})
       send({ jsonrpc: JSONRPC_VERSION, id: msg.id, result: {
