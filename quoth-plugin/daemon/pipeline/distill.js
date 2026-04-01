@@ -18,7 +18,7 @@ function makeId(content) {
   return crypto.createHash('sha1').update(content).digest('hex').slice(0, 12)
 }
 
-function distill(entry) {
+async function distill(entry) {
   const prompt = PROMPT
     .replace('{{agent}}', entry.agent || 'unknown')
     .replace('{{task}}', entry.task || 'unknown')
@@ -37,7 +37,12 @@ function distill(entry) {
     if (start === -1) throw new Error('No JSON')
     const result = JSON.parse(raw.slice(start))
     const id = makeId(result.pattern)
-    return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow' }
+    let embedding = null
+    try {
+      const { generateEmbedding } = require('../lib/embed.js')
+      embedding = await generateEmbedding(result.pattern)
+    } catch {}
+    return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow', embedding, source: 'distilled' }
   } catch (err) {
     const fallbackContent = entry.pattern_used || `${entry.agent}: ${entry.task}`
     return {
@@ -46,7 +51,9 @@ function distill(entry) {
       tags: [],
       applicability: 'narrow',
       fallback: true,
-      error: err.message
+      error: err.message,
+      embedding: null,
+      source: 'distilled'
     }
   }
 }

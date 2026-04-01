@@ -94,9 +94,14 @@ async function handleTool(name, args) {
   const db = getDb()
   switch (name) {
     case 'quoth_log_outcome': {
-      const delta = args.result === 'success' ? 0.03 : -0.03
-      db.applyConfidenceDelta(args.patternId, delta)
-      return { logged: true, patternId: args.patternId, delta }
+      if (db.applyBayesianUpdate) {
+        db.applyBayesianUpdate(args.patternId, args.result)
+      } else {
+        const delta = args.result === 'success' ? 0.03 : -0.03
+        db.applyConfidenceDelta(args.patternId, delta)
+      }
+      const p = db.getPattern(args.patternId)
+      return { logged: true, patternId: args.patternId, result: args.result, confidence: p?.confidence }
     }
     case 'quoth_score_pattern': {
       db.applyConfidenceDelta(args.patternId, args.delta)
@@ -120,7 +125,7 @@ async function handleTool(name, args) {
       const trajFile = path.join(TRAJECTORIES_DIR, `${sessionId}.jsonl`)
       const prompt = `Query Exolar for clustered failures (dataset: clustered_failures${args.projectId ? `, project: ${args.projectId}` : ''}).
 For each cluster, write a JSON line to: ${trajFile}
-Format: {"event":"exolar_seed","session":"${sessionId}","task":"<cluster description>","outcome":"failure","pattern_used":"<error type>","agent":"exolar-importer"}
+Format: {"event":"exolar_seed","session":"${sessionId}","task":"<cluster description>","outcome":"failure","pattern_used":"<error type>","agent":"exolar-importer","source":"exolar-seeded"}
 One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar_data tool.`
       try {
         fs.mkdirSync(TRAJECTORIES_DIR, { recursive: true })

@@ -149,7 +149,7 @@ async function processEntry({ entry, filePath, line }) {
         action: distilled.pattern,
         confidence: 0.5,
         tags: distilled.tags,
-        source: 'distilled',
+        source: distilled.source || entry.source || 'distilled',
         embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
       })
       log('info', 'New pattern', { id: distilled.id })
