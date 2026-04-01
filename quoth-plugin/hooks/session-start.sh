@@ -18,7 +18,6 @@ main() {
   # Create/restore session ID
   local session_id
   session_id=$(get_or_create_session_id)
-  export QUOTH_SESSION_ID="${session_id}"
   log_debug "Session: ${session_id}"
 
   # Get top patterns for context injection (non-blocking — if it fails, we just skip)

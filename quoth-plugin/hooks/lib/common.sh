@@ -8,7 +8,7 @@ QUOTH_DAEMON_LOG="${QUOTH_HOME}/daemon.log"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 # Ensure quoth home exists
-mkdir -p "${QUOTH_HOME}" "${QUOTH_TRAJECTORIES}"
+mkdir -p "${QUOTH_HOME}" "${QUOTH_TRAJECTORIES}" || true
 
 log_debug() {
   if [ "${QUOTH_DEBUG:-}" = "true" ]; then
@@ -73,12 +73,13 @@ start_daemon() {
   local daemon_js="${PLUGIN_ROOT}/daemon/daemon.js"
   if [ ! -f "${daemon_js}" ]; then
     log_debug "daemon.js not found at ${daemon_js}"
-    return 1
+    return 0
   fi
   QUOTH_HOME="${QUOTH_HOME}" nohup node "${daemon_js}" \
     >> "${QUOTH_DAEMON_LOG}" 2>&1 &
-  echo $! > "${QUOTH_DAEMON_PID}"
-  log_debug "Daemon started with PID $!"
+  local daemon_pid=$!
+  echo "${daemon_pid}" > "${QUOTH_DAEMON_PID}"
+  log_debug "Daemon started with PID ${daemon_pid}"
 }
 
 # Call quoth-learning MCP tool (fire-and-forget)
