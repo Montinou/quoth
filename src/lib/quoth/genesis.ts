@@ -11,7 +11,7 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { AuthContext } from '../auth/mcp-auth';
+import type { AuthContext } from '../auth/types';
 import { FRONTMATTER_TEMPLATE } from './prompt-constants';
 
 /**
