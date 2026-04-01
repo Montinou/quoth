@@ -97,16 +97,7 @@ For clients that require Server-Sent Events transport:
 
 ```bash
 claude mcp add --transport sse quoth \
-  "https://quoth.triqual.dev/api/mcp/sse?token=YOUR_TOKEN"
-```
-
-## Public Demo (No Auth)
-
-For testing without authentication (read-only access):
-
-```bash
-claude mcp add --transport http quoth-public \
-  https://quoth.triqual.dev/api/mcp/public
+  "https://quoth.triqual.dev/api/sse?token=YOUR_TOKEN"
 ```
 
 ## Agent-to-Agent Bus Setup
