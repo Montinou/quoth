@@ -15,10 +15,11 @@
  */
 
 
+import { randomBytes } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { getAuthContext } from '@/lib/auth/clerk';
-import { getSecureDb } from '@/db/connection';
+import { getDb, getSecureDb } from '@/db/connection';
 import { agentApiKeys, agentRegistry } from '@/db/schema';
 import { generateAgentApiKey } from '@/lib/auth/agent-keys';
 
@@ -46,11 +47,12 @@ export async function POST(req: Request): Promise<Response> {
   const db = await getSecureDb(ctx.orgId, ctx.userId);
 
   // Resolve agentId: use provided agentId (must belong to org), or fall back to
-  // the caller's own agentId (when authenticated via an agent key).
+  // the caller's own agentId (when authenticated via an agent key), or
+  // auto-upsert a default claude-code agent for human callers.
   let agentId: string;
 
   if (body.agentId) {
-    // Verify the agent belongs to the caller's org
+    // Caller specified an agent — verify it belongs to this org
     const [agent] = await db
       .select({ id: agentRegistry.id })
       .from(agentRegistry)
@@ -68,13 +70,48 @@ export async function POST(req: Request): Promise<Response> {
 
     agentId = agent.id;
   } else if (ctx.isAgent && ctx.agentId) {
-    // Authenticated as an agent — generate key for itself
+    // Agent generating a key for itself
     agentId = ctx.agentId;
   } else {
-    return Response.json(
-      { error: 'Provide "agentId" in the request body to specify the target agent.' },
-      { status: 400 },
-    );
+    // Human caller with no agentId — auto-upsert the org's default claude-code agent
+    if (!ctx.orgId) {
+      return Response.json({ error: 'No organization found for your account.' }, { status: 400 });
+    }
+
+    const rawDb = getDb();
+
+    const [existing] = await rawDb
+      .select({ id: agentRegistry.id })
+      .from(agentRegistry)
+      .where(
+        and(
+          eq(agentRegistry.orgId, ctx.orgId),
+          eq(agentRegistry.agentName, 'claude-code'),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      agentId = existing.id;
+    } else {
+      const [created] = await rawDb
+        .insert(agentRegistry)
+        .values({
+          orgId: ctx.orgId,
+          agentName: 'claude-code',
+          displayName: 'Claude Code',
+          instance: `user-${ctx.userId}`,
+          role: 'agent',
+          signingKey: randomBytes(32).toString('hex'),
+        })
+        .returning({ id: agentRegistry.id });
+
+      if (!created) {
+        return Response.json({ error: 'Failed to initialize agent.' }, { status: 500 });
+      }
+
+      agentId = created.id;
+    }
   }
 
   // Generate and store the key
