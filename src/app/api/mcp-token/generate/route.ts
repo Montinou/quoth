@@ -78,49 +78,59 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: 'No organization found for your account.' }, { status: 400 });
     }
 
-    const rawDb = getDb();
+    const serviceDb = getDb();
 
-    const [existing] = await rawDb
-      .select({ id: agentRegistry.id })
-      .from(agentRegistry)
-      .where(
-        and(
-          eq(agentRegistry.orgId, ctx.orgId),
-          eq(agentRegistry.agentName, 'claude-code'),
-        ),
-      )
-      .limit(1);
+    // Upsert: insert the claude-code agent, ignore if it already exists
+    const [created] = await serviceDb
+      .insert(agentRegistry)
+      .values({
+        orgId: ctx.orgId,
+        agentName: 'claude-code',
+        displayName: 'Claude Code',
+        instance: `user-${ctx.userId}`,
+        role: 'agent',
+        signingKey: randomBytes(32).toString('hex'),
+      })
+      .onConflictDoNothing()
+      .returning({ id: agentRegistry.id });
 
-    if (existing) {
-      agentId = existing.id;
+    // If insert was a no-op (conflict), fetch the existing row
+    if (created) {
+      agentId = created.id;
     } else {
-      const [created] = await rawDb
-        .insert(agentRegistry)
-        .values({
-          orgId: ctx.orgId,
-          agentName: 'claude-code',
-          displayName: 'Claude Code',
-          instance: `user-${ctx.userId}`,
-          role: 'agent',
-          signingKey: randomBytes(32).toString('hex'),
-        })
-        .returning({ id: agentRegistry.id });
+      const [existing] = await serviceDb
+        .select({ id: agentRegistry.id })
+        .from(agentRegistry)
+        .where(
+          and(
+            eq(agentRegistry.orgId, ctx.orgId),
+            eq(agentRegistry.agentName, 'claude-code'),
+          ),
+        )
+        .limit(1);
 
-      if (!created) {
+      if (!existing) {
         return Response.json({ error: 'Failed to initialize agent.' }, { status: 500 });
       }
 
-      agentId = created.id;
+      agentId = existing.id;
     }
   }
 
   // Generate and store the key
-  const { key: rawKey } = await generateAgentApiKey({
-    agentId,
-    orgId: ctx.orgId,
-    label: body.label,
-    createdBy: ctx.isAgent ? undefined : ctx.userId,
-  });
+  let rawKey: string;
+  try {
+    const { key } = await generateAgentApiKey({
+      agentId,
+      orgId: ctx.orgId,
+      label: body.label,
+      createdBy: ctx.isAgent ? undefined : ctx.userId,
+    });
+    rawKey = key;
+  } catch (err) {
+    console.error('[generate-token] Key generation failed:', err);
+    return Response.json({ error: 'Failed to generate token.' }, { status: 500 });
+  }
 
   // Return updated key list (excluding the one just created's hash — only prefix visible)
   const keys = await db
