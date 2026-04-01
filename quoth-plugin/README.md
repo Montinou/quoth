@@ -31,7 +31,7 @@ This installs:
 ### MCP Only (No Local Memory)
 
 ```bash
-claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp/sse
 ```
 
 ## Getting Started
