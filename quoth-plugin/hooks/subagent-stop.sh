@@ -1,58 +1,40 @@
 #!/usr/bin/env bash
-# Quoth Memory v2.0 - Subagent Stop Hook
-# Instructs subagent to document findings (except quoth-memory)
-
-set -e
+# Quoth Plugin - SubagentStop Hook
+# Logs agent outcome to trajectory JSONL (fire-and-forget)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/common.sh"
-
-# Read input from stdin
-INPUT=$(cat)
-
-SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%s)}"
-
-# ============================================================================
-# MAIN LOGIC
-# ============================================================================
+source "${SCRIPT_DIR}/lib/common.sh"
 
 main() {
-    # Extract subagent name
-    local subagent_name=$(echo "$INPUT" | grep -o '"subagent_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || echo "")
+  read_hook_input || true
 
-    # Exempt quoth-memory
-    if [ "$subagent_name" = "quoth-memory" ]; then
-        output_empty
-        exit 0
-    fi
+  local input="${_HOOK_INPUT}"
+  local session_id
+  session_id=$(get_or_create_session_id)
 
-    # Skip if no config
-    if ! config_exists; then
-        output_empty
-        exit 0
-    fi
+  # Extract fields from hook input
+  local agent_name=""
+  local outcome=""
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-    # Check if session folder exists
-    if ! session_folder_exists "$SESSION_ID"; then
-        output_empty
-        exit 0
-    fi
+  if command -v jq >/dev/null 2>&1; then
+    agent_name=$(echo "${input}" | jq -r '.agent_name // .agentName // "unknown"' 2>/dev/null || echo "unknown")
+    outcome=$(echo "${input}" | jq -r '.outcome // "unknown"' 2>/dev/null || echo "unknown")
+  fi
 
-    # Only remind if quoth tools were used
-    if quoth_tools_were_used; then
-        local doc_msg="**Document your findings**
+  # Build trajectory entry
+  local project_dir="${PWD}"
+  local entry
+  entry=$(printf '{"ts":"%s","session":"%s","event":"agent_stop","agent":"%s","outcome":"%s","project":"%s"}' \
+    "${ts}" "${session_id}" "${agent_name}" "${outcome}" "${project_dir}")
 
-Before completing, update the session log with:
-- What approach did you take?
-- What patterns did you discover?
-- What errors did you encounter?
+  # Append to trajectory file (non-blocking)
+  append_trajectory "${entry}"
+  log_debug "Logged trajectory: ${entry}"
 
-Log location: \`.quoth/sessions/$SESSION_ID/log.md\`"
-
-        output_context "$doc_msg"
-    else
-        output_empty
-    fi
+  output_empty
 }
 
-main
+main "$@"
+exit 0  # ALWAYS exit 0

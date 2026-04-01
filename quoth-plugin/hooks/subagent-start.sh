@@ -1,53 +1,32 @@
 #!/usr/bin/env bash
-# Quoth Memory v2.0 - Subagent Start Hook
-# Injects context before subagents run (except quoth-memory)
-
-set -e
+# Quoth Plugin - SubagentStart Hook
+# Injects top relevant patterns into the agent's starting context
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/common.sh"
-
-# Read input from stdin
-INPUT=$(cat)
-
-SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%s)}"
-
-# ============================================================================
-# MAIN LOGIC
-# ============================================================================
+source "${SCRIPT_DIR}/lib/common.sh"
 
 main() {
-    # Extract subagent name
-    local subagent_name=$(echo "$INPUT" | grep -o '"subagent_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || echo "")
+  read_hook_input || true
 
-    # Exempt quoth-memory from context injection
-    if [ "$subagent_name" = "quoth-memory" ]; then
-        output_empty
-        exit 0
-    fi
+  # Extract agent name from hook input
+  local agent_name=""
+  if command -v jq >/dev/null 2>&1; then
+    agent_name=$(echo "${_HOOK_INPUT}" | jq -r '.agent_name // .agentName // ""' 2>/dev/null || echo "")
+  fi
 
-    # Skip if no config
-    if ! config_exists; then
-        output_empty
-        exit 0
-    fi
+  # Get top patterns — fire off silently, inject if available
+  local patterns=""
+  patterns=$(claude mcp call quoth-learning quoth_top_patterns '{"limit":3}' 2>/dev/null) || true
 
-    # Build context message for subagent
-    local session_dir=$(get_session_folder "$SESSION_ID")
-    local context_msg="**Quoth Memory Context**
+  if [ -n "${patterns}" ] && [ "${patterns}" != "null" ]; then
+    output_system_message "[Quoth] Learned patterns for this task:
+${patterns}
 
-Before starting, consult these local knowledge files:
-- \`.quoth/patterns.md\` - Local patterns and conventions
-- \`.quoth/errors.md\` - Known pitfalls to avoid
-- \`.quoth/decisions.md\` - Architecture decisions"
-
-    # Add session context if exists
-    if [ -d "$session_dir" ]; then
-        context_msg="$context_msg
-- \`.quoth/sessions/$SESSION_ID/context.md\` - Session-specific context"
-    fi
-
-    output_context "$context_msg"
+Apply these patterns where relevant."
+  else
+    output_empty
+  fi
 }
 
-main
+main "$@"
+exit 0  # ALWAYS exit 0
