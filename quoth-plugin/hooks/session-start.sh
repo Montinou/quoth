@@ -1,103 +1,43 @@
 #!/usr/bin/env bash
-# Quoth Memory v2.0 - Session Start Hook
-# Initializes session, spawns quoth-memory for context injection
-
-set -e
+# Quoth Plugin - SessionStart Hook
+# Ensures daemon is running; injects top patterns into context
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/common.sh"
-
-# Read input from stdin
-INPUT=$(cat)
-
-# Get session ID
-SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%s)}"
-
-# ============================================================================
-# MAIN LOGIC
-# ============================================================================
+source "${SCRIPT_DIR}/lib/common.sh"
 
 main() {
-    # 1. Initialize session state (existing behavior)
-    local config_path=$(find_quoth_config)
-    local project_id=""
-    if [ -n "$config_path" ]; then
-        project_id=$(get_config_value "project_id" "$config_path")
-    fi
-    init_session "$project_id"
+  read_hook_input || true
 
-    # 2. Initialize .quoth/ folder if config exists
-    if config_exists; then
-        # Ensure local folder structure exists
-        init_quoth_local_folder
+  # Ensure daemon is running (start if dead/missing)
+  if ! daemon_is_running; then
+    log_debug "Daemon not running, starting..."
+    start_daemon
+    sleep 0.5  # brief wait for PID file to be written
+  fi
 
-        # Initialize session folder
-        local session_dir=$(init_session_folder "$SESSION_ID")
+  # Create/restore session ID
+  local session_id
+  session_id=$(get_or_create_session_id)
+  export QUOTH_SESSION_ID="${session_id}"
+  log_debug "Session: ${session_id}"
 
-        # Clean up old sessions (7 days)
-        cleanup_old_sessions 7
+  # Get top patterns for context injection (non-blocking — if it fails, we just skip)
+  local patterns_context=""
+  if daemon_is_running; then
+    patterns_context=$(get_top_patterns_context 5 2>/dev/null) || true
+  fi
 
-        # 3. Populate context.md with session metadata and knowledge snapshots
-        local strictness=$(get_strictness)
-        local context_file="$session_dir/context.md"
-        cat > "$context_file" << CTXEOF
-# Session Context: $SESSION_ID
+  # Build context message
+  local message="[Quoth] Learning daemon active."
+  if [ -n "${patterns_context}" ]; then
+    message="${message}
 
-- **Strictness:** $strictness
-- **Started:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
-- **Local storage:** .quoth/
+Top learned patterns available:
+${patterns_context}"
+  fi
 
-CTXEOF
-
-        # Append snapshot of each .quoth/*.md type file (first 10 lines)
-        for type_file in .quoth/*.md; do
-            if [ -f "$type_file" ]; then
-                local basename=$(basename "$type_file")
-                echo "## $basename" >> "$context_file"
-                echo "" >> "$context_file"
-                head -10 "$type_file" >> "$context_file" 2>/dev/null || true
-                echo "" >> "$context_file"
-                echo "---" >> "$context_file"
-                echo "" >> "$context_file"
-            fi
-        done
-
-        # 4. Build context injection message
-        local memory_instruction=""
-        case "$strictness" in
-            blocking)
-                memory_instruction="**[REQUIRED]** Invoke \`quoth-memory\` subagent before making code edits. Gates will block Edit/Write if memory context is not loaded after 3+ operations."
-                ;;
-            reminder)
-                memory_instruction="Consider using \`quoth-memory\` subagent for context queries before editing code."
-                ;;
-            off)
-                memory_instruction=""
-                ;;
-        esac
-
-        # Build remote context hint
-        local remote_hint=""
-        if [ -n "$project_id" ]; then
-            remote_hint=" Remote memory available — \`quoth-memory\` will auto-search for relevant context."
-        fi
-
-        local context_msg="**Quoth Memory v2 Active** - Strictness: $strictness - Session: $SESSION_ID - Local: .quoth/ ($(wc -l .quoth/*.md 2>/dev/null | tail -1 | awk '{print $1}') lines)${remote_hint}"
-
-        # Add auto-memory status
-        if is_auto_memory_enabled; then
-            context_msg="$context_msg **Auto-memory ON** — learnings saved automatically at session end."
-        fi
-
-        if [ -n "$memory_instruction" ]; then
-            context_msg="$context_msg $memory_instruction"
-        fi
-
-        output_context "$context_msg"
-    else
-        # No config - output standard hint
-        output_context "Quoth plugin active. Run \`/quoth-init\` to initialize memory for this project."
-    fi
+  output_system_message "${message}"
 }
 
-main
+main "$@"
+exit 0  # ALWAYS exit 0

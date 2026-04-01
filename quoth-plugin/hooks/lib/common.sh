@@ -1,400 +1,110 @@
 #!/usr/bin/env bash
-# Quoth Plugin - Shared Functions
-# Source this file from other hooks: source "${SCRIPT_DIR}/lib/common.sh"
+# Quoth Plugin - Shared hook utilities
 
-set -e
+QUOTH_HOME="${HOME}/.quoth"
+QUOTH_TRAJECTORIES="${QUOTH_HOME}/trajectories"
+QUOTH_DAEMON_PID="${QUOTH_HOME}/daemon.pid"
+QUOTH_DAEMON_LOG="${QUOTH_HOME}/daemon.log"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-# Source memory v2 libraries
-COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$(dirname "$(dirname "$COMMON_SCRIPT_DIR")")/lib"
-if [ -f "$LIB_DIR/memory-schema.sh" ]; then
-    source "$LIB_DIR/memory-schema.sh"
-fi
-if [ -f "$LIB_DIR/config-schema.sh" ]; then
-    source "$LIB_DIR/config-schema.sh"
-fi
-if [ -f "$COMMON_SCRIPT_DIR/auto-memory.sh" ]; then
-    source "$COMMON_SCRIPT_DIR/auto-memory.sh"
-fi
+# Ensure quoth home exists
+mkdir -p "${QUOTH_HOME}" "${QUOTH_TRAJECTORIES}"
 
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-
-QUOTH_SESSION_DIR="/tmp/quoth"
-QUOTH_MCP_NAME="quoth"
-
-# ============================================================================
-# MCP DETECTION
-# ============================================================================
-
-# Check if Quoth MCP is likely available
-# Returns: 0 (always) - if this hook is running, the plugin is installed
-# Note: We skip the slow `claude mcp list` check (~3.6s) for instant execution
-quoth_mcp_installed() {
-    return 0
+log_debug() {
+  if [ "${QUOTH_DEBUG:-}" = "true" ]; then
+    echo "[quoth-debug] $1" >&2
+  fi
 }
 
-# ============================================================================
-# PROJECT CONFIG
-# ============================================================================
-
-# Find Quoth config file in current directory
-# Returns: path to config file, or empty string
-find_quoth_config() {
-    if [ -f ".quoth/config.json" ]; then
-        echo ".quoth/config.json"
-    elif [ -f "quoth.config.json" ]; then
-        echo "quoth.config.json"
-    else
-        echo ""
-    fi
+# Read stdin (Claude Code sends hook input via stdin)
+_HOOK_INPUT=""
+read_hook_input() {
+  _HOOK_INPUT=$(cat)
+  return 0
 }
 
-# Extract value from JSON config (simple grep-based, no jq dependency)
-# Usage: get_config_value "project_id" "$CONFIG_PATH"
-get_config_value() {
-    local key="$1"
-    local config_path="$2"
-    if [ -f "$config_path" ]; then
-        grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$config_path" 2>/dev/null | \
-            head -1 | sed 's/.*"\([^"]*\)"$/\1/' || echo ""
-    fi
+output_system_message() {
+  local msg="$1"
+  printf '%s' "$msg"
 }
 
-# ============================================================================
-# SESSION STATE
-# ============================================================================
-
-# Get session marker file path
-# Uses CLAUDE_SESSION_ID if available, falls back to process-based ID
-get_session_file() {
-    mkdir -p "$QUOTH_SESSION_DIR"
-    local session_id="${CLAUDE_SESSION_ID:-$$}"
-    echo "$QUOTH_SESSION_DIR/session_$session_id.json"
-}
-
-# Initialize session state with new schema
-# Usage: init_session "$PROJECT_ID"
-init_session() {
-    local project_id="$1"
-    local session_file=$(get_session_file)
-    cat > "$session_file" << EOF
-{
-  "project_id": "$project_id",
-  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "hints_delivered": {
-    "session_start": true,
-    "pre_edit_test": false,
-    "pre_edit_api": false,
-    "pre_edit_component": false,
-    "pre_edit_service": false,
-    "pre_edit_generic": false
-  },
-  "quoth_tools_used": {
-    "guidelines": 0,
-    "search_index": 0,
-    "read_doc": 0,
-    "read_chunks": 0,
-    "propose_update": 0
-  },
-  "detected_intent": null,
-  "memory_agent_invoked": false,
-  "total_operations": 0,
-  "memory_nudge_count": 0
-}
-EOF
-}
-
-# Check if session exists
-session_exists() {
-    local session_file=$(get_session_file)
-    [ -f "$session_file" ]
-}
-
-# Update session state (increment counter)
-# Usage: increment_session_counter "patterns_applied"
-increment_session_counter() {
-    local counter="$1"
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        local current=$(grep -o "\"$counter\"[[:space:]]*:[[:space:]]*[0-9]*" "$session_file" | grep -o '[0-9]*' || echo "0")
-        local new=$((current + 1))
-        # Use portable sed syntax (works on both macOS and Linux)
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/\"$counter\"[[:space:]]*:[[:space:]]*[0-9]*/\"$counter\": $new/" "$session_file"
-        else
-            sed -i "s/\"$counter\"[[:space:]]*:[[:space:]]*[0-9]*/\"$counter\": $new/" "$session_file"
-        fi
-    fi
-}
-
-# Read session state
-# Returns: JSON content of session file
-read_session() {
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        cat "$session_file"
-    else
-        echo '{}'
-    fi
-}
-
-# Get counter value from session
-# Usage: get_session_counter "patterns_applied"
-get_session_counter() {
-    local counter="$1"
-    local session=$(read_session)
-    echo "$session" | grep -o "\"$counter\"[[:space:]]*:[[:space:]]*[0-9]*" | grep -o '[0-9]*' || echo "0"
-}
-
-# Clean up session state
-cleanup_session() {
-    local session_file=$(get_session_file)
-    rm -f "$session_file"
-}
-
-# ============================================================================
-# HINT TRACKING HELPERS
-# ============================================================================
-
-# Check if hint was already delivered for a category
-# Usage: hint_delivered_for "pre_edit_test"
-# Returns: 0 if delivered, 1 if not
-hint_delivered_for() {
-    local category="$1"
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        # Check if hints_delivered.$category is true
-        if grep -q "\"$category\"[[:space:]]*:[[:space:]]*true" "$session_file" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Mark hint as delivered for a category
-# Usage: mark_hint_delivered "pre_edit_test"
-mark_hint_delivered() {
-    local category="$1"
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        # Replace false with true for this category
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/\"$category\"[[:space:]]*:[[:space:]]*false/\"$category\": true/" "$session_file"
-        else
-            sed -i "s/\"$category\"[[:space:]]*:[[:space:]]*false/\"$category\": true/" "$session_file"
-        fi
-    fi
-}
-
-# Check if any Quoth tools were used in this session
-# Returns: 0 if any tool counter > 0, 1 if all are 0
-quoth_tools_were_used() {
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        # Check if any quoth_tools_used counter is > 0
-        local tools_section=$(grep -A 6 '"quoth_tools_used"' "$session_file" 2>/dev/null || echo "")
-        if echo "$tools_section" | grep -qE ':[[:space:]]*[1-9]'; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Increment a Quoth tool usage counter
-# Usage: increment_tool_counter "search_index"
-increment_tool_counter() {
-    local tool_name="$1"
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        local current=$(grep -o "\"$tool_name\"[[:space:]]*:[[:space:]]*[0-9]*" "$session_file" | grep -o '[0-9]*' | head -1 || echo "0")
-        local new=$((current + 1))
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/\"$tool_name\"[[:space:]]*:[[:space:]]*[0-9]*/\"$tool_name\": $new/" "$session_file"
-        else
-            sed -i "s/\"$tool_name\"[[:space:]]*:[[:space:]]*[0-9]*/\"$tool_name\": $new/" "$session_file"
-        fi
-    fi
-}
-
-# Update detected user intent
-# Usage: update_session_intent "testing"
-update_session_intent() {
-    local intent="$1"
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/\"detected_intent\"[[:space:]]*:[[:space:]]*[^,}]*/\"detected_intent\": \"$intent\"/" "$session_file"
-        else
-            sed -i "s/\"detected_intent\"[[:space:]]*:[[:space:]]*[^,}]*/\"detected_intent\": \"$intent\"/" "$session_file"
-        fi
-    fi
-}
-
-# ============================================================================
-# FILE CATEGORY DETECTION
-# ============================================================================
-
-# Determine the category of a file based on its path
-# Returns: component, api, test, service, config, or unknown
-detect_file_category() {
-    local file_path="$1"
-
-    case "$file_path" in
-        *.test.* | *.spec.* | */__tests__/* | */tests/*)
-            echo "test"
-            ;;
-        */api/* | */routes/* | *route.ts | *route.js)
-            echo "api"
-            ;;
-        */components/* | *.tsx | *.jsx)
-            echo "component"
-            ;;
-        */lib/* | */utils/* | */services/* | */helpers/*)
-            echo "service"
-            ;;
-        *.config.* | */config/* | .env* | package.json | tsconfig.json)
-            echo "config"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Build search query based on file category
-build_search_query() {
-    local category="$1"
-
-    case "$category" in
-        test)
-            echo "testing patterns best practices"
-            ;;
-        api)
-            echo "api endpoint patterns response format"
-            ;;
-        component)
-            echo "component patterns react conventions"
-            ;;
-        service)
-            echo "service patterns error handling"
-            ;;
-        config)
-            echo "configuration conventions"
-            ;;
-        *)
-            echo "coding conventions patterns"
-            ;;
-    esac
-}
-
-# Check if file should be skipped (config/generated files)
-should_skip_file() {
-    local file_path="$1"
-    case "$file_path" in
-        *.lock | *.generated.* | package-lock.json | yarn.lock | node_modules/*)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-# Check if file is non-code (docs, config, etc.)
-is_non_code_file() {
-    local file_path="$1"
-    case "$file_path" in
-        *.md | *.txt | *.json | *.yaml | *.yml | *.lock)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-# ============================================================================
-# JSON PARSING HELPERS
-# ============================================================================
-
-# Extract file_path from hook input JSON
-# Usage: extract_file_path "$INPUT"
-extract_file_path() {
-    local input="$1"
-    echo "$input" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/'
-}
-
-# ============================================================================
-# JSON OUTPUT HELPERS
-# ============================================================================
-
-# Escape string for JSON
-# Usage: json_escape "string with \"quotes\""
-json_escape() {
-    local str="$1"
-    printf '%s' "$str" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' '
-}
-
-# Output hook response with additional context
-# Usage: output_context "Your context message here"
-output_context() {
-    local context="$1"
-    local escaped=$(json_escape "$context")
-    cat << EOF
-{
-  "hookSpecificOutput": {
-    "additionalContext": "$escaped"
-  }
-}
-EOF
-}
-
-# Output empty response (hook has nothing to add)
 output_empty() {
-    echo '{}'
+  return 0
 }
 
-# ============================================================================
-# MEMORY AGENT TRACKING
-# ============================================================================
-
-# Mark that quoth-memory subagent was invoked in this session
-mark_memory_agent_invoked() {
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' 's/"memory_agent_invoked"[[:space:]]*:[[:space:]]*false/"memory_agent_invoked": true/' "$session_file"
-        else
-            sed -i 's/"memory_agent_invoked"[[:space:]]*:[[:space:]]*false/"memory_agent_invoked": true/' "$session_file"
-        fi
-    fi
+# Append one JSON line to the current session's trajectory file
+# Usage: append_trajectory '{"event":"agent_stop","agent":"test-healer",...}'
+append_trajectory() {
+  local entry="$1"
+  local session_id="${QUOTH_SESSION_ID:-unknown}"
+  local traj_file="${QUOTH_TRAJECTORIES}/${session_id}.jsonl"
+  echo "${entry}" >> "${traj_file}" 2>/dev/null || true
 }
 
-# Check if quoth-memory agent was invoked
-# Returns: 0 if invoked, 1 if not
-memory_agent_was_invoked() {
-    local session_file=$(get_session_file)
-    if [ -f "$session_file" ]; then
-        if grep -q '"memory_agent_invoked"[[:space:]]*:[[:space:]]*true' "$session_file" 2>/dev/null; then
-            return 0
-        fi
-    fi
+# Get or create session ID (persisted for the session)
+get_or_create_session_id() {
+  local id_file="${QUOTH_HOME}/current_session"
+  if [ -f "${id_file}" ]; then
+    cat "${id_file}"
+  else
+    local new_id
+    new_id="session-$(date +%s)-$$"
+    echo "${new_id}" > "${id_file}"
+    echo "${new_id}"
+  fi
+}
+
+clear_session_id() {
+  rm -f "${QUOTH_HOME}/current_session"
+}
+
+# Check if daemon is running
+daemon_is_running() {
+  if [ ! -f "${QUOTH_DAEMON_PID}" ]; then
     return 1
+  fi
+  local pid
+  pid=$(cat "${QUOTH_DAEMON_PID}" 2>/dev/null)
+  [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
 }
 
-# Get total operations count
-get_total_operations() {
-    get_session_counter "total_operations"
+# Start daemon as detached background process
+start_daemon() {
+  local daemon_js="${PLUGIN_ROOT}/daemon/daemon.js"
+  if [ ! -f "${daemon_js}" ]; then
+    log_debug "daemon.js not found at ${daemon_js}"
+    return 1
+  fi
+  QUOTH_HOME="${QUOTH_HOME}" nohup node "${daemon_js}" \
+    >> "${QUOTH_DAEMON_LOG}" 2>&1 &
+  echo $! > "${QUOTH_DAEMON_PID}"
+  log_debug "Daemon started with PID $!"
 }
 
-# Get memory nudge count
-get_memory_nudge_count() {
-    get_session_counter "memory_nudge_count"
+# Call quoth-learning MCP tool (fire-and-forget)
+call_learning_tool() {
+  local tool_name="$1"
+  local args_json="$2"
+  # Fire and forget — never wait, never fail Claude
+  (claude mcp call quoth-learning "${tool_name}" "${args_json}" \
+    >> "${QUOTH_HOME}/mcp-calls.log" 2>&1) &
 }
 
-# Increment memory nudge count
-increment_memory_nudge() {
-    increment_session_counter "memory_nudge_count"
+# Send SIGUSR1 to daemon for immediate processing
+signal_daemon_flush() {
+  if daemon_is_running; then
+    local pid
+    pid=$(cat "${QUOTH_DAEMON_PID}")
+    kill -USR1 "${pid}" 2>/dev/null || true
+    log_debug "Sent SIGUSR1 to daemon PID ${pid}"
+  fi
+}
+
+# Get top patterns as context string (for injection)
+get_top_patterns_context() {
+  local limit="${1:-5}"
+  local result
+  result=$(claude mcp call quoth-learning quoth_top_patterns \
+    "{\"limit\":${limit}}" 2>/dev/null) || true
+  echo "${result}"
 }
