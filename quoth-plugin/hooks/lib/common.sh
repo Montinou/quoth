@@ -102,10 +102,17 @@ signal_daemon_flush() {
 }
 
 # Get top patterns as context string (for injection)
+# Usage: get_top_patterns_context [limit] [query]
 get_top_patterns_context() {
   local limit="${1:-5}"
+  local query="${2:-}"
+  local args
+  if [ -n "${query}" ]; then
+    args=$(printf '{"limit":%s,"query":"%s"}' "${limit}" "${query}" 2>/dev/null) || args="{\"limit\":${limit}}"
+  else
+    args="{\"limit\":${limit}}"
+  fi
   local result
-  result=$(claude mcp call quoth-learning quoth_top_patterns \
-    "{\"limit\":${limit}}" 2>/dev/null) || true
+  result=$(claude mcp call quoth-learning quoth_top_patterns "${args}" 2>/dev/null) || true
   echo "${result}"
 }
