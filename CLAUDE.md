@@ -201,6 +201,9 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autono
 - Auto-starts via `session-start` hook
 - PID: `~/.quoth/daemon.pid`, Log: `~/.quoth/daemon.log`
 - Debug: `QUOTH_DEBUG=true`
+- Nightly promotion: high-confidence patterns (>0.8, >10 uses) auto-promote to Quoth cloud at 3am
+- Re-promotion only when confidence improves by >0.1 since last upload
+- Env vars: `QUOTH_API_KEY` (qth_* key), `QUOTH_PROJECT_ID`, `QUOTH_API_URL` (optional, defaults to quoth.triqual.dev)
 
 ### New MCP Tools (quoth-learning)
 - `quoth_log_outcome` — record pattern success/failure (+0.03/-0.03 confidence delta)
@@ -208,6 +211,7 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autono
 - `quoth_top_patterns` — get top-N scored patterns (optionally filtered by tags)
 - `quoth_seed_from_exolar` — import Exolar clustered failures as pattern candidates
 - `quoth_daemon_status` — check daemon health (running, PID, last log lines)
+- `quoth_propose_update` — manually promote a local pattern to the Quoth cloud (no wait for 3am)
 
 ### Skills
 - `/patterns` — browse confidence-scored pattern library
