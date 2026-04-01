@@ -80,6 +80,18 @@ describe('integration: db + pipeline', () => {
     expect(parsed).toHaveProperty('error')
   })
 
+  it('tools/list includes quoth_extract_skill and quoth_list_skills', () => {
+    const result = execSync(
+      `printf '%s\\n%s\\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | QUOTH_HOME=${tmpDir} node ${join(__dirname, '../mcp/quoth-learning-server.js')}`,
+      { encoding: 'utf8', timeout: 5000 }
+    )
+    const lines = result.trim().split('\n').map(l => JSON.parse(l))
+    const toolsListResponse = lines.find(l => l.id === 2)
+    const toolNames = toolsListResponse.result.tools.map(t => t.name)
+    expect(toolNames).toContain('quoth_extract_skill')
+    expect(toolNames).toContain('quoth_list_skills')
+  })
+
   it('tools/list includes quoth_propose_update', () => {
     const result = execSync(
       `printf '%s\\n%s\\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | QUOTH_HOME=${tmpDir} node ${join(__dirname, '../mcp/quoth-learning-server.js')}`,
