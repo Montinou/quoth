@@ -85,32 +85,51 @@ export const POST = createApiHandler(
 
     // Look up the internal user UUID from Clerk ID
     const clerkId = ctx.clerkUserId ?? ctx.userId;
-    const userRow = await db.execute<{ id: string; default_org_id: string }>(sql`
-      SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${clerkId} LIMIT 1
-    `);
-    const user = userRow.rows[0] as { id: string; default_org_id: string } | undefined;
-    if (!user) return Response.json({ error: 'User not found' }, { status: 404 });
+
+    let user: { id: string; default_org_id: string } | undefined;
+    try {
+      const userRow = await db.execute<{ id: string; default_org_id: string }>(sql`
+        SELECT id, default_org_id FROM public.users WHERE clerk_user_id = ${clerkId} LIMIT 1
+      `);
+      user = userRow.rows[0] as { id: string; default_org_id: string } | undefined;
+    } catch (err) {
+      console.error('[assign-agent] User lookup failed:', err);
+      return Response.json({ error: 'User lookup failed', detail: err instanceof Error ? err.message : 'unknown' }, { status: 500 });
+    }
+
+    if (!user) return Response.json({ error: 'User not found', clerkId }, { status: 404 });
 
     const orgId = ctx.orgId || user.default_org_id;
+    if (!orgId) return Response.json({ error: 'No organization context' }, { status: 400 });
 
     // Verify agent exists in the same org
-    const agentCheck = await db.execute(sql`
-      SELECT 1 FROM agents.registry
-      WHERE id = ${agentId}::uuid AND org_id = ${orgId}::uuid
-    `);
-    if (!agentCheck.rows.length) {
-      return Response.json({ error: 'Agent not found in organization' }, { status: 404 });
+    try {
+      const agentCheck = await db.execute(sql`
+        SELECT 1 FROM agents.registry
+        WHERE id = ${agentId}::uuid AND org_id = ${orgId}::uuid
+      `);
+      if (!agentCheck.rows.length) {
+        return Response.json({ error: 'Agent not found in organization', agentId, orgId }, { status: 404 });
+      }
+    } catch (err) {
+      console.error('[assign-agent] Agent check failed:', err);
+      return Response.json({ error: 'Agent lookup failed', detail: err instanceof Error ? err.message : 'unknown' }, { status: 500 });
     }
 
     // Upsert assignment
-    await db.execute(sql`
-      INSERT INTO agents.agent_projects (agent_id, project_id, role, assigned_by)
-      VALUES (${agentId}::uuid, ${projectId}::uuid, ${role}, ${user.id}::uuid)
-      ON CONFLICT (agent_id, project_id) DO UPDATE SET
-        role = EXCLUDED.role,
-        assigned_at = now(),
-        assigned_by = EXCLUDED.assigned_by
-    `);
+    try {
+      await db.execute(sql`
+        INSERT INTO agents.agent_projects (agent_id, project_id, role, assigned_by)
+        VALUES (${agentId}::uuid, ${projectId}::uuid, ${role}, ${user.id}::uuid)
+        ON CONFLICT (agent_id, project_id) DO UPDATE SET
+          role = EXCLUDED.role,
+          assigned_at = now(),
+          assigned_by = EXCLUDED.assigned_by
+      `);
+    } catch (err) {
+      console.error('[assign-agent] Upsert failed:', err);
+      return Response.json({ error: 'Assignment failed', detail: err instanceof Error ? err.message : 'unknown' }, { status: 500 });
+    }
 
     return Response.json({ ok: true, agentId, projectId, role });
   },
