@@ -107,6 +107,15 @@ function createDb(dbPath) {
     }
   }
 
+  // Runtime migration: add Bayesian scoring columns if not present
+  const existingCols2 = db.prepare('PRAGMA table_info(patterns)').all().map(r => r.name)
+  if (!existingCols2.includes('alpha')) {
+    db.exec(`ALTER TABLE patterns ADD COLUMN alpha REAL DEFAULT 1`)
+  }
+  if (!existingCols2.includes('beta')) {
+    db.exec(`ALTER TABLE patterns ADD COLUMN beta REAL DEFAULT 1`)
+  }
+
   db.upsertPattern = function(p) {
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
@@ -189,10 +198,35 @@ function createDb(dbPath) {
     `).run(delta, delta, delta, id)
   }
 
+  db.applyBayesianUpdate = function(id, outcome) {
+    if (outcome === 'success') {
+      db.prepare(`
+        UPDATE patterns SET
+          alpha = alpha + 1,
+          success_count = success_count + 1,
+          confidence = (alpha + 1.0) / (alpha + 1.0 + beta),
+          last_matched_at = strftime('%s','now') * 1000,
+          updated_at = strftime('%s','now') * 1000
+        WHERE id = ?
+      `).run(id)
+    } else {
+      db.prepare(`
+        UPDATE patterns SET
+          beta = beta + 1,
+          failure_count = failure_count + 1,
+          confidence = alpha / (alpha + beta + 1.0),
+          last_matched_at = strftime('%s','now') * 1000,
+          updated_at = strftime('%s','now') * 1000
+        WHERE id = ?
+      `).run(id)
+    }
+  }
+
   db.applyHourlyDecay = function() {
     db.prepare(`
       UPDATE patterns
-      SET confidence = MAX(0.0, confidence - decay_rate),
+      SET alpha = MAX(1.0, alpha - (decay_rate * alpha * 0.01)),
+          confidence = MAX(0.0, MAX(1.0, alpha - (decay_rate * alpha * 0.01)) / (MAX(1.0, alpha - (decay_rate * alpha * 0.01)) + beta)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
     `).run()

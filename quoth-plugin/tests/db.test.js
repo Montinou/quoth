@@ -67,14 +67,17 @@ describe('db', () => {
   it('applies hourly decay to all patterns', () => {
     db.upsertPattern({ id: 'decay-p', name: 'p', pattern_type: 'code-pattern',
       condition: 'c', action: 'a', confidence: 0.8, tags: [], source: 'test' })
+    db.prepare("UPDATE patterns SET alpha = 4, beta = 1 WHERE id = 'decay-p'").run()
     db.applyHourlyDecay()
     const p = db.getPattern('decay-p')
-    expect(p.confidence).toBeCloseTo(0.795)
+    expect(p.confidence).toBeLessThan(0.8)
+    expect(p.confidence).toBeGreaterThan(0.79)
   })
 
   it('floors confidence at 0.0', () => {
     db.upsertPattern({ id: 'floor-p', name: 'p', pattern_type: 'code-pattern',
       condition: 'c', action: 'a', confidence: 0.002, tags: [], source: 'test' })
+    db.prepare("UPDATE patterns SET alpha = 1, beta = 100 WHERE id = 'floor-p'").run()
     db.applyHourlyDecay()
     const p = db.getPattern('floor-p')
     expect(p.confidence).toBeGreaterThanOrEqual(0.0)
@@ -143,5 +146,49 @@ describe('db', () => {
     const c = candidates.find(c => c.id === 'cand-2')
     expect(Array.isArray(c.tags)).toBe(true)
     expect(c.tags).toContain('foo')
+  })
+
+  it('has alpha and beta columns for Bayesian scoring', () => {
+    const cols = db.prepare("PRAGMA table_info(patterns)").all().map(r => r.name)
+    expect(cols).toContain('alpha')
+    expect(cols).toContain('beta')
+  })
+
+  it('upsertPattern sets default alpha=1 beta=1 for new patterns', () => {
+    db.upsertPattern({ id: 'bayes-1', name: 'b', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'distilled' })
+    const p = db.prepare("SELECT alpha, beta FROM patterns WHERE id = 'bayes-1'").get()
+    expect(p.alpha).toBe(1)
+    expect(p.beta).toBe(1)
+  })
+
+  it('applyBayesianUpdate increments alpha on success', () => {
+    db.upsertPattern({ id: 'bayes-2', name: 'b', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'distilled' })
+    db.applyBayesianUpdate('bayes-2', 'success')
+    const p = db.prepare("SELECT alpha, beta, confidence FROM patterns WHERE id = 'bayes-2'").get()
+    expect(p.alpha).toBe(2)
+    expect(p.beta).toBe(1)
+    expect(p.confidence).toBeCloseTo(2 / 3)
+  })
+
+  it('applyBayesianUpdate increments beta on failure', () => {
+    db.upsertPattern({ id: 'bayes-3', name: 'b', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'distilled' })
+    db.applyBayesianUpdate('bayes-3', 'failure')
+    const p = db.prepare("SELECT alpha, beta, confidence FROM patterns WHERE id = 'bayes-3'").get()
+    expect(p.alpha).toBe(1)
+    expect(p.beta).toBe(2)
+    expect(p.confidence).toBeCloseTo(1 / 3)
+  })
+
+  it('applyHourlyDecay decays alpha slowly', () => {
+    db.upsertPattern({ id: 'decay-bayes', name: 'b', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.9, tags: [], source: 'distilled' })
+    db.prepare("UPDATE patterns SET alpha = 10, beta = 2 WHERE id = 'decay-bayes'").run()
+    db.applyHourlyDecay()
+    const p = db.prepare("SELECT alpha FROM patterns WHERE id = 'decay-bayes'").get()
+    expect(p.alpha).toBeLessThan(10)
+    expect(p.alpha).toBeGreaterThan(9)
   })
 })
