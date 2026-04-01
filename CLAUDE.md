@@ -186,3 +186,27 @@ npx @claude-flow/cli@latest doctor --fix
 
 - Documentation: https://github.com/ruvnet/claude-flow
 - Issues: https://github.com/ruvnet/claude-flow/issues
+
+## Quoth Plugin (Self-Learning)
+
+Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autonomous self-learning.
+
+### What It Does
+- Logs all agent trajectories to `~/.quoth/trajectories/{session}.jsonl`
+- Background daemon processes trajectories using Haiku subagents (JUDGE → DISTILL → CONSOLIDATE)
+- Maintains confidence-scored pattern library in `~/.quoth/memory.db`
+- Injects top patterns into every agent's context at session start
+
+### Daemon
+- Auto-starts via `session-start` hook
+- PID: `~/.quoth/daemon.pid`, Log: `~/.quoth/daemon.log`
+- Debug: `QUOTH_DEBUG=true`
+
+### New MCP Tools (quoth-learning)
+- `quoth_log_outcome` — record pattern success/failure
+- `quoth_top_patterns` — get top-N scored patterns
+- `quoth_daemon_status` — check daemon health
+
+### Skills
+- `/patterns` — browse confidence-scored pattern library
+- `/learn` — trigger manual consolidation
