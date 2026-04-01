@@ -28,28 +28,41 @@ export async function getClerkAuthContext(): Promise<AuthContext | null> {
 
   const claims = (sessionClaims ?? {}) as unknown as ClerkJwtClaims;
 
-  // project_id and org_id from user.public_metadata via JWT template
+  // project_id from JWT template or user metadata
   let projectId = claims.project_id ?? '';
-  let resolvedOrgId = orgId ?? claims.org_id ?? '';
 
-  // Fallback: if JWT template is not configured or user hasn't synced metadata,
-  // look up default_project_id and default_org_id from the users table
-  if (!projectId || !resolvedOrgId) {
-    try {
-      const { getDb } = await import('@/db/connection');
-      const db = getDb();
-      const rows = await db.execute<{ default_project_id: string | null; default_org_id: string | null }>(sql`
+  // Resolve org and project IDs from DB — Clerk provides clerk_org_id (string like "org_xxx")
+  // but our DB uses internal UUIDs. Always look up the internal IDs.
+  const clerkOrgId = orgId ?? claims.org_id ?? '';
+  let resolvedOrgId = '';
+
+  try {
+    const { getDb } = await import('@/db/connection');
+    const db = getDb();
+
+    // If Clerk provides an org ID, resolve it to internal UUID via organizations table
+    if (clerkOrgId) {
+      const orgRows = await db.execute<{ id: string }>(sql`
+        SELECT id FROM public.organizations WHERE clerk_org_id = ${clerkOrgId} LIMIT 1
+      `);
+      const orgRow = orgRows.rows[0] as { id: string } | undefined;
+      if (orgRow) resolvedOrgId = orgRow.id;
+    }
+
+    // Fallback: look up from user's defaults
+    if (!resolvedOrgId || !projectId) {
+      const userRows = await db.execute<{ default_project_id: string | null; default_org_id: string | null }>(sql`
         SELECT default_project_id, default_org_id
         FROM public.users
         WHERE clerk_user_id = ${userId}
         LIMIT 1
       `);
-      const row = rows.rows[0] as { default_project_id: string | null; default_org_id: string | null } | undefined;
-      if (!projectId) projectId = row?.default_project_id ?? '';
-      if (!resolvedOrgId) resolvedOrgId = row?.default_org_id ?? '';
-    } catch {
-      // DB lookup failed — proceed with whatever we have
+      const userRow = userRows.rows[0] as { default_project_id: string | null; default_org_id: string | null } | undefined;
+      if (!resolvedOrgId) resolvedOrgId = userRow?.default_org_id ?? '';
+      if (!projectId) projectId = userRow?.default_project_id ?? '';
     }
+  } catch {
+    // DB lookup failed — proceed with whatever we have
   }
 
   const roleMap: Record<string, AuthContext['role']> = {
