@@ -134,6 +134,39 @@ async function handleUserCreated(data: Record<string, any>) {
       },
     });
 
+  // If user has org memberships in Clerk data, resolve and set default_org_id
+  if (data.organization_memberships?.length > 0) {
+    const firstOrgClerkId = data.organization_memberships[0].organization?.id;
+    if (firstOrgClerkId) {
+      const [org] = await db
+        .select({ id: organizations.id })
+        .from(organizations)
+        .where(eq(organizations.clerkOrgId, firstOrgClerkId))
+        .limit(1);
+
+      if (org) {
+        await db
+          .update(users)
+          .set({ defaultOrgId: org.id })
+          .where(eq(users.clerkUserId, data.id));
+
+        // Also set default project
+        const [firstProject] = await db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(eq(projects.orgId, org.id))
+          .limit(1);
+
+        if (firstProject) {
+          await db
+            .update(users)
+            .set({ defaultProjectId: firstProject.id })
+            .where(eq(users.clerkUserId, data.id));
+        }
+      }
+    }
+  }
+
   console.log(`[Clerk Webhook] user.created: ${data.id} (${email})`);
 
   // Fire-and-forget: sync project_id + tier to Clerk publicMetadata
@@ -264,6 +297,34 @@ async function handleMembershipCreated(data: Record<string, any>) {
         role: data.role ?? 'member',
       },
     });
+
+  // Set user's default_org_id if not already set (first org membership)
+  const [currentUser] = await db
+    .select({ defaultOrgId: users.defaultOrgId })
+    .from(users)
+    .where(eq(users.id, resolved.userId))
+    .limit(1);
+
+  if (!currentUser?.defaultOrgId) {
+    await db
+      .update(users)
+      .set({ defaultOrgId: resolved.orgId })
+      .where(eq(users.id, resolved.userId));
+
+    // Also set default project to the first project in this org
+    const [firstProject] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.orgId, resolved.orgId))
+      .limit(1);
+
+    if (firstProject) {
+      await db
+        .update(users)
+        .set({ defaultProjectId: firstProject.id })
+        .where(eq(users.id, resolved.userId));
+    }
+  }
 
   console.log(
     `[Clerk Webhook] membership.created: user=${resolved.userId} org=${resolved.orgId} role=${data.role}`,
