@@ -16,7 +16,7 @@
 
 
 import { randomBytes } from 'crypto';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getAuthContext } from '@/lib/auth/clerk';
 import { getDb, getSecureDb } from '@/db/connection';
@@ -117,6 +117,17 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // Resolve internal user UUID for createdBy (ctx.userId is Clerk ID, column needs users.id UUID)
+  let internalUserId: string | undefined;
+  if (!ctx.isAgent && ctx.userId) {
+    const serviceDb = getDb();
+    const result = await serviceDb.execute<{ id: string }>(
+      sql`SELECT id FROM public.users WHERE clerk_user_id = ${ctx.userId} LIMIT 1`
+    );
+    const userRow = result.rows[0] as { id: string } | undefined;
+    internalUserId = userRow?.id;
+  }
+
   // Generate and store the key
   let rawKey: string;
   try {
@@ -124,7 +135,7 @@ export async function POST(req: Request): Promise<Response> {
       agentId,
       orgId: ctx.orgId,
       label: body.label,
-      createdBy: ctx.isAgent ? undefined : ctx.userId,
+      createdBy: internalUserId,
     });
     rawKey = key;
   } catch (err) {
