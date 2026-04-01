@@ -27,10 +27,9 @@ function judge(entry) {
       { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
     ).trim()
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('No JSON in response')
-
-    const result = JSON.parse(jsonMatch[0])
+    const start = raw.indexOf('{')
+    if (start === -1) throw new Error('No JSON in response')
+    const result = JSON.parse(raw.slice(start))
     return {
       effective: Boolean(result.effective),
       reason: result.reason || '',

@@ -31,10 +31,9 @@ function distill(entry) {
       { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
     ).trim()
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('No JSON')
-
-    const result = JSON.parse(jsonMatch[0])
+    const start = raw.indexOf('{')
+    if (start === -1) throw new Error('No JSON')
+    const result = JSON.parse(raw.slice(start))
     const id = makeId(result.pattern)
     return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow' }
   } catch (err) {
