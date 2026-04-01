@@ -159,6 +159,9 @@ export async function GET(request: NextRequest) {
   const { userId } = await auth();
   if (userId) {
     const ctx = await resolveUserContext(userId);
+    if (!ctx) {
+      return NextResponse.json({ error: 'access_denied', error_description: 'Could not resolve user context' }, { status: 401, headers: corsHeaders });
+    }
     return issueAuthCode(authRequest, ctx);
   }
 
@@ -188,6 +191,9 @@ export async function POST() {
     }
 
     const ctx = await resolveUserContext(userId);
+    if (!ctx) {
+      return NextResponse.json({ error: 'access_denied' }, { status: 401 });
+    }
     return issueAuthCode(authRequest, ctx);
   } catch (error) {
     console.error('[OAuth Authorize POST] Error:', error);

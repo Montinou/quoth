@@ -647,7 +647,7 @@ export function registerGenesisTools(
 ${language_hint ? `- Language: \`${language_hint}\`` : ''}
 
 **Project Context:**
-- Project ID: \`${authContext.project_id}\`
+- Project ID: \`${authContext.projectId}\`
 - Role: \`${authContext.role}\`
 
 ---

@@ -89,7 +89,7 @@ async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInf
       token: bearerToken,
       clientId: clerkPayload.sub,
       scopes: ['mcp:read', 'mcp:write'],
-      extra: authContext,
+      extra: authContext as unknown as Record<string, unknown>,
     };
   } catch {
     return undefined;
@@ -102,7 +102,7 @@ async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInf
 function getAuthContext(req: Request): AuthContext {
   const authInfo = (req as Request & { auth?: AuthInfo }).auth;
   if (authInfo?.extra) {
-    return authInfo.extra as AuthContext;
+    return authInfo.extra as unknown as AuthContext;
   }
   throw new Error('[MCP] Missing auth context on authenticated route — withMcpAuth misconfigured');
 }
