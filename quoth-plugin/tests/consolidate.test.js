@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import childProcess from 'child_process'
 
-let execSyncSpy
+let spawnSyncSpy
 
 const existingPatterns = [
   { id: 'vis-1', name: 'visibility-filter', pattern_type: 'code-pattern',
@@ -9,7 +9,7 @@ const existingPatterns = [
 ]
 
 beforeEach(() => {
-  execSyncSpy = vi.spyOn(childProcess, 'execSync')
+  spawnSyncSpy = vi.spyOn(childProcess, 'spawnSync')
 })
 
 afterEach(() => {
@@ -20,10 +20,10 @@ const { consolidate } = require('../daemon/pipeline/consolidate.js')
 
 describe('consolidate', () => {
   it('returns "strengthen" when new pattern matches existing', () => {
-    execSyncSpy.mockReturnValue(JSON.stringify({
+    spawnSyncSpy.mockReturnValue({ status: 0, stdout: JSON.stringify({
       action: 'strengthen', targetId: 'vis-1',
       updated: { id: 'vis-1', action: 'use :visible filter for ambiguous selectors' }
-    }))
+    }) })
     const result = consolidate(
       { id: 'new-1', pattern: 'use :visible for buttons', tags: ['selector'] },
       existingPatterns
@@ -33,10 +33,10 @@ describe('consolidate', () => {
   })
 
   it('returns "new" when no similar pattern exists', () => {
-    execSyncSpy.mockReturnValue(JSON.stringify({
+    spawnSyncSpy.mockReturnValue({ status: 0, stdout: JSON.stringify({
       action: 'new',
       updated: { id: 'auth-1', pattern: 'use storageState for auth' }
-    }))
+    }) })
     const result = consolidate(
       { id: 'auth-1', pattern: 'use storageState for auth', tags: ['auth'] },
       []
@@ -45,7 +45,7 @@ describe('consolidate', () => {
   })
 
   it('falls back to "new" on parse error', () => {
-    execSyncSpy.mockReturnValue('garbage')
+    spawnSyncSpy.mockReturnValue({ status: 0, stdout: 'garbage' })
     const result = consolidate(
       { id: 'x', pattern: 'some pattern', tags: [] },
       existingPatterns

@@ -209,10 +209,14 @@ Patterns: ${JSON.stringify(patterns)}
 
 Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives": ["id"]}`
 
-    const raw = require('child_process').execSync(
-      `echo ${JSON.stringify(prompt)} | claude -p --model claude-sonnet-4-6 --output-format text`,
-      { encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'ignore'] }
-    ).trim()
+    // Deep consolidation uses Sonnet (not Haiku) — more complex reasoning needed for
+    // cross-session pattern deduplication and quality assessment
+    const proc = require('child_process').spawnSync(
+      'claude', ['-p', '--model', 'claude-sonnet-4-6', '--output-format', 'text'],
+      { input: prompt, encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'ignore'] }
+    )
+    // Fire-and-forget — don't throw on failure
+    const raw = (proc.stdout || '').trim()
 
     const start = raw.indexOf('{')
     if (start === -1) return

@@ -21,10 +21,12 @@ function consolidate(newPattern, existingPatterns) {
     .replace('{{existing_patterns}}', JSON.stringify(existingPatterns.slice(0, 3)))
 
   try {
-    const raw = require('child_process').execSync(
-      `echo ${JSON.stringify(prompt)} | claude -p --model claude-haiku-4-5-20251001 --output-format text`,
-      { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
-    ).trim()
+    const proc = require('child_process').spawnSync(
+      'claude', ['-p', '--model', 'claude-haiku-4-5-20251001', '--output-format', 'text'],
+      { input: prompt, encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
+    )
+    if (proc.status !== 0) throw new Error('claude subprocess failed')
+    const raw = (proc.stdout || '').trim()
 
     const start = raw.indexOf('{')
     if (start === -1) throw new Error('No JSON')
