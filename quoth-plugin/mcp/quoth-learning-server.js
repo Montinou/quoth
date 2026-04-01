@@ -110,6 +110,20 @@ const TOOLS = [
         tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags' }
       }
     }
+  },
+  {
+    name: 'quoth_search_patterns',
+    description: 'Search local patterns by semantic similarity to a query. Use this to find patterns related to specific features, error types, or techniques.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language query — e.g. "login redirect wait patterns" or "table row count assertions"' },
+        limit: { type: 'number', default: 5, description: 'Max results to return' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter' },
+        includeSkills: { type: 'boolean', default: true, description: 'Include skill-type patterns in results' }
+      },
+      required: ['query']
+    }
   }
 ]
 
@@ -132,12 +146,25 @@ async function handleTool(name, args) {
       return { updated: true, pattern: p }
     }
     case 'quoth_top_patterns': {
-      const patterns = db.getTopPatterns(args.limit || 5, args.tags || [])
+      let patterns
+      if (args.query) {
+        // Try semantic search first (uses local embeddings)
+        try {
+          const { generateEmbedding } = require(path.join(__dirname, '../daemon/lib/embed.js'))
+          const queryVec = await generateEmbedding(args.query)
+          if (queryVec) {
+            patterns = db.searchBySimilarity(queryVec, args.limit || 5, args.tags || [])
+          }
+        } catch {}
+      }
+      if (!patterns) {
+        patterns = db.getTopPatterns(args.limit || 5, args.tags || [])
+      }
+      // Jina reranking as final pass if available
       if (args.query && process.env.JINA_API_KEY && patterns.length > 0) {
         try {
           const { rerankPatterns } = require(path.join(__dirname, '../daemon/lib/rerank.js'))
-          const reranked = await rerankPatterns(args.query, patterns)
-          return { patterns: reranked }
+          patterns = await rerankPatterns(args.query, patterns)
         } catch {}
       }
       return { patterns }
@@ -202,6 +229,52 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
       const patterns = db.getTopPatterns(50, args.tags || [])
       const skills = patterns.filter(p => p.source === 'skill-derived' || p.pattern_type === 'skill')
       return { skills }
+    }
+
+    case 'quoth_search_patterns': {
+      const limit = args.limit || 5
+      let results = []
+
+      // Try semantic search with local embeddings
+      try {
+        const { generateEmbedding } = require(path.join(__dirname, '../daemon/lib/embed.js'))
+        const queryVec = await generateEmbedding(args.query)
+        if (queryVec) {
+          results = db.searchBySimilarity(queryVec, limit, args.tags || [])
+        }
+      } catch {}
+
+      // Fallback: text-match using getTopPatterns with tag filtering
+      if (results.length === 0) {
+        results = db.getTopPatterns(limit * 2, args.tags || [])
+        // Simple text relevance: filter patterns whose action/condition/name contain query words
+        const queryWords = args.query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+        if (queryWords.length > 0) {
+          results = results.filter(p => {
+            const text = `${p.name} ${p.condition} ${p.action}`.toLowerCase()
+            return queryWords.some(w => text.includes(w))
+          }).slice(0, limit)
+        }
+      }
+
+      // Jina reranking as final pass
+      if (process.env.JINA_API_KEY && results.length > 1) {
+        try {
+          const { rerankPatterns } = require(path.join(__dirname, '../daemon/lib/rerank.js'))
+          results = await rerankPatterns(args.query, results)
+        } catch {}
+      }
+
+      // Filter out skills if not wanted
+      if (args.includeSkills === false) {
+        results = results.filter(p => p.pattern_type !== 'skill' && p.source !== 'skill-derived')
+      }
+
+      return {
+        query: args.query,
+        count: results.length,
+        patterns: results.slice(0, limit)
+      }
     }
 
     case 'quoth_propose_update': {
