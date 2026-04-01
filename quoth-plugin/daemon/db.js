@@ -119,12 +119,15 @@ function createDb(dbPath) {
 
   db.getTopPatterns = function(limit = 5, tags = []) {
     let query = `SELECT * FROM patterns WHERE status = 'active'`
+    const params = []
     if (tags.length > 0) {
-      const tagConditions = tags.map(t => `tags LIKE '%"${t}"%'`).join(' OR ')
+      const tagConditions = tags.map(() => `tags LIKE ?`).join(' OR ')
       query += ` AND (${tagConditions})`
+      tags.forEach(t => params.push(`%"${t}"%`))
     }
     query += ` ORDER BY confidence DESC LIMIT ?`
-    return db.prepare(query).all(limit).map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
+    params.push(limit)
+    return db.prepare(query).all(...params).map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
   }
 
   db.applyConfidenceDelta = function(id, delta) {
