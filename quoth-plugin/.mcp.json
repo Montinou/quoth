@@ -2,7 +2,12 @@
   "mcpServers": {
     "quoth": {
       "type": "http",
-      "url": "https://quoth.triqual.dev/api/mcp"
+      "url": "https://quoth.triqual.dev/api/mcp/sse"
+    },
+    "quoth-learning": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/quoth-learning-server.js"],
+      "type": "stdio"
     }
   }
 }

@@ -20,6 +20,11 @@
     },
     "clerk": {
       "url": "https://mcp.clerk.com/mcp"
+    },
+    "quoth-learning": {
+      "command": "node",
+      "args": ["quoth-plugin/mcp/quoth-learning-server.js"],
+      "type": "stdio"
     }
   }
 }
