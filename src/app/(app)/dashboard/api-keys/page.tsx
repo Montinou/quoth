@@ -45,7 +45,7 @@ interface ApiKey {
   key_prefix: string;
   label: string;
   created_at: string;
-  expires_at: string;
+  expires_at: string | null;
   last_used_at: string | null;
 }
 
@@ -301,11 +301,11 @@ export default function ApiKeysPage() {
                       })}
                     </TableCell>
                     <TableCell className="text-sm text-gray-400">
-                      {new Date(key.expires_at).toLocaleDateString('en-US', {
+                      {key.expires_at ? new Date(key.expires_at).toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: 'short',
                         day: 'numeric',
-                      })}
+                      }) : 'Never'}
                     </TableCell>
                     <TableCell className="text-sm">
                       {key.last_used_at ? (
@@ -321,7 +321,7 @@ export default function ApiKeysPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {new Date(key.expires_at) > new Date() ? (
+                      {!key.expires_at || new Date(key.expires_at) > new Date() ? (
                         <span className="text-xs px-2 py-1 bg-green-500/10 text-green-400 rounded-full border border-green-500/20">
                           Active
                         </span>

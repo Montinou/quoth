@@ -36,9 +36,9 @@ export async function generateAgentApiKey(params: {
   const keyPrefix = fullKey.substring(0, 12); // qth_XXXXXXXX
   const keyHash = createHash('sha256').update(fullKey).digest('hex');
 
-  const expiresAt = params.expiresDays
-    ? new Date(Date.now() + params.expiresDays * 86400000)
-    : null;
+  const defaultExpireDays = 90;
+  const days = params.expiresDays ?? defaultExpireDays;
+  const expiresAt = new Date(Date.now() + days * 86400000);
 
   const db = getDb();
   const [inserted] = await db
