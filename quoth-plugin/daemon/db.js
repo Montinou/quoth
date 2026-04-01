@@ -75,6 +75,17 @@ CREATE INDEX IF NOT EXISTS idx_patterns_confidence ON patterns(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
 `
 
+function cosineSimilarity(a, b) {
+  let dot = 0, magA = 0, magB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    magA += a[i] * a[i]
+    magB += b[i] * b[i]
+  }
+  const mag = Math.sqrt(magA) * Math.sqrt(magB)
+  return mag === 0 ? 0 : dot / mag
+}
+
 function createDb(dbPath) {
   const dir = path.dirname(dbPath)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
@@ -82,12 +93,26 @@ function createDb(dbPath) {
   const db = new Database(dbPath)
   db.exec(SCHEMA)
 
+  // Runtime migration: add promotion tracking columns if not present
+  const existingCols = db.prepare('PRAGMA table_info(patterns)').all().map(r => r.name)
+  const promotionCols = [
+    { name: 'promoted_at', type: 'INTEGER' },
+    { name: 'cloud_document_id', type: 'TEXT' },
+    { name: 'promoted_confidence', type: 'REAL' },
+    { name: 'applicability', type: "TEXT DEFAULT 'narrow'" }
+  ]
+  for (const col of promotionCols) {
+    if (!existingCols.includes(col.name)) {
+      db.exec(`ALTER TABLE patterns ADD COLUMN ${col.name} ${col.type}`)
+    }
+  }
+
   db.upsertPattern = function(p) {
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
-        confidence, tags, source, status)
+        confidence, tags, source, status, embedding)
       VALUES (@id, @name, @pattern_type, @condition, @action, @description,
-        @confidence, @tags, @source, @status)
+        @confidence, @tags, @source, @status, @embedding)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         condition = excluded.condition,
@@ -96,6 +121,7 @@ function createDb(dbPath) {
         confidence = excluded.confidence,
         tags = excluded.tags,
         source = excluded.source,
+        embedding = COALESCE(excluded.embedding, patterns.embedding),
         updated_at = strftime('%s','now') * 1000
     `).run({
       id: p.id,
@@ -107,7 +133,8 @@ function createDb(dbPath) {
       confidence: p.confidence ?? 0.5,
       tags: JSON.stringify(p.tags || []),
       source: p.source || 'distilled',
-      status: p.status || 'active'
+      status: p.status || 'active',
+      embedding: p.embedding || null
     })
   }
 
@@ -128,6 +155,26 @@ function createDb(dbPath) {
     query += ` ORDER BY confidence DESC LIMIT ?`
     params.push(limit)
     return db.prepare(query).all(...params).map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
+  }
+
+  db.searchBySimilarity = function(queryVector, limit = 5, tags = []) {
+    let query = `SELECT * FROM patterns WHERE status = 'active' AND embedding IS NOT NULL`
+    const params = []
+    if (tags.length > 0) {
+      const tagConditions = tags.map(() => `tags LIKE ?`).join(' OR ')
+      query += ` AND (${tagConditions})`
+      tags.forEach(t => params.push(`%"${t}"%`))
+    }
+    const rows = db.prepare(query).all(...params)
+    if (rows.length === 0) return db.getTopPatterns(limit, tags)
+
+    const scored = rows.map(row => {
+      let sim = 0
+      try { sim = cosineSimilarity(queryVector, JSON.parse(row.embedding)) } catch {}
+      return { ...row, tags: JSON.parse(row.tags || '[]'), _similarity: sim }
+    })
+    scored.sort((a, b) => b._similarity - a._similarity)
+    return scored.slice(0, limit)
   }
 
   db.applyConfidenceDelta = function(id, delta) {
@@ -167,7 +214,18 @@ function createDb(dbPath) {
         AND (success_count + failure_count) > 10
         AND status = 'active'
         AND source = 'distilled'
-    `).all()
+    `).all().map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
+  }
+
+  db.markPromoted = function(id, cloudDocumentId, confidence) {
+    db.prepare(`
+      UPDATE patterns SET
+        promoted_at = strftime('%s','now') * 1000,
+        cloud_document_id = ?,
+        promoted_confidence = ?,
+        updated_at = strftime('%s','now') * 1000
+      WHERE id = ?
+    `).run(cloudDocumentId, confidence, id)
   }
 
   db.appendTrajectoryEntry = function(entry) {

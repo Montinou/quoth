@@ -79,4 +79,69 @@ describe('db', () => {
     const p = db.getPattern('floor-p')
     expect(p.confidence).toBeGreaterThanOrEqual(0.0)
   })
+
+  it('stores and retrieves embedding in upsertPattern', () => {
+    const vec = [1, 0, 0]
+    db.upsertPattern({ id: 'emb-1', name: 'e', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'test',
+      embedding: JSON.stringify(vec) })
+    const p = db.getPattern('emb-1')
+    expect(JSON.parse(p.embedding)).toEqual(vec)
+  })
+
+  it('searchBySimilarity returns closest vector match', () => {
+    db.upsertPattern({ id: 'vec-1', name: 'v1', pattern_type: 'code-pattern',
+      condition: 'c', action: 'use :visible', confidence: 0.5, tags: [], source: 'test',
+      embedding: JSON.stringify([1, 0, 0]) })
+    db.upsertPattern({ id: 'vec-2', name: 'v2', pattern_type: 'code-pattern',
+      condition: 'c', action: 'use data-testid', confidence: 0.5, tags: [], source: 'test',
+      embedding: JSON.stringify([0, 1, 0]) })
+    const results = db.searchBySimilarity([0.9, 0.1, 0], 5)
+    expect(results[0].id).toBe('vec-1')
+  })
+
+  it('searchBySimilarity falls back to confidence sort when no embeddings stored', () => {
+    db.upsertPattern({ id: 'no-emb-hi', name: 'h', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.9, tags: [], source: 'test' })
+    db.upsertPattern({ id: 'no-emb-lo', name: 'l', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.3, tags: [], source: 'test' })
+    const results = db.searchBySimilarity([1, 0, 0], 5)
+    expect(results[0].id).toBe('no-emb-hi')
+  })
+
+  it('has promoted_at, cloud_document_id, promoted_confidence, applicability columns', () => {
+    const cols = db.prepare("PRAGMA table_info(patterns)").all().map(r => r.name)
+    expect(cols).toContain('promoted_at')
+    expect(cols).toContain('cloud_document_id')
+    expect(cols).toContain('promoted_confidence')
+    expect(cols).toContain('applicability')
+  })
+
+  it('markPromoted sets all three promotion fields', () => {
+    db.upsertPattern({ id: 'promo-1', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.9, tags: [], source: 'distilled' })
+    db.markPromoted('promo-1', 'doc-uuid-123', 0.9)
+    const p = db.getPattern('promo-1')
+    expect(p.cloud_document_id).toBe('doc-uuid-123')
+    expect(p.promoted_confidence).toBeCloseTo(0.9)
+    expect(p.promoted_at).toBeGreaterThan(0)
+  })
+
+  it('getPromotionCandidates returns patterns above threshold', () => {
+    db.upsertPattern({ id: 'cand-1', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.85, tags: [], source: 'distilled' })
+    db.prepare("UPDATE patterns SET success_count = 8, failure_count = 3 WHERE id = 'cand-1'").run()
+    const candidates = db.getPromotionCandidates()
+    expect(candidates.find(c => c.id === 'cand-1')).toBeTruthy()
+  })
+
+  it('getPromotionCandidates returns parsed tags array', () => {
+    db.upsertPattern({ id: 'cand-2', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.85, tags: ['foo', 'bar'], source: 'distilled' })
+    db.prepare("UPDATE patterns SET success_count = 8, failure_count = 3 WHERE id = 'cand-2'").run()
+    const candidates = db.getPromotionCandidates()
+    const c = candidates.find(c => c.id === 'cand-2')
+    expect(Array.isArray(c.tags)).toBe(true)
+    expect(c.tags).toContain('foo')
+  })
 })
