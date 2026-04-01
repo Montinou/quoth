@@ -1,13 +1,9 @@
 {
-  "name": "quoth",
-  "version": "2.0.0",
-  "description": "AI Memory plugin with local-first storage, configurable strictness, and quoth-memory subagent for context summarization. Transforms documentation from 'search and read' to 'automatic memory'.",
-  "author": {
-    "name": "Montinou",
-    "url": "https://github.com/Montinou"
-  },
-  "homepage": "https://quoth.quoth.triqual.dev",
-  "repository": "https://github.com/Montinou/quoth-mcp",
-  "license": "MIT",
-  "keywords": ["documentation", "mcp", "ai", "claude-code", "memory", "patterns", "quoth", "ai-memory"]
+  "name": "quoth-plugin",
+  "version": "1.0.0",
+  "description": "Autonomous self-learning layer for Claude Code — logs agent trajectories, scores patterns, injects learnings",
+  "author": "AttorneyShare",
+  "mcpServers": ["quoth", "quoth-learning"],
+  "hooks": "hooks/hooks.json",
+  "skills": "skills/"
 }
