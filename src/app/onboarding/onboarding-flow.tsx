@@ -286,77 +286,7 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-// ── Step 0: Organization ─────────────────────────────────────────────────────
-
-function StepOrganization({
-  onSubmit,
-  currentStep,
-  totalSteps,
-  loading,
-}: StepComponentProps) {
-  const [orgName, setOrgName] = useState("");
-  const [orgSlug, setOrgSlug] = useState("");
-  const [slugManual, setSlugManual] = useState(false);
-
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setOrgName(val);
-    if (!slugManual) setOrgSlug(slugify(val));
-  };
-
-  const handleSlugChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSlugManual(true);
-    setOrgSlug(slugify(e.target.value));
-  };
-
-  return (
-    <OnboardingStepLayout>
-      <LeftPanel
-        title="Welcome to Quoth"
-        description="Create your organization to get started."
-        currentStep={currentStep}
-        totalSteps={totalSteps}
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({ orgName, orgSlug });
-          }}
-          className="space-y-6 py-4"
-        >
-          <FormField
-            label="Organization name"
-            placeholder="Acme Labs"
-            name="orgName"
-            value={orgName}
-            onChange={handleNameChange}
-            disabled={loading}
-          />
-          <FormField
-            label="Organization slug"
-            placeholder="acme-labs"
-            name="orgSlug"
-            value={orgSlug}
-            onChange={handleSlugChange}
-            disabled={loading}
-          />
-          <Button
-            type="submit"
-            disabled={loading || !orgName.trim()}
-            className="mt-4 w-full bg-violet-600 hover:bg-violet-700 text-white"
-          >
-            {loading ? "Creating..." : "Continue"}
-          </Button>
-        </form>
-      </LeftPanel>
-      <RightPanel>
-        <GeometricPattern icon={<Layers className="size-8 text-violet-400/80" />} />
-      </RightPanel>
-    </OnboardingStepLayout>
-  );
-}
-
-// ── Step 1: Project ──────────────────────────────────────────────────────────
+// ── Step 0: Project ──────────────────────────────────────────────────────────
 
 function StepProject({
   onSubmit,
@@ -502,7 +432,7 @@ function StepProject({
   );
 }
 
-// ── Step 2: Agent ────────────────────────────────────────────────────────────
+// ── Step 1: Agent ────────────────────────────────────────────────────────────
 
 function StepAgent({
   onSubmit,
@@ -715,7 +645,7 @@ function StepAgent({
   );
 }
 
-// ── Step 3: Genesis ──────────────────────────────────────────────────────────
+// ── Step 2: Genesis ──────────────────────────────────────────────────────────
 
 const GENESIS_OPTIONS = [
   {
@@ -852,7 +782,7 @@ function StepDone({
               {savedData.orgId && (
                 <div className="flex items-center gap-2 text-sm">
                   <Check className="size-3.5 text-emerald-400" />
-                  <span className="text-gray-400">Organization created</span>
+                  <span className="text-gray-400">Organization ready</span>
                 </div>
               )}
               {(() => {
@@ -989,7 +919,7 @@ function StepDone({
 
 // ── Main Flow ────────────────────────────────────────────────────────────────
 
-const STEPS = [StepOrganization, StepProject, StepAgent, StepGenesis, StepDone];
+const STEPS = [StepProject, StepAgent, StepGenesis, StepDone];
 
 export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(initialStep);
@@ -1025,8 +955,8 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
         }
         setSavedData((prev) => ({ ...prev, ...flatData }));
 
-        // Step 4 (Done) -> redirect to dashboard
-        if (currentStep === 4) {
+        // Step 3 (Done) -> redirect to dashboard
+        if (currentStep === 3) {
           router.push("/dashboard");
           return;
         }

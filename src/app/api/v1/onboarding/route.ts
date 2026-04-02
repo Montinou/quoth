@@ -130,19 +130,16 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  // Step 0: Project (org already created during Clerk signup)
   const Step0Data = z.object({
-    orgName: z.string().min(1).max(100).optional(),
-    orgSlug: z.string().min(1).max(100).optional(),
-  }).passthrough();
-
-  const Step1Data = z.object({
     action: z.enum(['add', 'continue']).optional(),
     projectName: z.string().min(1).max(100).optional(),
     projectSlug: z.string().min(1).max(100).optional(),
     description: z.string().max(500).optional(),
   }).passthrough();
 
-  const Step2Data = z.object({
+  // Step 1: Agent
+  const Step1Data = z.object({
     action: z.enum(['add', 'continue', 'skip']).optional(),
     agentName: z.string().min(1).max(100).optional(),
     displayName: z.string().min(1).max(100).optional(),
@@ -151,7 +148,8 @@ export async function POST(req: Request) {
     projectId: z.string().uuid().optional(),
   }).passthrough();
 
-  const Step3Data = z.object({
+  // Step 2: Genesis
+  const Step2Data = z.object({
     genesisDepth: z.enum(['skip', 'minimal', 'standard', 'comprehensive']).optional(),
   }).passthrough();
 
@@ -159,12 +157,11 @@ export async function POST(req: Request) {
     0: Step0Data,
     1: Step1Data,
     2: Step2Data,
-    3: Step3Data,
-    4: z.record(z.unknown()),
+    3: z.record(z.unknown()),
   };
 
   const OnboardingInput = z.object({
-    step: z.number().int().min(0).max(4),
+    step: z.number().int().min(0).max(3),
     data: z.record(z.unknown()),
   });
 
@@ -187,7 +184,7 @@ export async function POST(req: Request) {
 
   // Fetch user row
   const [user] = await db
-    .select({ id: users.id, metadata: users.metadata })
+    .select({ id: users.id, metadata: users.metadata, defaultOrgId: users.defaultOrgId })
     .from(users)
     .where(eq(users.clerkUserId, userId))
     .limit(1);
@@ -199,80 +196,28 @@ export async function POST(req: Request) {
   const meta = parseMetadata(user.metadata);
 
   try {
-    // ── Step 0: Organization ───────────────────────────────────────────
+    // ── Step 0: Project ────────────────────────────────────────────────
+    // Org is already created during Clerk signup — look up user's defaultOrgId
     if (step === 0) {
-      const orgName = String(data.orgName || '').trim();
-      const orgSlug = slugify(String(data.orgSlug || orgName));
+      // Resolve orgId: prefer already-stored value, fall back to user.defaultOrgId
+      let orgId = meta.onboarding_data.orgId ?? user.defaultOrgId ?? undefined;
 
-      if (!orgName || !orgSlug) {
-        return Response.json({ error: 'Organization name is required' }, { status: 400 });
-      }
-
-      // Find or create org
-      let [existing] = await db
-        .select({ id: organizations.id })
-        .from(organizations)
-        .where(eq(organizations.slug, orgSlug))
-        .limit(1);
-
-      let orgId: string;
-
-      if (existing) {
-        // Verify the current user is already a member of this org
+      if (!orgId) {
+        // Last resort: find any org the user is a member of
         const [membership] = await db
           .select({ orgId: orgMembers.orgId })
           .from(orgMembers)
-          .where(and(eq(orgMembers.orgId, existing.id), eq(orgMembers.userId, user.id)))
+          .where(eq(orgMembers.userId, user.id))
           .limit(1);
-
-        if (!membership) {
-          return Response.json(
-            { error: 'Organization slug is already taken. Please choose a different name.' },
-            { status: 409 },
-          );
-        }
-
-        orgId = existing.id;
-      } else {
-        const [created] = await db
-          .insert(organizations)
-          .values({ name: orgName, slug: orgSlug })
-          .returning({ id: organizations.id });
-        orgId = created!.id;
-
-        // Add user as owner of the org
-        await db.insert(orgMembers).values({
-          orgId,
-          userId: user.id,
-          role: 'owner',
-        });
+        orgId = membership?.orgId;
       }
 
-      // Update user default org
-      meta.onboarding_step = 1;
-      meta.onboarding_data.orgId = orgId;
-
-      await db
-        .update(users)
-        .set({
-          defaultOrgId: orgId,
-          metadata: { ...meta },
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, user.id));
-
-      // Sync org_id to Clerk so JWT claims include it
-      void syncToClerk(userId, { default_org_id: orgId });
-
-      return Response.json({ success: true, step: 1, data: meta.onboarding_data });
-    }
-
-    // ── Step 1: Project ────────────────────────────────────────────────
-    if (step === 1) {
-      const orgId = meta.onboarding_data.orgId;
       if (!orgId) {
-        return Response.json({ error: 'Complete step 0 first' }, { status: 400 });
+        return Response.json({ error: 'No organization found. Please complete signup first.' }, { status: 400 });
       }
+
+      // Store orgId in meta so downstream steps can use it
+      meta.onboarding_data.orgId = orgId;
 
       const action = String(data.action || 'continue');
 
@@ -303,7 +248,6 @@ export async function POST(req: Request) {
             .returning({ id: projects.id });
           projectId = created!.id;
 
-          // Add user as admin of the project
           await db.insert(projectMembers).values({
             projectId,
             userId: user.id,
@@ -311,7 +255,6 @@ export async function POST(req: Request) {
           });
         }
 
-        // Set defaultProjectId on first project
         const isFirst = meta.onboarding_data.projectIds.length === 0;
         meta.onboarding_data.projectIds = [...meta.onboarding_data.projectIds, projectId];
 
@@ -325,7 +268,6 @@ export async function POST(req: Request) {
 
         await db.update(users).set(updateSet).where(eq(users.id, user.id));
 
-        // Sync default_project_id + org_id to Clerk so JWT claims include them
         if (isFirst) {
           void syncToClerk(userId, {
             default_project_id: projectId,
@@ -334,30 +276,30 @@ export async function POST(req: Request) {
           });
         }
 
-        return Response.json({ success: true, step: 1, data: meta.onboarding_data });
+        return Response.json({ success: true, step: 0, data: meta.onboarding_data });
       }
 
-      // action === 'continue' — advance to step 2
+      // action === 'continue' — advance to step 1
       if (!meta.onboarding_data.projectIds.length) {
         return Response.json({ error: 'Create at least one project' }, { status: 400 });
       }
 
-      meta.onboarding_step = 2;
+      meta.onboarding_step = 1;
 
       await db
         .update(users)
         .set({ metadata: { ...meta }, updatedAt: new Date() })
         .where(eq(users.id, user.id));
 
-      return Response.json({ success: true, step: 2, data: meta.onboarding_data });
+      return Response.json({ success: true, step: 1, data: meta.onboarding_data });
     }
 
-    // ── Step 2: Agent ──────────────────────────────────────────────────
-    if (step === 2) {
-      const orgId = meta.onboarding_data.orgId;
+    // ── Step 1: Agent ──────────────────────────────────────────────────
+    if (step === 1) {
+      const orgId = meta.onboarding_data.orgId ?? user.defaultOrgId ?? undefined;
 
       if (!orgId || !meta.onboarding_data.projectIds.length) {
-        return Response.json({ error: 'Complete steps 0-1 first' }, { status: 400 });
+        return Response.json({ error: 'Complete step 0 first' }, { status: 400 });
       }
 
       const action = String(data.action || 'continue');
@@ -367,12 +309,10 @@ export async function POST(req: Request) {
         const displayName = String(data.displayName || 'Claude').trim();
         const model = String(data.model || 'claude-sonnet-4-6');
         const role = String(data.role || 'orchestrator');
-        // Which project to assign the agent to (defaults to first)
         const targetProjectId = String(
           data.projectId || meta.onboarding_data.projectIds[0]
         );
 
-        // Generate a signing key for the agent
         const signingKey = randomBytes(32).toString('hex');
 
         const [created] = await db
@@ -391,7 +331,6 @@ export async function POST(req: Request) {
           .returning({ id: agentRegistry.id });
         const agentId = created!.id;
 
-        // Assign agent to selected project
         await db.insert(agentProjects).values({
           agentId,
           projectId: targetProjectId,
@@ -406,11 +345,26 @@ export async function POST(req: Request) {
           .set({ metadata: { ...meta }, updatedAt: new Date() })
           .where(eq(users.id, user.id));
 
-        return Response.json({ success: true, step: 2, data: meta.onboarding_data });
+        return Response.json({ success: true, step: 1, data: meta.onboarding_data });
       }
 
-      // action === 'continue' or 'skip' — advance to step 3
+      // action === 'continue' or 'skip' — advance to step 2
+      meta.onboarding_step = 2;
+
+      await db
+        .update(users)
+        .set({ metadata: { ...meta }, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      return Response.json({ success: true, step: 2, data: meta.onboarding_data });
+    }
+
+    // ── Step 2: Genesis ────────────────────────────────────────────────
+    if (step === 2) {
+      const genesisDepth = String(data.genesisDepth || 'skip');
+
       meta.onboarding_step = 3;
+      meta.onboarding_data.genesisDepth = genesisDepth;
 
       await db
         .update(users)
@@ -420,24 +374,9 @@ export async function POST(req: Request) {
       return Response.json({ success: true, step: 3, data: meta.onboarding_data });
     }
 
-    // ── Step 3: Genesis ────────────────────────────────────────────────
+    // ── Step 3: Done ───────────────────────────────────────────────────
     if (step === 3) {
-      const genesisDepth = String(data.genesisDepth || 'skip');
-
-      meta.onboarding_step = 4;
-      meta.onboarding_data.genesisDepth = genesisDepth;
-
-      await db
-        .update(users)
-        .set({ metadata: { ...meta }, updatedAt: new Date() })
-        .where(eq(users.id, user.id));
-
-      return Response.json({ success: true, step: 4, data: meta.onboarding_data });
-    }
-
-    // ── Step 4: Done ───────────────────────────────────────────────────
-    if (step === 4) {
-      meta.onboarding_step = 4;
+      meta.onboarding_step = 3;
       meta.onboarding_completed = true;
 
       await db
@@ -445,8 +384,7 @@ export async function POST(req: Request) {
         .set({ metadata: { ...meta }, updatedAt: new Date() })
         .where(eq(users.id, user.id));
 
-      // Final comprehensive sync to Clerk — ensure all claims are populated
-      const orgId = meta.onboarding_data.orgId;
+      const orgId = meta.onboarding_data.orgId ?? user.defaultOrgId ?? undefined;
       const projectId = meta.onboarding_data.projectIds[0];
       if (orgId || projectId) {
         void syncToClerk(userId, {
@@ -457,7 +395,7 @@ export async function POST(req: Request) {
         });
       }
 
-      return Response.json({ success: true, step: 4, data: meta.onboarding_data });
+      return Response.json({ success: true, step: 3, data: meta.onboarding_data });
     }
 
     return Response.json({ error: 'Invalid step' }, { status: 400 });
