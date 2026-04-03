@@ -1,9 +1,29 @@
 {
-  "name": "quoth-plugin",
-  "version": "1.0.0",
-  "description": "Autonomous self-learning layer for Claude Code — logs agent trajectories, scores patterns, injects learnings",
-  "author": "AttorneyShare",
-  "mcpServers": ["quoth", "quoth-learning"],
-  "hooks": "hooks/hooks.json",
-  "skills": "skills/"
+  "name": "quoth",
+  "version": "3.1.0",
+  "description": "Universal self-learning and agent coordination for Claude Code. Captures trajectories, learns patterns, shares knowledge across projects.",
+  "author": {
+    "name": "Montino",
+    "url": "https://github.com/Montinou/quoth"
+  },
+  "homepage": "https://github.com/Montinou/quoth",
+  "keywords": ["self-learning", "patterns", "memory", "agents", "coordination"],
+  "mcpServers": {
+    "quoth-learning": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/../mcp/quoth-learning-server.js"]
+    }
+  },
+  "hooks": "./hooks/hooks.json",
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "userConfig": {
+    "QUOTH_API_KEY": {
+      "type": "string",
+      "title": "Quoth Cloud API Key",
+      "description": "Optional qth_* key for cloud pattern sync",
+      "required": false,
+      "sensitive": true
+    }
+  }
 }

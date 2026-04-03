@@ -30,9 +30,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.swarm
+.claude-flow
 
 #quoth agent tools
-.quoth/
+.quoth
 .*
 !.npmrc
 !.gitignore
@@ -59,4 +61,5 @@ supabase/.temp/
 .agent/
 .quoth/sessions/
 .claude
+!**/.claude-plugin
 docs/evidence-to-delete-later/
