@@ -112,6 +112,112 @@ const TOOLS = [
     }
   },
   {
+    name: 'quoth_ingest_trajectory',
+    description: 'Ingest trajectory entries from any source (OpenClaw, external agents, batch import). Writes to local trajectory store and signals daemon for processing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entries: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              event: { type: 'string', default: 'tool_use' },
+              agent: { type: 'string', description: 'Agent name (e.g. "morfeo", "hermes", "claude-code")' },
+              project: { type: 'string', description: 'Project namespace' },
+              task: { type: 'string', description: 'What the agent was doing' },
+              outcome: { type: 'string', enum: ['success', 'failure'], description: 'Task outcome' },
+              pattern_used: { type: 'string', description: 'Pattern that was applied (if any)' },
+              source: { type: 'string', default: 'api', description: 'Source: claude-code, openclaw-telegram, openclaw-whatsapp, api' }
+            },
+            required: ['agent', 'task', 'outcome']
+          },
+          description: 'Array of trajectory entries to ingest'
+        }
+      },
+      required: ['entries']
+    }
+  },
+  {
+    name: 'quoth_project_patterns',
+    description: 'Get patterns relevant to a specific project (project-scoped + global patterns). Use at session start to inject learned patterns into context.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project namespace (e.g. "quoth", "exolar", "culturapp")' },
+        limit: { type: 'number', default: 10, description: 'Max patterns to return' }
+      },
+      required: ['project']
+    }
+  },
+  {
+    name: 'quoth_promote_global',
+    description: 'Manually promote a project-local pattern to global scope so all projects can benefit from it',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        patternId: { type: 'string', description: 'Pattern ID to promote' }
+      },
+      required: ['patternId']
+    }
+  },
+  {
+    name: 'quoth_agent_register',
+    description: 'Register or update an agent in the Quoth coordination layer. Call at session start.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Unique agent identifier (e.g. "claude-code-montino-12345")' },
+        name: { type: 'string', description: 'Human-readable name' },
+        type: { type: 'string', enum: ['claude-code', 'openclaw', 'daemon', 'worker'], description: 'Agent type' },
+        project: { type: 'string', description: 'Current project namespace' },
+        platform: { type: 'string', description: 'Host platform (montino, aws, local)' },
+        capabilities: { type: 'array', items: { type: 'string' }, description: 'Agent capabilities' },
+        metadata: { type: 'object', description: 'Additional metadata' }
+      },
+      required: ['agentId', 'name', 'type']
+    }
+  },
+  {
+    name: 'quoth_agent_heartbeat',
+    description: 'Send heartbeat to keep agent status as online. Call periodically.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string' },
+        status: { type: 'string', enum: ['online', 'busy', 'idle'], description: 'Optional status update' }
+      },
+      required: ['agentId']
+    }
+  },
+  {
+    name: 'quoth_agent_list',
+    description: 'List registered agents, optionally filtered by project, type, or status',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string' },
+        type: { type: 'string' },
+        status: { type: 'string', enum: ['online', 'offline', 'busy', 'idle'] },
+        limit: { type: 'number', default: 20 }
+      }
+    }
+  },
+  {
+    name: 'quoth_assign_task',
+    description: 'Assign a task to an agent via the event system. The target agent can poll for assigned tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Target agent ID' },
+        task: { type: 'string', description: 'Task description' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+        metadata: { type: 'object', description: 'Additional task context' }
+      },
+      required: ['agentId', 'task']
+    }
+  },
+  {
     name: 'quoth_search_patterns',
     description: 'Search local patterns by semantic similarity to a query. Use this to find patterns related to specific features, error types, or techniques.',
     inputSchema: {
@@ -231,6 +337,45 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
       return { skills }
     }
 
+    case 'quoth_ingest_trajectory': {
+      const entries = args.entries || []
+      if (entries.length === 0) return { ingested: 0 }
+
+      const date = new Date().toISOString().slice(0, 10)
+      const source = entries[0]?.source || 'api'
+      const trajFile = path.join(TRAJECTORIES_DIR, `${source}-${date}.jsonl`)
+
+      // Ensure directory exists
+      fs.mkdirSync(TRAJECTORIES_DIR, { recursive: true })
+
+      // Write all entries
+      const lines = entries.map(e => JSON.stringify({
+        event: e.event || 'tool_use',
+        agent: e.agent,
+        project: e.project || 'unknown',
+        session: e.session || `ingest-${Date.now()}`,
+        task: e.task,
+        outcome: e.outcome,
+        pattern_used: e.pattern_used || null,
+        source: e.source || 'api',
+        timestamp: Date.now()
+      })).join('\n') + '\n'
+
+      fs.appendFileSync(trajFile, lines)
+
+      // Signal daemon to process new entries
+      let daemonSignaled = false
+      const pidFile = path.join(QUOTH_HOME, 'daemon.pid')
+      if (fs.existsSync(pidFile)) {
+        try {
+          const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim())
+          process.kill(pid, 'SIGUSR1')
+          daemonSignaled = true
+        } catch {}
+      }
+
+      return { ingested: entries.length, trajectoryFile: trajFile, daemonSignaled }
+    }
     case 'quoth_search_patterns': {
       const limit = args.limit || 5
       let results = []
@@ -274,6 +419,89 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
         query: args.query,
         count: results.length,
         patterns: results.slice(0, limit)
+      }
+    }
+
+    case 'quoth_project_patterns': {
+      const patterns = db.getProjectPatterns(args.project, args.limit || 10)
+      return {
+        project: args.project,
+        count: patterns.length,
+        patterns: patterns.map(p => ({
+          id: p.id,
+          name: p.name,
+          condition: p.condition,
+          action: p.action,
+          confidence: p.confidence,
+          namespace: p.namespace || 'default',
+          tags: p.tags,
+          source: p.source
+        }))
+      }
+    }
+
+    case 'quoth_promote_global': {
+      const pattern = db.getPattern(args.patternId)
+      if (!pattern) return { error: `Pattern '${args.patternId}' not found` }
+      if (pattern.confidence < 0.6) {
+        return { error: `Pattern confidence ${pattern.confidence.toFixed(2)} too low (min 0.6 for global promotion)` }
+      }
+      if (pattern.namespace === 'global') {
+        return { alreadyGlobal: true, patternId: args.patternId }
+      }
+      db.promoteToGlobal(args.patternId)
+      return { promoted: true, patternId: args.patternId, previousNamespace: pattern.namespace || 'default' }
+    }
+
+    case 'quoth_agent_register': {
+      db.registerAgent({
+        agentId: args.agentId,
+        name: args.name,
+        type: args.type,
+        project: args.project,
+        platform: args.platform,
+        capabilities: args.capabilities,
+        metadata: args.metadata
+      })
+      db.emitEvent('agent.registered', args.agentId, args.project, {
+        name: args.name,
+        type: args.type,
+        platform: args.platform
+      })
+      return { registered: true, agentId: args.agentId }
+    }
+
+    case 'quoth_agent_heartbeat': {
+      db.heartbeat(args.agentId, args.status)
+      return { ok: true, agentId: args.agentId, timestamp: Date.now() }
+    }
+
+    case 'quoth_agent_list': {
+      const agents = db.listAgents({
+        project: args.project,
+        type: args.type,
+        status: args.status,
+        limit: args.limit || 20
+      })
+      return { count: agents.length, agents }
+    }
+
+    case 'quoth_assign_task': {
+      // Verify agent exists
+      const targetAgent = db.listAgents({ limit: 100 }).find(a => a.agent_id === args.agentId)
+
+      const assignResult = db.emitEvent('task.assigned', args.agentId, targetAgent?.project, {
+        task: args.task,
+        priority: args.priority || 'medium',
+        assignedBy: 'mcp',
+        ...(args.metadata || {})
+      })
+
+      return {
+        assigned: true,
+        eventId: assignResult.lastInsertRowid,
+        agentId: args.agentId,
+        task: args.task
       }
     }
 

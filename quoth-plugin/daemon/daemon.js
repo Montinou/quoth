@@ -24,10 +24,13 @@ const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 })
 
 const db = createDb(DB_PATH)
+db.initHnsw()
 const jobQueue = []
 let isProcessing = false
 let decayTimer = null
 let deepConsolidateTimer = null
+let hnswSaveTimer = null
+let agentCleanupTimer = null
 
 // --- Logging ---
 function log(level, msg, data) {
@@ -121,7 +124,8 @@ async function processQueue() {
 // --- Process a single trajectory entry ---
 async function processEntry({ entry, filePath, line }) {
   try {
-    log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome })
+    const project = entry.project || 'default'
+    log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome, project })
 
     const judgment = judge(entry)
     if (!judgment.effective) {
@@ -139,6 +143,10 @@ async function processEntry({ entry, filePath, line }) {
 
     if (consolidation.action === 'strengthen' && consolidation.targetId) {
       db.applyConfidenceDelta(consolidation.targetId, 0.03)
+      db.emitEvent('pattern.strengthened', entry.agent || 'daemon', project, {
+        patternId: consolidation.targetId,
+        delta: 0.03
+      })
       log('info', 'Strengthened pattern', { id: consolidation.targetId })
     } else {
       db.upsertPattern({
@@ -148,10 +156,20 @@ async function processEntry({ entry, filePath, line }) {
         condition: entry.task || 'agent task',
         action: distilled.pattern,
         confidence: 0.5,
-        tags: distilled.tags,
+        tags: [...distilled.tags, ...(project !== 'default' ? [`project:${project}`] : [])],
         source: distilled.source || entry.source || 'distilled',
         embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
       })
+      db.emitEvent('pattern.learned', entry.agent || 'daemon', project, {
+        patternId: distilled.id,
+        name: distilled.pattern.slice(0, 60),
+        confidence: 0.5,
+        source: distilled.source || 'distilled'
+      })
+      // Set namespace based on source project
+      if (project !== 'default') {
+        db.setPatternNamespace(distilled.id, project)
+      }
       log('info', 'New pattern', { id: distilled.id })
     }
 
@@ -185,6 +203,13 @@ function startDecayTimer() {
       log('error', 'Decay failed', { error: err.message })
     }
   }, 60 * 60 * 1000)
+}
+
+// --- Save HNSW index every 30 minutes ---
+function startHnswSaveTimer() {
+  hnswSaveTimer = setInterval(() => {
+    try { db.saveHnsw() } catch {}
+  }, 30 * 60 * 1000)
 }
 
 // --- Daily deep consolidation at 3am ---
@@ -248,19 +273,43 @@ Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives"
           (pattern.confidence - (pattern.promoted_confidence || 0)) > 0.1
         if (!needsPromotion) continue
 
-        const result = await promotePattern(pattern)
-        if (result) {
-          db.markPromoted(pattern.id, result.documentId, pattern.confidence)
+        const promoteResult = await promotePattern(pattern)
+        if (promoteResult) {
+          db.markPromoted(pattern.id, promoteResult.documentId, pattern.confidence)
+          db.emitEvent('pattern.promoted', 'daemon', null, {
+            patternId: pattern.id,
+            documentId: promoteResult.documentId,
+            confidence: pattern.confidence
+          })
           log('info', 'Pattern promoted to cloud', {
             id: pattern.id,
-            documentId: result.documentId,
-            version: result.version,
-            status: result.status
+            documentId: promoteResult.documentId,
+            version: promoteResult.version,
+            status: promoteResult.status
           })
         }
       }
     } catch (err) {
       log('error', 'Promotion phase failed', { error: err.message })
+    }
+
+    // Auto-promote broad patterns to global namespace
+    try {
+      const globalCandidates = db.prepare(`
+        SELECT * FROM patterns
+        WHERE status = 'active' AND namespace != 'global'
+          AND confidence > 0.8 AND (success_count + failure_count) > 10
+          AND applicability = 'broad'
+      `).all()
+      for (const p of globalCandidates) {
+        db.promoteToGlobal(p.id)
+        log('info', 'Pattern promoted to global', { id: p.id, from: p.namespace })
+      }
+      if (globalCandidates.length > 0) {
+        log('info', `Promoted ${globalCandidates.length} patterns to global namespace`)
+      }
+    } catch (err) {
+      log('error', 'Global promotion failed', { error: err.message })
     }
 
     // Exolar cross-validation placeholder
@@ -282,12 +331,27 @@ Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives"
 function clearTimers() {
   if (decayTimer) clearInterval(decayTimer)
   if (deepConsolidateTimer) clearTimeout(deepConsolidateTimer)
+  if (hnswSaveTimer) clearInterval(hnswSaveTimer)
+  if (agentCleanupTimer) clearInterval(agentCleanupTimer)
+}
+
+// --- Stale agent cleanup every 5 minutes ---
+function startAgentCleanupTimer() {
+  agentCleanupTimer = setInterval(() => {
+    try {
+      db.cleanupStaleAgents(300000) // 5 min timeout
+    } catch (err) {
+      log('error', 'Agent cleanup failed', { error: err.message })
+    }
+  }, 5 * 60 * 1000)
 }
 
 // --- Start ---
 log('info', 'Quoth daemon started', { pid: process.pid, home: QUOTH_HOME })
 watchTrajectories()
 startDecayTimer()
+startHnswSaveTimer()
+startAgentCleanupTimer()
 scheduleDeepConsolidate()
 scanAndEnqueue()
 processQueue()

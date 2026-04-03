@@ -3,6 +3,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 const fs = require('fs')
+const { HnswIndex } = require('./lib/hnsw.js')
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -71,6 +72,31 @@ CREATE TABLE IF NOT EXISTS memory_entries (
   UNIQUE(namespace, key)
 );
 
+CREATE TABLE IF NOT EXISTS agent_registry (
+  agent_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  project TEXT,
+  platform TEXT,
+  status TEXT DEFAULT 'online',
+  capabilities TEXT DEFAULT '[]',
+  last_heartbeat INTEGER,
+  registered_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
+  metadata TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type TEXT NOT NULL,
+  agent_id TEXT,
+  project TEXT,
+  payload TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_patterns_confidence ON patterns(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
 `
@@ -116,6 +142,50 @@ function createDb(dbPath) {
     db.exec(`ALTER TABLE patterns ADD COLUMN beta REAL DEFAULT 1`)
   }
 
+  // Runtime migration: add namespace column for cross-project pattern sharing
+  const cols4 = db.prepare('PRAGMA table_info(patterns)').all().map(r => r.name)
+  if (!cols4.includes('namespace')) {
+    db.exec("ALTER TABLE patterns ADD COLUMN namespace TEXT DEFAULT 'default'")
+    db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_namespace ON patterns(namespace)")
+  }
+
+  // --- HNSW index state ---
+  const hnsw = new HnswIndex(1536)
+  let hnswHealthy = false
+
+  db.initHnsw = function() {
+    try {
+      const indexPath = path.join(path.dirname(dbPath), 'hnsw.index.json')
+      if (fs.existsSync(indexPath)) {
+        hnsw.load(indexPath)
+        hnswHealthy = true
+        return
+      }
+      hnsw.buildFromDb(db)
+      hnswHealthy = true
+      hnsw.save(indexPath)
+    } catch(e) {
+      hnswHealthy = false
+      // Don't crash — linear scan fallback still works
+    }
+  }
+
+  db.saveHnsw = function() {
+    if (!hnswHealthy) return
+    try {
+      const indexPath = path.join(path.dirname(dbPath), 'hnsw.index.json')
+      hnsw.save(indexPath)
+    } catch {}
+  }
+
+  db.rebuildHnsw = function() {
+    try {
+      hnsw.buildFromDb(db)
+      hnswHealthy = true
+      db.saveHnsw()
+    } catch { hnswHealthy = false }
+  }
+
   db.upsertPattern = function(p) {
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
@@ -145,6 +215,13 @@ function createDb(dbPath) {
       status: p.status || 'active',
       embedding: p.embedding || null
     })
+
+    if (p.embedding && hnswHealthy) {
+      try {
+        const vec = typeof p.embedding === 'string' ? JSON.parse(p.embedding) : p.embedding
+        hnsw.add(p.id, vec)
+      } catch {}
+    }
   }
 
   db.getPattern = function(id) {
@@ -167,6 +244,36 @@ function createDb(dbPath) {
   }
 
   db.searchBySimilarity = function(queryVector, limit = 5, tags = []) {
+    // Try HNSW first for fast approximate search
+    if (hnswHealthy && hnsw.size > 0) {
+      try {
+        // Get more candidates than needed for post-filtering
+        const candidates = hnsw.search(queryVector, limit * 3)
+        if (candidates.length > 0) {
+          const ids = candidates.map(c => c.id)
+          const placeholders = ids.map(() => '?').join(',')
+          let query = `SELECT * FROM patterns WHERE id IN (${placeholders}) AND status = 'active'`
+          const params = [...ids]
+          if (tags.length > 0) {
+            const tagConditions = tags.map(() => `tags LIKE ?`).join(' OR ')
+            query += ` AND (${tagConditions})`
+            tags.forEach(t => params.push(`%"${t}"%`))
+          }
+          const rows = db.prepare(query).all(...params)
+          // Re-score with exact cosine for final ranking
+          const scored = rows.map(row => ({
+            ...row,
+            tags: JSON.parse(row.tags || '[]'),
+            _similarity: cosineSimilarity(queryVector, JSON.parse(row.embedding))
+          }))
+          scored.sort((a, b) => b._similarity - a._similarity)
+          if (scored.length > 0) return scored.slice(0, limit)
+        }
+      } catch {}
+      // Fall through to linear scan on any HNSW error
+    }
+
+    // Linear scan fallback (original implementation)
     let query = `SELECT * FROM patterns WHERE status = 'active' AND embedding IS NOT NULL`
     const params = []
     if (tags.length > 0) {
@@ -299,6 +406,113 @@ function createDb(dbPath) {
     meta.processed = true
     db.prepare('UPDATE trajectory_steps SET metadata = ? WHERE id = ?')
       .run(JSON.stringify(meta), stepId)
+  }
+
+  db.getProjectPatterns = function(namespace, limit = 10) {
+    return db.prepare(`
+      SELECT * FROM patterns
+      WHERE status = 'active' AND (namespace = ? OR namespace = 'global')
+      ORDER BY confidence DESC LIMIT ?
+    `).all(namespace, limit).map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
+  }
+
+  db.promoteToGlobal = function(id) {
+    db.prepare(`
+      UPDATE patterns SET namespace = 'global', updated_at = strftime('%s','now') * 1000
+      WHERE id = ?
+    `).run(id)
+  }
+
+  db.setPatternNamespace = function(id, namespace) {
+    db.prepare(`
+      UPDATE patterns SET namespace = ?, updated_at = strftime('%s','now') * 1000
+      WHERE id = ?
+    `).run(namespace, id)
+  }
+
+  // --- Agent Registry ---
+
+  db.registerAgent = function(agent) {
+    db.prepare(`
+      INSERT INTO agent_registry (agent_id, name, type, project, platform, status, capabilities, last_heartbeat, metadata)
+      VALUES (@agent_id, @name, @type, @project, @platform, @status, @capabilities, @last_heartbeat, @metadata)
+      ON CONFLICT(agent_id) DO UPDATE SET
+        name = excluded.name,
+        type = excluded.type,
+        project = excluded.project,
+        platform = excluded.platform,
+        status = excluded.status,
+        capabilities = excluded.capabilities,
+        last_heartbeat = excluded.last_heartbeat,
+        metadata = excluded.metadata
+    `).run({
+      agent_id: agent.agentId,
+      name: agent.name,
+      type: agent.type,
+      project: agent.project || null,
+      platform: agent.platform || null,
+      status: agent.status || 'online',
+      capabilities: JSON.stringify(agent.capabilities || []),
+      last_heartbeat: Date.now(),
+      metadata: JSON.stringify(agent.metadata || {})
+    })
+  }
+
+  db.heartbeat = function(agentId, status) {
+    db.prepare(`
+      UPDATE agent_registry SET
+        last_heartbeat = ?,
+        status = COALESCE(?, status)
+      WHERE agent_id = ?
+    `).run(Date.now(), status || null, agentId)
+  }
+
+  db.listAgents = function(filters = {}) {
+    let query = 'SELECT * FROM agent_registry WHERE 1=1'
+    const params = []
+    if (filters.project) { query += ' AND project = ?'; params.push(filters.project) }
+    if (filters.type) { query += ' AND type = ?'; params.push(filters.type) }
+    if (filters.status) { query += ' AND status = ?'; params.push(filters.status) }
+    query += ' ORDER BY last_heartbeat DESC'
+    if (filters.limit) { query += ' LIMIT ?'; params.push(filters.limit) }
+    return db.prepare(query).all(...params).map(r => ({
+      ...r,
+      capabilities: JSON.parse(r.capabilities || '[]'),
+      metadata: JSON.parse(r.metadata || '{}'),
+      heartbeatAge: r.last_heartbeat ? Date.now() - r.last_heartbeat : null
+    }))
+  }
+
+  db.cleanupStaleAgents = function(timeoutMs = 300000) {
+    const cutoff = Date.now() - timeoutMs
+    db.prepare(`
+      UPDATE agent_registry SET status = 'offline'
+      WHERE status = 'online' AND last_heartbeat < ? AND last_heartbeat IS NOT NULL
+    `).run(cutoff)
+  }
+
+  // --- Event Sourcing ---
+
+  db.emitEvent = function(eventType, agentId, project, payload) {
+    return db.prepare(`
+      INSERT INTO events (event_type, agent_id, project, payload)
+      VALUES (?, ?, ?, ?)
+    `).run(eventType, agentId || null, project || null, JSON.stringify(payload))
+  }
+
+  db.getEvents = function(filters = {}) {
+    let query = 'SELECT * FROM events WHERE 1=1'
+    const params = []
+    if (filters.eventType) { query += ' AND event_type = ?'; params.push(filters.eventType) }
+    if (filters.agentId) { query += ' AND agent_id = ?'; params.push(filters.agentId) }
+    if (filters.project) { query += ' AND project = ?'; params.push(filters.project) }
+    if (filters.since) { query += ' AND created_at > ?'; params.push(filters.since) }
+    query += ' ORDER BY created_at DESC'
+    query += ` LIMIT ${filters.limit || 50}`
+    return db.prepare(query).all(...params).map(r => ({
+      ...r,
+      payload: JSON.parse(r.payload || '{}')
+    }))
   }
 
   return db
