@@ -29,6 +29,8 @@ const promotePatternBody = z.object({
   applicability: z.enum(['broad', 'narrow']),
   /** Daemon's embedding — same model (voyage/voyage-4-lite, 1024d) as cloud. */
   embedding: z.array(z.number()).optional(),
+  /** Project slug to promote to (optional — resolved from tags or defaults to first project) */
+  projectSlug: z.string().min(1).max(64).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,38 @@ export const POST = createApiHandler(
     const db = await getSecureDb(ctx!.orgId, ctx!.userId);
     const body = req.validatedBody as z.infer<typeof promotePatternBody>;
 
+    // Resolve projectId: from body.projectSlug, tags, ctx, or first project in org
+    let projectId = projectId;
+    if (!projectId || projectId === '') {
+      const { projects } = await import('@/db/schema');
+      const slug = body.projectSlug
+        || body.tags.find(t => t.startsWith('project:'))?.replace('project:', '')
+        || null;
+
+      if (slug) {
+        const [proj] = await db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(and(eq(projects.orgId, ctx!.orgId), eq(projects.slug, slug)))
+          .limit(1);
+        if (proj) projectId = proj.id;
+      }
+
+      // Fallback: first project in org
+      if (!projectId || projectId === '') {
+        const [first] = await db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(eq(projects.orgId, ctx!.orgId))
+          .limit(1);
+        if (first) projectId = first.id;
+      }
+
+      if (!projectId || projectId === '') {
+        throw forbidden('No project found in organization.');
+      }
+    }
+
     const filePath = `system/patterns/${body.patternId}`;
     const visibility = body.applicability === 'broad' ? 'shared' : 'project';
     const hash = await sha256(body.content);
@@ -78,7 +112,7 @@ export const POST = createApiHandler(
       .from(documents)
       .where(
         and(
-          eq(documents.projectId, ctx!.projectId),
+          eq(documents.projectId, projectId),
           eq(documents.filePath, filePath),
         ),
       )
@@ -110,7 +144,7 @@ export const POST = createApiHandler(
     const [doc] = await db
       .insert(documents)
       .values({
-        projectId: ctx!.projectId,
+        projectId: projectId,
         orgId: ctx!.orgId,
         filePath,
         title: body.name,
@@ -153,7 +187,7 @@ export const POST = createApiHandler(
     const chunkHash = await sha256(body.content);
     await db.insert(chunks).values({
       documentId: doc.id,
-      projectId: ctx!.projectId,
+      projectId: projectId,
       content: body.content,
       chunkHash,
       chunkIndex: 0,

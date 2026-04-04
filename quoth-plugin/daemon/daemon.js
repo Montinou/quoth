@@ -144,9 +144,34 @@ async function processQueue() {
 }
 
 // --- Process a single trajectory entry ---
+/**
+ * Detect the actual project from file paths in the task description.
+ * Corrects the namespace when sessions run from ~ but edit project-specific files.
+ */
+function detectProjectFromTask(task, fallback) {
+  if (!task) return fallback
+  // Match known project path patterns
+  const patterns = [
+    /projects\/agents-tools\/([\w-]+)/,
+    /\.openclaw\/workspaces\/([\w-]+)\/repo/,
+    /IPS_audit\/([\w-]+)/,
+    /projects\/([\w-]+)\//,
+  ]
+  for (const re of patterns) {
+    const m = task.match(re)
+    if (m) return m[1].toLowerCase()
+  }
+  return fallback
+}
+
 async function processEntry({ entry, filePath, line }) {
   try {
-    const project = entry.project || 'default'
+    // Detect actual project from file paths in the task (corrects ~ sessions)
+    const rawProject = entry.project || 'default'
+    const project = detectProjectFromTask(entry.task, rawProject)
+    if (project !== rawProject) {
+      log('debug', 'Namespace corrected', { from: rawProject, to: project, task: (entry.task || '').slice(0, 60) })
+    }
     log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome, project })
 
     const judgment = await judge(entry)

@@ -86,6 +86,7 @@ async function promotePattern(pattern) {
     failureCount: pattern.failure_count,
     tags,
     applicability: pattern.applicability || 'narrow',
+    projectSlug: namespace !== 'default' ? namespace : undefined,
     ...(embedding ? { embedding } : {})
   }
 
