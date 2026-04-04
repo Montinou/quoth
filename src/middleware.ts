@@ -25,6 +25,8 @@ const isPublicRoute = createRouteMatcher([
   '/api/v1/health(.*)',
   // MCP has its own auth (JWT / API key)
   '/api/mcp(.*)',
+  // API v1 has its own auth layer (agent API keys + Clerk JWT)
+  '/api/v1(.*)',
   // OAuth / auth flows
   '/api/auth/(.*)',
   '/api/oauth/(.*)',
