@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Quoth - Referencia Tecnica Completa</title>
+<style>
+  @page {
+    size: A4;
+    margin: 2cm 2.5cm;
+    @bottom-center { content: counter(page) " / " counter(pages); font-size: 9px; color: #666; }
+    @top-right { content: "Quoth v3.1.0 — Referencia Tecnica"; font-size: 8px; color: #999; }
+  }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; }
+  h1 { font-size: 28pt; color: #2d1b69; margin-bottom: 5px; border-bottom: 3px solid #7c3aed; padding-bottom: 10px; }
+  h2 { font-size: 18pt; color: #2d1b69; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; page-break-after: avoid; }
+  h3 { font-size: 13pt; color: #4c1d95; margin-top: 20px; page-break-after: avoid; }
+  h4 { font-size: 11pt; color: #6d28d9; margin-top: 15px; }
+  .subtitle { font-size: 14pt; color: #666; margin-bottom: 30px; }
+  .meta { font-size: 10pt; color: #888; margin-bottom: 40px; }
+  code { background: #f3f0ff; padding: 1px 5px; border-radius: 3px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 9.5pt; }
+  pre { background: #1e1e2e; color: #cdd6f4; padding: 14px 18px; border-radius: 8px; font-size: 9pt; line-height: 1.5; overflow-wrap: break-word; white-space: pre-wrap; page-break-inside: avoid; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 20px; font-size: 10pt; page-break-inside: avoid; }
+  th { background: #f3f0ff; color: #2d1b69; padding: 8px 10px; text-align: left; border: 1px solid #e0d4f5; }
+  td { padding: 6px 10px; border: 1px solid #e8e8e8; vertical-align: top; }
+  tr:nth-child(even) td { background: #faf9fc; }
+  .box { background: #f8f6ff; border-left: 4px solid #7c3aed; padding: 12px 16px; margin: 15px 0; border-radius: 0 6px 6px 0; page-break-inside: avoid; }
+  .box-warn { background: #fff7ed; border-left-color: #f59e0b; }
+  .box-green { background: #f0fdf4; border-left-color: #22c55e; }
+  .diagram { background: #1e1e2e; color: #89b4fa; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 9pt; line-height: 1.4; white-space: pre; page-break-inside: avoid; }
+  .toc a { text-decoration: none; color: #4c1d95; }
+  .toc li { margin: 4px 0; }
+  .badge { display: inline-block; background: #7c3aed; color: white; padding: 2px 8px; border-radius: 4px; font-size: 8pt; font-weight: 600; }
+  .cover { text-align: center; padding-top: 120px; page-break-after: always; }
+  .cover h1 { font-size: 42pt; border: none; }
+  .flow-step { display: inline-block; background: #ede9fe; border: 1px solid #c4b5fd; border-radius: 6px; padding: 4px 12px; margin: 2px; font-size: 9pt; font-weight: 600; color: #4c1d95; }
+  .arrow { display: inline-block; margin: 0 4px; color: #7c3aed; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div style="font-size: 80pt; margin-bottom: 20px;">&#x1F426;&#x200D;&#x2B1B;</div>
+  <h1>Quoth</h1>
+  <p class="subtitle">Sistema de Auto-Aprendizaje para Claude Code</p>
+  <p style="font-size: 16pt; color: #7c3aed; font-weight: 600;">Referencia Tecnica Completa</p>
+  <p class="meta" style="margin-top: 60px;">
+    Version 3.1.0 &mdash; Abril 2026<br>
+    Configuracion actual del nodo Montino<br>
+    Agustin &mdash; OpenClaw Infrastructure
+  </p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<h2>Contenido</h2>
+<ol class="toc" style="font-size: 11pt;">
+  <li><a href="#overview">Vision General</a></li>
+  <li><a href="#architecture">Arquitectura</a></li>
+  <li><a href="#hooks">Sistema de Hooks</a></li>
+  <li><a href="#intelligence">Motor de Inteligencia</a></li>
+  <li><a href="#daemon">Daemon de Procesamiento</a></li>
+  <li><a href="#mcp-tools">MCP Tools (22 herramientas)</a></li>
+  <li><a href="#plugin">Plugin de Claude Code</a></li>
+  <li><a href="#trajectory">Captura de Trayectorias</a></li>
+  <li><a href="#patterns">Sistema de Patrones</a></li>
+  <li><a href="#routing">Routing de Tareas</a></li>
+  <li><a href="#config">Configuracion Actual (Montino)</a></li>
+  <li><a href="#setup">Instalacion y Setup</a></li>
+  <li><a href="#data-flow">Flujo de Datos Completo</a></li>
+  <li><a href="#roadmap">Roadmap</a></li>
+</ol>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 1. OVERVIEW -->
+<h2 id="overview">1. Vision General</h2>
+
+<p>Quoth es un sistema de auto-aprendizaje autonomo para Claude Code que captura trayectorias de trabajo, las procesa en patrones reutilizables, y los inyecta en sesiones futuras para mejorar la calidad de las respuestas del agente.</p>
+
+<div class="box box-green">
+  <strong>Principio fundamental:</strong> Cada sesion de Claude Code genera conocimiento implicito. Quoth lo hace explicito, lo evalua, y lo reutiliza automaticamente.
+</div>
+
+<h3>Componentes principales</h3>
+<table>
+  <tr><th>Componente</th><th>Funcion</th><th>Ubicacion</th></tr>
+  <tr><td><strong>Hooks</strong></td><td>Interceptan eventos de Claude Code (edits, prompts, sesiones)</td><td><code>~/.quoth/hooks/</code> (symlinks)</td></tr>
+  <tr><td><strong>MCP Server</strong></td><td>22 herramientas via JSON-RPC 2.0 sobre stdio</td><td><code>quoth-plugin/mcp/</code></td></tr>
+  <tr><td><strong>Daemon</strong></td><td>Procesa trayectorias en background (JUDGE &rarr; DISTILL &rarr; CONSOLIDATE)</td><td><code>quoth-plugin/daemon/</code></td></tr>
+  <tr><td><strong>Intelligence Engine</strong></td><td>PageRank + trigrams para ranking y routing</td><td><code>quoth-plugin/mcp/lib/</code></td></tr>
+  <tr><td><strong>SQLite DB</strong></td><td>Almacen de patrones, agentes, eventos</td><td><code>~/.quoth/memory.db</code></td></tr>
+  <tr><td><strong>Plugin</strong></td><td>Empaquetado para Claude Code (<code>.claude-plugin/</code>)</td><td><code>quoth-plugin/.claude-plugin/</code></td></tr>
+</table>
+
+<!-- 2. ARCHITECTURE -->
+<h2 id="architecture">2. Arquitectura</h2>
+
+<h3>Arquitectura modular</h3>
+<p>El servidor MCP fue refactorizado de un monolito de 553 lineas a una arquitectura modular:</p>
+
+<div class="diagram">
+quoth-plugin/
+  mcp/
+    quoth-learning-server.js    ~55 lines  (protocolo JSON-RPC)
+    handlers/
+      index.js                  dispatch central
+      patterns.js               8 tools  (log, score, search, promote...)
+      agents.js                 6 tools  (register, heartbeat, assign...)
+      intelligence.js           6 tools  (route, init, context, consolidate...)
+      skills.js                 2 tools  (extract, list)
+    lib/
+      graph.js                  PageRank, trigrams, Jaccard
+      routing.js                TASK_PATTERNS + AGENT_CAPABILITIES
+  daemon/
+    daemon.js                   Background processor
+    db.js                       SQLite layer (better-sqlite3)
+  hooks/
+    hook-dispatch.js            Unified dispatcher
+    inject-patterns.js          Session start pattern injection
+    trajectory-capture.js       PostToolUse trajectory logging
+    rl-annotate.js              RL signals on MCP tool outputs
+  scripts/
+    setup.sh                    Automated installation
+  .claude-plugin/               Claude Code plugin packaging
+</div>
+
+<h3>Flujo de ejecucion por sesion</h3>
+
+<p>
+  <span class="flow-step">SessionStart</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">Init Graph (129 nodes)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">Inject Patterns</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">UserPrompt &rarr; Route</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">Tool Use &rarr; Capture</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">SessionEnd &rarr; Consolidate</span>
+</p>
+
+<!-- 3. HOOKS -->
+<h2 id="hooks">3. Sistema de Hooks</h2>
+
+<p>Los hooks se configuran en <code>~/.claude/settings.json</code> y se ejecutan como procesos Node.js independientes. Todos los archivos en <code>~/.quoth/hooks/</code> son symlinks al source tree para portabilidad.</p>
+
+<h3>Hooks activos</h3>
+<table>
+  <tr><th>Evento</th><th>Handler</th><th>Timeout</th><th>Funcion</th></tr>
+  <tr><td><code>SessionStart</code></td><td>hook-dispatch.js session-restore</td><td>15s</td><td>Inicializa grafo de inteligencia, inyecta patrones top al contexto</td></tr>
+  <tr><td><code>UserPromptSubmit</code></td><td>hook-dispatch.js route</td><td>10s</td><td>Analiza prompt, sugiere agente optimo, muestra alternativas</td></tr>
+  <tr><td><code>PreToolUse (Bash)</code></td><td>hook-dispatch.js pre-bash</td><td>5s</td><td>Valida comandos peligrosos (rm -rf /, fork bombs, etc.)</td></tr>
+  <tr><td><code>PostToolUse (Write|Edit)</code></td><td>hook-dispatch.js post-edit</td><td>10s</td><td>Registra edicion en pending-insights.jsonl</td></tr>
+  <tr><td><code>PostToolUse (Bash|Write|Edit|Agent)</code></td><td>trajectory-capture.js</td><td>3s</td><td>Captura trayectoria completa (tool + input + output)</td></tr>
+  <tr><td><code>SessionEnd</code></td><td>hook-dispatch.js session-end</td><td>10s</td><td>Consolida grafo: decay, refresh, rebuild PageRank</td></tr>
+  <tr><td><code>PreCompact (manual|auto)</code></td><td>hook-dispatch.js session-end</td><td>5-6s</td><td>Consolida antes de comprimir contexto</td></tr>
+  <tr><td><code>SubagentStop</code></td><td>hook-dispatch.js post-task</td><td>5s</td><td>Feedback implicito de exito al completar subagente</td></tr>
+  <tr><td><code>Stop</code></td><td>auto-memory-hook.mjs sync</td><td>10s</td><td>Sincroniza memorias (separado de quoth)</td></tr>
+</table>
+
+<h3>Resolucion de paths (portabilidad)</h3>
+<div class="box">
+  <p>Los hooks usan <code>fs.realpathSync(__dirname)</code> para resolver symlinks. Cuando se invoca <code>~/.quoth/hooks/hook-dispatch.js</code> (symlink), Node.js resuelve <code>__dirname</code> al directorio real del source tree, permitiendo que <code>path.join(__dirname, '..', 'mcp', 'handlers')</code> encuentre los modulos correctamente.</p>
+  <p>Variables de entorno opcionales para override: <code>QUOTH_HOME</code>, <code>QUOTH_PLUGIN_DIR</code>, <code>QUOTH_DB_MODULE</code></p>
+</div>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 4. INTELLIGENCE -->
+<h2 id="intelligence">4. Motor de Inteligencia</h2>
+
+<p>El motor de inteligencia combina PageRank con similitud de trigramas para ranquear y recuperar conocimiento relevante. Portado de <code>intelligence.cjs</code> (ruflo) a modulos puros de Quoth.</p>
+
+<h3>Componentes</h3>
+
+<h4>graph.js — Algoritmos</h4>
+<table>
+  <tr><th>Funcion</th><th>Descripcion</th></tr>
+  <tr><td><code>tokenize(text)</code></td><td>Normaliza texto a tokens lowercase</td></tr>
+  <tr><td><code>trigrams(tokens)</code></td><td>Genera set de trigramas de tokens consecutivos</td></tr>
+  <tr><td><code>jaccardSimilarity(a, b)</code></td><td>Similitud Jaccard entre dos sets de trigramas (0-1)</td></tr>
+  <tr><td><code>computePageRank(nodes, edges, opts)</code></td><td>PageRank iterativo con damping=0.85, 20 iteraciones</td></tr>
+  <tr><td><code>buildEdges(entries, threshold)</code></td><td>Construye aristas temporales + de similitud (Jaccard > threshold)</td></tr>
+</table>
+
+<h4>Estado persistido</h4>
+<p>Almacenado en <code>~/.quoth/intelligence/</code>:</p>
+<table>
+  <tr><th>Archivo</th><th>Contenido</th></tr>
+  <tr><td><code>graph-state.json</code></td><td>Nodos y aristas del grafo (129 nodos, 95 aristas actualmente)</td></tr>
+  <tr><td><code>ranked-context.json</code></td><td>Entradas ranqueadas por PageRank</td></tr>
+  <tr><td><code>store.json</code></td><td>Almacen de entradas con metadata</td></tr>
+  <tr><td><code>snapshots.json</code></td><td>Snapshots de estado para tracking temporal</td></tr>
+  <tr><td><code>last-matched.json</code></td><td>Ultimos matches para RL feedback</td></tr>
+  <tr><td><code>pending-insights.jsonl</code></td><td>Ediciones pendientes de procesar</td></tr>
+</table>
+
+<h3>Estadisticas actuales del grafo</h3>
+<div class="box box-green">
+  <table style="margin: 0;">
+    <tr><td><strong>Nodos</strong></td><td>129</td><td><strong>Aristas</strong></td><td>95 (87 temporales, 8 similitud)</td></tr>
+    <tr><td><strong>Densidad</strong></td><td>0.0115</td><td><strong>Snapshots</strong></td><td>2</td></tr>
+    <tr><td><strong>Confianza min/max/media</strong></td><td colspan="3">0.50 / 0.55 / 0.502</td></tr>
+    <tr><td><strong>Top PageRank</strong></td><td colspan="3">0.0756 (Orden de ejecucion sugerido)</td></tr>
+  </table>
+</div>
+
+<h3>Ciclo de vida del grafo</h3>
+<ol>
+  <li><strong>initGraph(db)</strong> — Lee MEMORY.md files + patrones de la DB, construye nodos, calcula aristas (Jaccard &gt; 0.15), ejecuta PageRank</li>
+  <li><strong>getContext(prompt, topK)</strong> — Genera trigramas del prompt, calcula Jaccard contra todos los nodos, retorna top-K con scores</li>
+  <li><strong>consolidateGraph(db)</strong> — Procesa pending edits, refresca desde patterns DB, aplica decay a entradas no accedidas, rebuild completo</li>
+  <li><strong>applyFeedback(success)</strong> — Ajusta confianza de los ultimos nodos matched (+0.03 exito / -0.03 fallo)</li>
+</ol>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 5. DAEMON -->
+<h2 id="daemon">5. Daemon de Procesamiento</h2>
+
+<p>El daemon corre en background y procesa trayectorias capturadas usando subagentes de Claude (Haiku) para extraer patrones reutilizables.</p>
+
+<h3>Pipeline de procesamiento</h3>
+
+<p>
+  <span class="flow-step">1. JUDGE</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">2. DISTILL</span>
+  <span class="arrow">&rarr;</span>
+  <span class="flow-step">3. CONSOLIDATE</span>
+</p>
+
+<table>
+  <tr><th>Fase</th><th>Modelo</th><th>Input</th><th>Output</th></tr>
+  <tr><td><strong>JUDGE</strong></td><td>Haiku</td><td>Trayectoria raw (tool calls + results)</td><td>Veredicto: es patron reutilizable? (si/no + razon)</td></tr>
+  <tr><td><strong>DISTILL</strong></td><td>Haiku</td><td>Trayectorias aprobadas</td><td>Patron destilado: nombre, accion, tags, confianza inicial</td></tr>
+  <tr><td><strong>CONSOLIDATE</strong></td><td>Local</td><td>Patrones destilados + existentes</td><td>Merge con DB: dedup, update confianza, prune baja confianza</td></tr>
+</table>
+
+<h3>Configuracion del daemon</h3>
+<table>
+  <tr><th>Parametro</th><th>Valor</th><th>Descripcion</th></tr>
+  <tr><td>Auto-start</td><td>Via hook <code>session-start</code></td><td>Se inicia automaticamente al abrir sesion</td></tr>
+  <tr><td>PID file</td><td><code>~/.quoth/daemon.pid</code></td><td>Tracking de proceso</td></tr>
+  <tr><td>Log file</td><td><code>~/.quoth/daemon.log</code></td><td>Log de actividad</td></tr>
+  <tr><td>Debug mode</td><td><code>QUOTH_DEBUG=true</code></td><td>Verbose logging</td></tr>
+</table>
+
+<h3>Scoring Bayesiano</h3>
+<p>La confianza de patrones usa distribucion Beta(alpha, beta) en lugar de incrementos simples:</p>
+<ul>
+  <li><strong>Exito:</strong> alpha += 1 (incrementa media)</li>
+  <li><strong>Fallo:</strong> beta += 1 (decrementa media)</li>
+  <li><strong>Confianza = alpha / (alpha + beta)</strong> — converge con mas evidencia</li>
+  <li><strong>Delta por feedback:</strong> +/-0.03 por evento</li>
+</ul>
+
+<h3>Decision Attribution</h3>
+<p>El sistema trackea que patron causo cada decision exitosa o fallida, permitiendo refinar la confianza de patrones especificos basado en outcomes reales.</p>
+
+<h3>Source Tagging</h3>
+<p>Cada patron tiene un tag de origen:</p>
+<table>
+  <tr><th>Tag</th><th>Origen</th></tr>
+  <tr><td><code>distilled</code></td><td>Extraido automaticamente de trayectorias via daemon</td></tr>
+  <tr><td><code>exolar-seeded</code></td><td>Importado de clusters de fallos de Exolar</td></tr>
+  <tr><td><code>healer-learned</code></td><td>Aprendido de correcciones de errores</td></tr>
+  <tr><td><code>attributed</code></td><td>Refinado via decision attribution</td></tr>
+  <tr><td><code>skill-derived</code></td><td>Extraido de tests exitosos como skills</td></tr>
+</table>
+
+<h3>Promocion nocturna</h3>
+<div class="box">
+  Patrones con <strong>confianza &gt; 0.8</strong> y <strong>&gt; 10 usos</strong> se auto-promueven a Quoth Cloud (quoth.triqual.dev) a las 3am. Re-promocion solo cuando la confianza mejora &gt; 0.1 desde el ultimo upload. Requiere <code>QUOTH_API_KEY</code>.
+</div>
+
+<!-- 6. MCP TOOLS -->
+<h2 id="mcp-tools">6. MCP Tools (22 herramientas)</h2>
+
+<p>Todas las herramientas se exponen via JSON-RPC 2.0 sobre stdio a traves del servidor <code>quoth-learning-server.js</code>. Registrado globalmente en <code>~/.mcp.json</code>.</p>
+
+<h3>Patterns (8 tools) — <code>handlers/patterns.js</code></h3>
+<table>
+  <tr><th>Tool</th><th>Descripcion</th><th>Input clave</th></tr>
+  <tr><td><code>quoth_log_outcome</code></td><td>Registra exito/fallo de un patron</td><td>pattern_id, success (bool)</td></tr>
+  <tr><td><code>quoth_score_pattern</code></td><td>Ajusta manualmente la confianza</td><td>pattern_id, delta</td></tr>
+  <tr><td><code>quoth_top_patterns</code></td><td>Top-N patrones por confianza</td><td>limit, tags[]</td></tr>
+  <tr><td><code>quoth_search_patterns</code></td><td>Busqueda por texto/tags</td><td>query, tags[]</td></tr>
+  <tr><td><code>quoth_project_patterns</code></td><td>Patrones de un proyecto especifico</td><td>project, limit</td></tr>
+  <tr><td><code>quoth_promote_global</code></td><td>Promueve patron a scope global</td><td>pattern_id</td></tr>
+  <tr><td><code>quoth_seed_from_exolar</code></td><td>Importa fallos de Exolar como candidatos</td><td>cluster_data</td></tr>
+  <tr><td><code>quoth_propose_update</code></td><td>Promueve patron a Quoth Cloud manualmente</td><td>pattern_id</td></tr>
+</table>
+
+<h3>Agents (6 tools) — <code>handlers/agents.js</code></h3>
+<table>
+  <tr><th>Tool</th><th>Descripcion</th><th>Input clave</th></tr>
+  <tr><td><code>quoth_daemon_status</code></td><td>Estado del daemon (PID, log, uptime)</td><td>(ninguno)</td></tr>
+  <tr><td><code>quoth_ingest_trajectory</code></td><td>Ingesta manual de trayectoria</td><td>trajectory_data</td></tr>
+  <tr><td><code>quoth_agent_register</code></td><td>Registra agente en la DB</td><td>name, type, capabilities</td></tr>
+  <tr><td><code>quoth_agent_heartbeat</code></td><td>Heartbeat de agente activo</td><td>agent_id</td></tr>
+  <tr><td><code>quoth_agent_list</code></td><td>Lista agentes registrados</td><td>status filter</td></tr>
+  <tr><td><code>quoth_assign_task</code></td><td>Asigna tarea a un agente</td><td>agent_id, task</td></tr>
+</table>
+
+<h3>Intelligence (6 tools) — <code>handlers/intelligence.js</code></h3>
+<table>
+  <tr><th>Tool</th><th>Descripcion</th><th>Input clave</th></tr>
+  <tr><td><code>quoth_route_task</code></td><td>Sugiere agente optimo para una tarea</td><td>task (string)</td></tr>
+  <tr><td><code>quoth_intelligence_init</code></td><td>Inicializa grafo desde DB + MEMORY.md</td><td>(ninguno)</td></tr>
+  <tr><td><code>quoth_intelligence_context</code></td><td>Recupera contexto relevante para un prompt</td><td>prompt, topK</td></tr>
+  <tr><td><code>quoth_intelligence_consolidate</code></td><td>Consolida grafo (decay + refresh + rebuild)</td><td>(ninguno)</td></tr>
+  <tr><td><code>quoth_intelligence_stats</code></td><td>Estadisticas del grafo</td><td>json (bool)</td></tr>
+  <tr><td><code>quoth_intelligence_feedback</code></td><td>Feedback RL (+/- confianza)</td><td>success (bool)</td></tr>
+</table>
+
+<h3>Skills (2 tools) — <code>handlers/skills.js</code></h3>
+<table>
+  <tr><th>Tool</th><th>Descripcion</th><th>Input clave</th></tr>
+  <tr><td><code>quoth_extract_skill</code></td><td>Extrae skill reutilizable de un test exitoso</td><td>test_file, test_name</td></tr>
+  <tr><td><code>quoth_list_skills</code></td><td>Lista skills extraidos</td><td>(ninguno)</td></tr>
+</table>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 7. PLUGIN -->
+<h2 id="plugin">7. Plugin de Claude Code</h2>
+
+<p>El plugin empaqueta hooks, MCP server, comandos y agentes en formato <code>.claude-plugin/</code> para instalacion zero-config.</p>
+
+<h3>Estructura</h3>
+<div class="diagram">
+.claude-plugin/
+  plugin.json          Manifiesto (nombre, version, MCP, hooks, config)
+  hooks/
+    hooks.json         Declaracion de hooks (PostToolUse, SessionStart)
+  commands/
+    patterns.md        /quoth:patterns — browse pattern library
+    learn.md           /quoth:learn — trigger consolidacion manual
+  agents/
+    learner.md         quoth:learner — agente Haiku para review de trayectorias
+</div>
+
+<h3>plugin.json</h3>
+<table>
+  <tr><th>Campo</th><th>Valor</th></tr>
+  <tr><td>name</td><td>quoth</td></tr>
+  <tr><td>version</td><td>3.1.0</td></tr>
+  <tr><td>MCP server</td><td><code>quoth-learning</code> (stdio, Node.js)</td></tr>
+  <tr><td>Hooks</td><td>3: trajectory-capture, rl-annotate, inject-patterns</td></tr>
+  <tr><td>Commands</td><td>2: /quoth:patterns, /quoth:learn</td></tr>
+  <tr><td>Agents</td><td>1: quoth:learner (Haiku)</td></tr>
+  <tr><td>userConfig</td><td>QUOTH_API_KEY (opcional, sensitive)</td></tr>
+</table>
+
+<h3>RL Annotations (rl-annotate.js)</h3>
+<p>Hook PostToolUse que corre despues de llamadas a tools MCP de Quoth. Busca patrones relevantes en la DB y los inyecta como <code>additionalContext</code> con scores de confianza, creando un loop de reinforcement learning.</p>
+
+<!-- 8. TRAJECTORY -->
+<h2 id="trajectory">8. Captura de Trayectorias</h2>
+
+<p>Cada tool call que Claude Code ejecuta se captura como un entry en un archivo JSONL por sesion.</p>
+
+<h3>Formato de captura</h3>
+<pre><code>{
+  "timestamp": 1712170800000,
+  "session": "abc123",
+  "tool": "Edit",
+  "input": { "file_path": "/src/app.ts", "old_string": "...", "new_string": "..." },
+  "output_summary": "File updated successfully",
+  "project": "quoth"
+}</code></pre>
+
+<h3>Almacenamiento</h3>
+<table>
+  <tr><th>Parametro</th><th>Valor actual</th></tr>
+  <tr><td>Directorio</td><td><code>~/.quoth/trajectories/</code></td></tr>
+  <tr><td>Formato</td><td>Un .jsonl por sesion de Claude Code</td></tr>
+  <tr><td>Sesiones capturadas</td><td>2 archivos</td></tr>
+  <tr><td>Entries totales</td><td>382 lineas</td></tr>
+  <tr><td>Tools capturados</td><td>Bash, Write, Edit, MultiEdit, Agent</td></tr>
+</table>
+
+<!-- 9. PATTERNS -->
+<h2 id="patterns">9. Sistema de Patrones</h2>
+
+<h3>Ciclo de vida de un patron</h3>
+<ol>
+  <li><strong>Captura:</strong> trajectory-capture.js graba tool calls en .jsonl</li>
+  <li><strong>Evaluacion:</strong> Daemon JUDGE evalua si la trayectoria es patron reutilizable</li>
+  <li><strong>Destilacion:</strong> Daemon DISTILL extrae nombre, accion, tags</li>
+  <li><strong>Almacenamiento:</strong> Se inserta en <code>memory.db</code> con confianza Beta(1,1) = 0.50</li>
+  <li><strong>Uso:</strong> inject-patterns.js lo inyecta en sesiones futuras si es top-8</li>
+  <li><strong>Feedback:</strong> Exito/fallo ajusta confianza via <code>quoth_log_outcome</code></li>
+  <li><strong>Promocion:</strong> Si confianza &gt; 0.8 y &gt; 10 usos, se promueve a Quoth Cloud</li>
+</ol>
+
+<h3>Inyeccion token-optimizada</h3>
+<p>La inyeccion de patrones al inicio de sesion usa un formato comprimido para minimizar uso de contexto:</p>
+<pre><code>[Quoth] 8 patterns loaded
+HIGH: pattern-auth(0.9), error-handling(0.8)
+MED: api-design(0.6), test-setup(0.5)
+Details:
+- pattern-auth: Use JWT with refresh tokens, validate at middleware level...
+- error-handling: Wrap external calls in try/catch, log context...
+- api-design: REST endpoints follow /api/v1/{resource} convention...</code></pre>
+
+<div class="box">
+  <strong>Budget de tokens:</strong> Maximo 800 caracteres (~200 tokens). Patrones agrupados por tier (HIGH/MED). Solo los top 3 incluyen texto de accion completo. Reduccion: ~800 tokens (verbose) &rarr; ~200 tokens (comprimido). <strong>Reduccion del 75%.</strong>
+</div>
+
+<h3>Estado actual de la DB</h3>
+<table>
+  <tr><th>Metrica</th><th>Valor</th></tr>
+  <tr><td>Tamano de DB</td><td>76 KB</td></tr>
+  <tr><td>Total patrones</td><td>2</td></tr>
+  <tr><td>Alta confianza (&ge;0.8)</td><td>0</td></tr>
+  <tr><td>Media confianza (0.5-0.8)</td><td>2</td></tr>
+  <tr><td>Baja confianza (&lt;0.5)</td><td>0</td></tr>
+</table>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 10. ROUTING -->
+<h2 id="routing">10. Routing de Tareas</h2>
+
+<p>El routing analiza el prompt del usuario y sugiere el tipo de agente optimo para la tarea. Portado de <code>router.js</code> (ruflo).</p>
+
+<h3>Metodo: Keyword Matching</h3>
+<p><code>routing.js</code> define patrones regex para cada tipo de agente:</p>
+
+<table>
+  <tr><th>Agente</th><th>Patron</th><th>Confianza</th></tr>
+  <tr><td><code>tester</code></td><td>test|spec|coverage|unit test|integration</td><td>80%</td></tr>
+  <tr><td><code>reviewer</code></td><td>review|audit|check|inspect|quality</td><td>80%</td></tr>
+  <tr><td><code>security-auditor</code></td><td>security|vuln|cve|owasp|pentest</td><td>85%</td></tr>
+  <tr><td><code>devops</code></td><td>deploy|docker|ci|cd|pipeline|infrastructure</td><td>80%</td></tr>
+  <tr><td><code>researcher</code></td><td>research|investigate|analyze|explore|study</td><td>75%</td></tr>
+  <tr><td><code>planner</code></td><td>plan|design|architect|structure|organize</td><td>75%</td></tr>
+  <tr><td><code>coder</code></td><td>(default fallback)</td><td>50%</td></tr>
+</table>
+
+<h3>Output del routing</h3>
+<p>En cada <code>UserPromptSubmit</code>, el hook muestra:</p>
+<pre><code>[INFO] Routing task: fix the authentication bug in middleware
+
++------------------- Primary Recommendation -------------------+
+| Agent: coder                                                  |
+| Confidence: 50.0%                                             |
+| Reason: Default routing - no specific pattern matched         |
++---------------------------------------------------------------+
+
+Alternative Agents
++------------+------------+-------------------------------------+
+| Agent Type | Confidence | Reason                              |
++------------+------------+-------------------------------------+
+| tester     |      60.0% | Alternative agent                   |
+| reviewer   |      50.0% | Alternative agent                   |
++------------+------------+-------------------------------------+</code></pre>
+
+<!-- 11. CONFIG -->
+<h2 id="config">11. Configuracion Actual (Montino)</h2>
+
+<p>Estado del sistema a fecha 2026-04-04.</p>
+
+<h3>Archivos de configuracion</h3>
+<table>
+  <tr><th>Archivo</th><th>Contenido relevante</th></tr>
+  <tr><td><code>~/.claude/settings.json</code></td><td>9 hooks (todos apuntan a <code>$HOME/.quoth/hooks/</code>), MCP server <code>skill-registry</code>, permisos</td></tr>
+  <tr><td><code>~/.claude/settings.local.json</code></td><td><code>enabledMcpjsonServers: ["clerk", "quoth-learning"]</code>, <code>enableAllProjectMcpServers: true</code></td></tr>
+  <tr><td><code>~/.mcp.json</code></td><td>MCP global: <code>quoth-learning</code> (stdio, Node.js)</td></tr>
+</table>
+
+<h3>Estructura de archivos en disco</h3>
+<div class="diagram">
+~/.quoth/
+  memory.db                 76 KB   SQLite (patterns, agents, events)
+  daemon.pid                        PID del daemon activo
+  daemon.log                        Log de procesamiento
+  intelligence/
+    graph-state.json                Grafo: 129 nodos, 95 aristas
+    ranked-context.json             Entradas ranqueadas por PageRank
+    store.json                      Almacen de metadata
+    snapshots.json                  2 snapshots
+    last-matched.json               Ultimos matches para RL
+    pending-insights.jsonl          Cola de ediciones pendientes
+  trajectories/
+    {session-id}.jsonl              2 archivos, 382 entries totales
+  hooks/  (symlinks)
+    hook-dispatch.js      ->  quoth-plugin/hooks/hook-dispatch.js
+    inject-patterns.js    ->  quoth-plugin/hooks/inject-patterns.js
+    rl-annotate.js        ->  quoth-plugin/hooks/rl-annotate.js
+    trajectory-capture.js ->  quoth-plugin/hooks/trajectory-capture.js
+</div>
+
+<h3>Eliminacion de ruflo</h3>
+<div class="box box-warn">
+  <strong>Migrado el 2026-04-03/04.</strong> Ruflo (@claude-flow/cli) eliminado completamente:
+  <ul style="margin: 5px 0;">
+    <li>10 procesos zombie matados (382 MB liberados)</li>
+    <li>821 paquetes npm desinstalados</li>
+    <li>17 archivos <code>.mcp.json</code> limpiados (6 proyectos + IPS + 10 openclaw workspaces)</li>
+    <li>50+ directorios <code>.claude-flow/</code> eliminados (~72 MB)</li>
+    <li>200+ MCP tools de ruflo reemplazados por 22 tools de quoth</li>
+    <li>Zero referencias a claude-flow en todo el sistema</li>
+  </ul>
+</div>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 12. SETUP -->
+<h2 id="setup">12. Instalacion y Setup</h2>
+
+<h3>Instalacion automatica</h3>
+<pre><code>git clone &lt;quoth-repo&gt;
+cd quoth-plugin
+bash scripts/setup.sh</code></pre>
+
+<h3>Que hace setup.sh</h3>
+<ol>
+  <li>Crea estructura <code>~/.quoth/</code> (hooks/, intelligence/, trajectories/)</li>
+  <li>Symlink de 4 hook files desde source tree a <code>~/.quoth/hooks/</code></li>
+  <li>Inyecta hook declarations en <code>~/.claude/settings.json</code> (merge, no overwrite)</li>
+  <li>Agrega permiso <code>Bash(node .quoth/*)</code></li>
+  <li>Muestra instrucciones para iniciar daemon</li>
+</ol>
+
+<div class="box box-green">
+  <strong>Idempotente:</strong> El script detecta si ya esta instalado y no duplica configuracion. Seguro re-ejecutar.
+</div>
+
+<h3>Verificacion</h3>
+<pre><code># Verificar hooks
+node ~/.quoth/hooks/hook-dispatch.js stats
+
+# Verificar MCP server (22 tools)
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
+  node quoth-plugin/mcp/quoth-learning-server.js
+
+# Iniciar daemon
+node quoth-plugin/daemon/daemon.js &</code></pre>
+
+<!-- 13. DATA FLOW -->
+<h2 id="data-flow">13. Flujo de Datos Completo</h2>
+
+<div class="diagram">
+ Usuario escribe prompt
+      |
+      v
+ [UserPromptSubmit Hook]
+      |
+      +---> hook-dispatch.js route
+      |       |
+      |       +---> intelligence.getContext(prompt, 5)
+      |       |       lee ranked-context.json
+      |       |       calcula Jaccard vs trigramas del prompt
+      |       |       retorna top-5 patterns relevantes
+      |       |
+      |       +---> routing.routeTask(prompt)
+      |               regex match contra TASK_PATTERNS
+      |               retorna agente recomendado + alternativas
+      |
+      v
+ Claude Code ejecuta herramienta
+      |
+      v
+ [PostToolUse Hook]
+      |
+      +---> trajectory-capture.js
+      |       lee stdin (tool_name, tool_input, tool_output)
+      |       append a ~/.quoth/trajectories/{session}.jsonl
+      |
+      +---> hook-dispatch.js post-edit (si Write|Edit)
+      |       append a intelligence/pending-insights.jsonl
+      |
+      +---> rl-annotate.js (si mcp__quoth-learning__*)
+              busca patrones relevantes por tag en DB
+              retorna additionalContext con scores
+      |
+      v
+ [SubagentStop Hook]
+      |
+      +---> hook-dispatch.js post-task
+              intelligence.applyFeedback(true)
+              +0.03 confianza a ultimos matched patterns
+      |
+      v
+ [SessionEnd / PreCompact Hook]
+      |
+      +---> hook-dispatch.js session-end
+              intelligence.consolidateGraph(db)
+              procesa pending edits
+              refresca desde patterns DB
+              decay entradas no accedidas
+              rebuild PageRank completo
+      |
+      v
+ [Daemon (background)]
+      |
+      +---> Lee trajectories/*.jsonl
+      +---> JUDGE (Haiku): es patron?
+      +---> DISTILL (Haiku): extrae patron
+      +---> CONSOLIDATE: merge a memory.db
+      +---> 3am: promueve high-confidence a Cloud
+      |
+      v
+ [Siguiente SessionStart]
+      |
+      +---> hook-dispatch.js session-restore
+              intelligence.initGraph(db)
+              lee memory.db + MEMORY.md files
+              construye grafo (129 nodos, 95 aristas)
+              inyecta top-8 patterns al contexto (~200 tokens)
+</div>
+
+<div style="page-break-after: always;"></div>
+
+<!-- 14. ROADMAP -->
+<h2 id="roadmap">14. Roadmap</h2>
+
+<h3>Implementado (v3.1.0)</h3>
+<ul>
+  <li>Servidor MCP modular (22 tools, 4 handlers)</li>
+  <li>Motor de inteligencia (PageRank + trigrams + Jaccard)</li>
+  <li>Hook dispatcher unificado</li>
+  <li>Captura de trayectorias</li>
+  <li>Daemon JUDGE/DISTILL/CONSOLIDATE</li>
+  <li>Scoring Bayesiano + Decision Attribution</li>
+  <li>Token-optimized pattern injection</li>
+  <li>RL annotations (PostToolUse)</li>
+  <li>Plugin Claude Code (.claude-plugin/)</li>
+  <li>Automated setup (setup.sh)</li>
+  <li>Portabilidad (symlinks + realpathSync)</li>
+  <li>Promocion nocturna a Quoth Cloud</li>
+</ul>
+
+<h3>Pendiente (Fases 4-6)</h3>
+<table>
+  <tr><th>Fase</th><th>Feature</th><th>Tools</th></tr>
+  <tr><td>4</td><td>Browser Automation</td><td>quoth_browser_open, screenshot, click, fill, eval, close (CDP)</td></tr>
+  <tr><td>5</td><td>Workflow Engine</td><td>quoth_workflow_create, run, status, list (kv_store-backed)</td></tr>
+  <tr><td>6</td><td>Terminal Management</td><td>quoth_terminal_execute, list, close (child_process)</td></tr>
+</table>
+
+<hr style="margin-top: 40px;">
+<p style="text-align: center; color: #999; font-size: 9pt;">
+  Quoth v3.1.0 &mdash; Referencia Tecnica &mdash; Generado 2026-04-04 &mdash; Nodo Montino
+</p>
+
+</body>
+</html>
