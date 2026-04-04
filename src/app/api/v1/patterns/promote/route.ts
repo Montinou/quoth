@@ -66,7 +66,7 @@ export const POST = createApiHandler(
     const body = req.validatedBody as z.infer<typeof promotePatternBody>;
 
     // Resolve projectId: from body.projectSlug, tags, ctx, or first project in org
-    let projectId = projectId;
+    let projectId = ctx!.projectId;
     if (!projectId || projectId === '') {
       const { projects } = await import('@/db/schema');
       const slug = body.projectSlug
