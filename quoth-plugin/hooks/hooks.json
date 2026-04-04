@@ -1,27 +1,50 @@
 {
+  "description": "Quoth unified hook dispatcher: intelligence routing, trajectory capture, pattern injection, subagent context",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" pre-bash", "timeout": 2000 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|Agent",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/trajectory-capture.js\"", "timeout": 3000 }]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" post-edit", "timeout": 2000 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" route", "timeout": 3000 }]
+      }
+    ],
     "SessionStart": [
       {
-        "matcher": "*",
-        "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh" }]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" session-restore", "timeout": 15000 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" session-end", "timeout": 10000 }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" session-end", "timeout": 6000 }]
       }
     ],
     "SubagentStart": [
       {
-        "matcher": "*",
-        "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start.sh" }]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" subagent-start", "timeout": 3000 }]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": "*",
-        "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.sh" }]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh" }]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" post-task", "timeout": 5000 }]
       }
     ]
   }

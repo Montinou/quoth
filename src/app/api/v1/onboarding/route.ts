@@ -212,8 +212,91 @@ export async function POST(req: Request) {
         orgId = membership?.orgId;
       }
 
+      // Defensive sync: if still no org, check Clerk for memberships not yet synced to Neon
       if (!orgId) {
-        return Response.json({ error: 'No organization found. Please complete signup first.' }, { status: 400 });
+        try {
+          const client = await clerkClient();
+          const clerkOrgs = await client.users.getOrganizationMembershipList({ userId, limit: 1 });
+          const firstMembership = clerkOrgs.data?.[0];
+          if (firstMembership?.organization) {
+            const clerkOrg = firstMembership.organization;
+            const orgSlug = slugify(clerkOrg.slug ?? clerkOrg.name ?? 'workspace');
+
+            // Upsert org to Neon
+            const [dbOrg] = await db
+              .insert(organizations)
+              .values({ clerkOrgId: clerkOrg.id, slug: orgSlug, name: clerkOrg.name })
+              .onConflictDoUpdate({ target: organizations.clerkOrgId, set: { name: clerkOrg.name, slug: orgSlug } })
+              .returning({ id: organizations.id });
+
+            // Upsert membership
+            await db
+              .insert(orgMembers)
+              .values({ orgId: dbOrg.id, userId: user.id, role: firstMembership.role ?? 'admin' })
+              .onConflictDoNothing();
+
+            // Set default
+            await db.update(users).set({ defaultOrgId: dbOrg.id }).where(eq(users.id, user.id));
+
+            orgId = dbOrg.id;
+            console.log(`[onboarding] Synced Clerk org ${clerkOrg.id} → Neon for user ${userId}`);
+          }
+        } catch (err) {
+          console.error('[onboarding] Clerk org sync failed:', err);
+        }
+      }
+
+      if (!orgId) {
+        // Auto-create personal org for users who signed up without one
+        try {
+          const client = await clerkClient();
+          const clerkUser = await client.users.getUser(userId);
+          const email = clerkUser.emailAddresses?.[0]?.emailAddress ?? '';
+          const orgName = clerkUser.firstName
+            ? `${clerkUser.firstName}'s Workspace`
+            : email.split('@')[0] + "'s Workspace";
+          const orgSlug = slugify(email.split('@')[0] || 'workspace');
+
+          // Create org in Clerk
+          const clerkOrg = await client.organizations.createOrganization({
+            name: orgName,
+            slug: orgSlug,
+            createdBy: userId,
+          });
+
+          // Sync to Neon (same as webhook handler)
+          const [dbOrg] = await db
+            .insert(organizations)
+            .values({
+              clerkOrgId: clerkOrg.id,
+              slug: slugify(clerkOrg.slug ?? orgSlug),
+              name: clerkOrg.name,
+            })
+            .onConflictDoUpdate({
+              target: organizations.clerkOrgId,
+              set: { name: clerkOrg.name, slug: slugify(clerkOrg.slug ?? orgSlug) },
+            })
+            .returning({ id: organizations.id });
+
+          orgId = dbOrg.id;
+
+          // Add org membership
+          await db
+            .insert(orgMembers)
+            .values({ orgId, userId: user.id, role: 'admin' })
+            .onConflictDoNothing();
+
+          // Set as default
+          await db
+            .update(users)
+            .set({ defaultOrgId: orgId })
+            .where(eq(users.id, user.id));
+
+          console.log(`[onboarding] Auto-created org ${clerkOrg.id} for user ${userId}`);
+        } catch (err) {
+          console.error('[onboarding] Failed to auto-create org:', err);
+          return Response.json({ error: 'Failed to create organization. Please try again.' }, { status: 500 });
+        }
       }
 
       // Store orgId in meta so downstream steps can use it

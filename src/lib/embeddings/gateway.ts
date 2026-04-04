@@ -1,24 +1,25 @@
 /**
  * Vercel AI Gateway Embeddings
- * QUOTH-03: Unified embedding via OpenAI text-embedding-3-large (2000d)
- * Uses Matryoshka truncation to 2000d — maximum supported by Neon pgvector HNSW.
- * Model quality: MTEB 64.6 (large) vs 62.3 (small), truncation preserves quality.
+ * QUOTH-03: Unified embedding via voyage/voyage-4-lite (1024d)
+ * 6.5x cheaper than text-embedding-3-large ($0.02 vs $0.13/MTok).
+ * Same model used by local daemon (quoth-plugin) for SQLite HNSW.
  *
- * Uses AI_GATEWAY_API_KEY env var for Vercel AI Gateway routing.
+ * Gateway URL: https://ai-gateway.vercel.sh/v1
+ * Auth: AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN (auto on Vercel deploys)
  */
 
 import { embed, embedMany } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 
-const EMBEDDING_MODEL = 'text-embedding-3-large';
-const EMBEDDING_DIMS = 2000;
+const EMBEDDING_MODEL = 'voyage/voyage-4-lite';
+const EMBEDDING_DIMS = 1024;
 
 /**
- * OpenAI provider configured to prefer AI_GATEWAY_API_KEY (Vercel AI Gateway)
- * over OPENAI_API_KEY. This ensures we route through the gateway.
+ * OpenAI-compatible provider routed through Vercel AI Gateway.
  */
 const openai = createOpenAI({
   apiKey: process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY,
+  baseURL: 'https://ai-gateway.vercel.sh/v1',
 });
 
 /** Maximum inputs per embedMany call (OpenAI limit) */
@@ -28,7 +29,7 @@ const BATCH_SIZE = 2048;
  * Generate a single embedding vector via Vercel AI Gateway.
  *
  * @param text - Text to embed (query or passage)
- * @returns 2000-dimensional embedding vector
+ * @returns 1024-dimensional embedding vector
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   const cleanText = text.replace(/\n+/g, ' ').trim();
@@ -39,7 +40,6 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const { embedding } = await embed({
     model: openai.embedding(EMBEDDING_MODEL),
     value: cleanText,
-    providerOptions: { openai: { dimensions: EMBEDDING_DIMS } },
   });
 
   return embedding;
@@ -50,7 +50,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  * Batches up to 2048 inputs per API call (OpenAI limit).
  *
  * @param texts - Array of texts to embed
- * @returns Array of 2000-dimensional embedding vectors (same order as input)
+ * @returns Array of 1024-dimensional embedding vectors (same order as input)
  */
 export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -80,7 +80,6 @@ export async function generateEmbeddingsBatch(texts: string[]): Promise<number[]
     const { embeddings } = await embedMany({
       model: openai.embedding(EMBEDDING_MODEL),
       values: batch,
-      providerOptions: { openai: { dimensions: EMBEDDING_DIMS } },
     });
 
     embeddingResults.push(...embeddings);

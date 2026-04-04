@@ -58,7 +58,7 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   'mistral-small-3.1-24b': { input: 0.10, output: 0.30 },
   // Embeddings
   'text-embedding-3-small': { input: 0.02, output: 0 },
-  'text-embedding-3-large': { input: 0.13, output: 0 },
+  'voyage/voyage-4-lite': { input: 0.02, output: 0 },
 };
 
 /**

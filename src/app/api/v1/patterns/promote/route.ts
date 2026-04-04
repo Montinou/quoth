@@ -27,7 +27,7 @@ const promotePatternBody = z.object({
   failureCount: z.number().int().min(0),
   tags: z.array(z.string().max(64)).max(20).default([]),
   applicability: z.enum(['broad', 'narrow']),
-  /** Daemon's embedding -- server re-embeds at 2000d via text-embedding-3-large. */
+  /** Daemon's embedding — same model (voyage/voyage-4-lite, 1024d) as cloud. */
   embedding: z.array(z.number()).optional(),
 });
 
@@ -158,7 +158,7 @@ export const POST = createApiHandler(
       chunkHash,
       chunkIndex: 0,
       embedding,
-      embeddingModel: 'text-embedding-3-large',
+      embeddingModel: 'voyage/voyage-4-lite',
       metadata: {
         confidence: body.confidence,
         successCount: body.successCount,

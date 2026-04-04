@@ -1,5 +1,7 @@
 'use strict'
 
+const { callLLM } = require('../lib/llm.js')
+
 const PROMPT = `You are evaluating whether an AI agent action was effective.
 
 Agent: {{agent}}
@@ -13,7 +15,7 @@ Was this agent action effective and did it achieve the task?
 Respond with ONLY valid JSON (no markdown):
 {"effective": true/false, "reason": "brief explanation", "category": "selector|wait|auth|data|env|general"}`
 
-function judge(entry) {
+async function judge(entry) {
   const prompt = PROMPT
     .replace('{{agent}}', entry.agent || 'unknown')
     .replace('{{task}}', entry.task || 'unknown')
@@ -22,13 +24,7 @@ function judge(entry) {
     .replace('{{tool_calls}}', String(entry.tool_calls || 0))
 
   try {
-    const proc = require('child_process').spawnSync(
-      'claude', ['-p', '--model', 'claude-haiku-4-5-20251001', '--output-format', 'text'],
-      { input: prompt, encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
-    )
-    if (proc.status !== 0) throw new Error('claude subprocess failed')
-    const raw = (proc.stdout || '').trim()
-
+    const raw = await callLLM(prompt, 150)
     const start = raw.indexOf('{')
     if (start === -1) throw new Error('No JSON in response')
     const result = JSON.parse(raw.slice(start))
@@ -37,13 +33,12 @@ function judge(entry) {
       reason: result.reason || '',
       category: result.category || 'general'
     }
-  } catch (err) {
+  } catch {
     return {
       effective: entry.outcome === 'success',
-      reason: 'fallback: claude unavailable',
+      reason: 'fallback: llm unavailable',
       category: 'general',
-      fallback: true,
-      error: err.message
+      fallback: true
     }
   }
 }

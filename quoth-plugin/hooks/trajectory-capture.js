@@ -23,9 +23,11 @@ process.stdin.on('end', () => {
   try {
     const hookData = JSON.parse(input)
 
-    // Extract project name from CLAUDE_PROJECT_DIR or cwd
+    // Extract project name from CLAUDE_PROJECT_DIR or cwd.
+    // For OpenClaw workspaces (~/.openclaw/workspaces/<name>/repo), use the workspace
+    // name instead of "repo" to avoid collisions across agents.
     const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
-    const project = path.basename(projectDir)
+    const project = resolveProjectName(projectDir)
 
     // Extract tool info from hook data
     const toolName = hookData.tool_name || hookData.toolName || 'unknown'
@@ -64,6 +66,22 @@ process.stdin.on('end', () => {
   // Output empty JSON to signal success to Claude Code hook system
   process.stdout.write('{}')
 })
+
+function resolveProjectName(dir) {
+  // Try git remote origin → use repo name (e.g. "sales-companion" from Montinou/sales-companion)
+  try {
+    const { execSync } = require('child_process')
+    const url = execSync('git remote get-url origin', { cwd: dir, timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    const match = url.match(/[/:]([^/]+\/([^/]+?))(\.git)?$/)
+    if (match) return match[2].toLowerCase()
+  } catch {}
+  // Fallback: workspace name or directory basename
+  const base = path.basename(dir)
+  const wsMatch = dir.match(/\.openclaw\/workspaces\/([^/]+)\/repo\/?$/)
+  if (wsMatch) return wsMatch[1]
+  if (base === 'repo' || base === 'src') return path.basename(path.dirname(dir))
+  return base
+}
 
 function summarizeInput(tool, input) {
   if (!input) return ''

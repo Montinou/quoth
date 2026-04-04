@@ -6,7 +6,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-    exclude: ['node_modules', '.next', '.claude-flow', 'src/lib/quoth/__tests__/**'],
+    exclude: ['node_modules', '.next', 'src/lib/quoth/__tests__/**'],
     coverage: {
       provider: 'v8',
       include: ['src/lib/**/*.ts'],

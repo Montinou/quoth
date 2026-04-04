@@ -2,7 +2,7 @@
  * Drizzle ORM schema for Quoth multi-schema Neon database.
  *
  * 6 schemas: public, agents, docs, search, analytics, comms
- * All vector columns use 2000 dimensions (text-embedding-3-large, Matryoshka truncation for Neon HNSW).
+ * All vector columns use 1024 dimensions (voyage/voyage-4-lite via Vercel AI Gateway).
  */
 
 import {
@@ -271,8 +271,8 @@ export const agentMemory = agentsSchema.table(
     key: text("key").notNull(),
     value: text("value").notNull(),
     namespace: text("namespace").notNull().default("default"),
-    embedding: vector("embedding", { dimensions: 2000 }),
-    embeddingModel: text("embedding_model").default("text-embedding-3-large"),
+    embedding: vector("embedding", { dimensions: 1024 }),
+    embeddingModel: text("embedding_model").default("voyage/voyage-4-lite"),
     tier: text("tier").notNull().default("working"),
     relevanceScore: doublePrecision("relevance_score").notNull().default(1.0),
     accessCount: integer("access_count").notNull().default(0),
@@ -368,10 +368,10 @@ export const chunks = docsSchema.table(
     content: text("content").notNull(),
     chunkHash: text("chunk_hash").notNull(),
     chunkIndex: integer("chunk_index").notNull(),
-    embedding: vector("embedding", { dimensions: 2000 }),
+    embedding: vector("embedding", { dimensions: 1024 }),
     embeddingModel: text("embedding_model")
       .notNull()
-      .default("text-embedding-3-large"),
+      .default("voyage/voyage-4-lite"),
     metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
     title: text("title").notNull(),
     filePath: text("file_path").notNull(),
@@ -385,7 +385,7 @@ export const chunks = docsSchema.table(
   (t) => [
     index("idx_chunks_embedding")
       .using("hnsw", sql`${t.embedding} vector_cosine_ops`)
-      .where(sql`embedding_model = 'text-embedding-3-large'`)
+      .where(sql`embedding_model = 'voyage/voyage-4-lite'`)
       .with({ m: 16, ef_construction: 200 }),
     index("idx_chunks_document").on(t.documentId),
     index("idx_chunks_project_model").on(t.projectId, t.embeddingModel),

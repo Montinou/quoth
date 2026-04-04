@@ -1,6 +1,7 @@
 'use strict'
 
 const crypto = require('crypto')
+const { callLLM } = require('../lib/llm.js')
 
 const PROMPT = `You are extracting a reusable pattern from a successful AI agent action.
 
@@ -26,13 +27,7 @@ async function distill(entry) {
     .replace('{{context}}', JSON.stringify({ attempts: entry.attempts, tool_calls: entry.tool_calls }))
 
   try {
-    const proc = require('child_process').spawnSync(
-      'claude', ['-p', '--model', 'claude-haiku-4-5-20251001', '--output-format', 'text'],
-      { input: prompt, encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
-    )
-    if (proc.status !== 0) throw new Error('claude subprocess failed')
-    const raw = (proc.stdout || '').trim()
-
+    const raw = await callLLM(prompt, 200)
     const start = raw.indexOf('{')
     if (start === -1) throw new Error('No JSON')
     const result = JSON.parse(raw.slice(start))
@@ -43,7 +38,7 @@ async function distill(entry) {
       embedding = await generateEmbedding(result.pattern)
     } catch {}
     return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow', embedding, source: 'distilled' }
-  } catch (err) {
+  } catch {
     const fallbackContent = entry.pattern_used || `${entry.agent}: ${entry.task}`
     return {
       id: makeId(fallbackContent),
@@ -51,7 +46,6 @@ async function distill(entry) {
       tags: [],
       applicability: 'narrow',
       fallback: true,
-      error: err.message,
       embedding: null,
       source: 'distilled'
     }

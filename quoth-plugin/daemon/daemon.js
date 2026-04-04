@@ -26,6 +26,7 @@ const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const db = createDb(DB_PATH)
 db.initHnsw()
 const jobQueue = []
+const enqueuedKeys = new Set()  // Track enqueued entries to prevent duplicates
 let isProcessing = false
 let decayTimer = null
 let deepConsolidateTimer = null
@@ -41,7 +42,14 @@ function log(level, msg, data) {
 
 // --- PID management ---
 fs.writeFileSync(PID_FILE, String(process.pid))
-process.on('exit', () => { try { fs.unlinkSync(PID_FILE) } catch {} })
+process.on('exit', () => { try { fs.unlinkSync(PID_FILE) } catch {}; try { fs.unlinkSync(LOCK_FILE) } catch {} })
+// Clean stale lock from previous crash
+if (fs.existsSync(LOCK_FILE)) {
+  try {
+    const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
+    try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE); log('info', 'Cleaned stale lock', { stalePid: lockPid }) }
+  } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
+}
 
 // --- Signal handlers ---
 process.on('SIGTERM', () => {
@@ -79,16 +87,23 @@ function watchTrajectories() {
 
 // --- Scan JSONL files for unprocessed entries ---
 function scanAndEnqueue() {
+  let added = 0
   try {
     const files = fs.readdirSync(TRAJECTORIES_DIR).filter(f => f.endsWith('.jsonl'))
     for (const file of files) {
       const filePath = path.join(TRAJECTORIES_DIR, file)
       try {
         const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-        for (const line of lines) {
+        for (let i = 0; i < lines.length; i++) {
           try {
-            const entry = JSON.parse(line)
-            if (!entry._processed) jobQueue.push({ entry, filePath, line })
+            const entry = JSON.parse(lines[i])
+            if (entry._processed) continue
+            // Deduplicate: use file + line index as unique key
+            const key = `${file}:${i}`
+            if (enqueuedKeys.has(key)) continue
+            enqueuedKeys.add(key)
+            jobQueue.push({ entry, filePath, line: lines[i], key })
+            added++
           } catch {}
         }
       } catch (err) {
@@ -98,13 +113,20 @@ function scanAndEnqueue() {
   } catch (err) {
     log('error', 'scanAndEnqueue failed', { error: err.message })
   }
-  if (jobQueue.length > 0) log('info', `Enqueued ${jobQueue.length} entries`)
+  if (added > 0) log('info', `Enqueued ${added} new entries (queue: ${jobQueue.length})`)
 }
 
 // --- Process queue with up to 5 parallel workers ---
 async function processQueue() {
   if (isProcessing || jobQueue.length === 0) return
-  if (fs.existsSync(LOCK_FILE)) return
+  if (fs.existsSync(LOCK_FILE)) {
+    // Check if lock holder is still alive
+    try {
+      const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
+      try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE) }
+    } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
+    if (fs.existsSync(LOCK_FILE)) return
+  }
 
   try { fs.writeFileSync(LOCK_FILE, String(process.pid)) } catch { return }
   isProcessing = true
@@ -127,7 +149,7 @@ async function processEntry({ entry, filePath, line }) {
     const project = entry.project || 'default'
     log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome, project })
 
-    const judgment = judge(entry)
+    const judgment = await judge(entry)
     if (!judgment.effective) {
       log('debug', 'Entry judged ineffective', { reason: judgment.reason })
       markProcessed(filePath, line)
@@ -241,14 +263,8 @@ Patterns: ${JSON.stringify(patterns)}
 
 Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives": ["id"]}`
 
-    // Deep consolidation uses Sonnet (not Haiku) — more complex reasoning needed for
-    // cross-session pattern deduplication and quality assessment
-    const proc = require('child_process').spawnSync(
-      'claude', ['-p', '--model', 'claude-sonnet-4-6', '--output-format', 'text'],
-      { input: prompt, encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'ignore'] }
-    )
-    // Fire-and-forget — don't throw on failure
-    const raw = (proc.stdout || '').trim()
+    const { callLLM } = require('./lib/llm.js')
+    const raw = await callLLM(prompt, 500)
 
     const start = raw.indexOf('{')
     if (start === -1) return

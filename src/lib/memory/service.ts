@@ -2,7 +2,7 @@
  * Agent Memory Service
  * MEM-02: Core CRUD + semantic search for agent memory entries.
  *
- * - Embeddings via AI Gateway (text-embedding-3-large, 2000d Matryoshka)
+ * - Embeddings via AI Gateway (voyage/voyage-4-lite, 1024d)
  * - Semantic search via agents.search_memory() SQL function
  * - Fire-and-forget access tracking (don't block reads)
  * - Parameterized queries only
@@ -42,7 +42,7 @@ function rowToEntry(row: Record<string, unknown>): MemoryEntry {
       : new Date(row.created_at as string),
     decayRate: Number(row.decay_rate ?? 0.05),
     expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
-    embeddingModel: (row.embedding_model as string) ?? "text-embedding-3-large",
+    embeddingModel: (row.embedding_model as string) ?? "voyage/voyage-4-lite",
     projectId: (row.project_id as string) ?? null,
   };
 }

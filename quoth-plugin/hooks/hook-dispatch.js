@@ -12,6 +12,7 @@
  *   post-edit       - Record edit for intelligence
  *   post-task       - Implicit success feedback
  *   pre-bash        - Command safety check
+ *   subagent-start  - Inject relevant patterns into subagent context
  *   stats           - Intelligence diagnostics
  */
 
@@ -24,6 +25,22 @@ const os = require('os')
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
+
+function resolveProjectName(dir) {
+  // Try git remote origin → use repo name (e.g. "sales-companion" from Montinou/sales-companion)
+  try {
+    const { execSync } = require('child_process')
+    const url = execSync('git remote get-url origin', { cwd: dir, timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    const match = url.match(/[/:]([^/]+\/([^/]+?))(\.git)?$/)
+    if (match) return match[2].toLowerCase()
+  } catch {}
+  // Fallback: workspace name or directory basename
+  const base = path.basename(dir)
+  const wsMatch = dir.match(/\.openclaw\/workspaces\/([^/]+)\/repo\/?$/)
+  if (wsMatch) return wsMatch[1]
+  if (base === 'repo' || base === 'src') return path.basename(path.dirname(dir))
+  return base
+}
 
 // Resolve quoth-plugin root: follow symlinks to find the real source location.
 // When deployed as symlink (~/.quoth/hooks/hook-dispatch.js -> quoth-plugin/hooks/hook-dispatch.js),
@@ -71,12 +88,14 @@ async function readStdin() {
 const handlers = {
   'route': (prompt) => {
     const intel = getIntelligence()
-    // Get intelligence context
+    // Get intelligence context — lightweight graph lookup, no API calls
     const ctx = intel.getContext(prompt, 5)
-    if (ctx && ctx.entries && ctx.entries.length > 0) {
+    const hasRelevant = ctx && ctx.entries && ctx.entries.some(e => e.score >= 0.1)
+    if (hasRelevant) {
+      const top = ctx.entries.filter(e => e.score >= 0.1).slice(0, 3)
       const lines = ['[INTELLIGENCE] Relevant patterns for this task:']
-      for (let i = 0; i < ctx.entries.length; i++) {
-        const e = ctx.entries[i]
+      for (let i = 0; i < top.length; i++) {
+        const e = top[i]
         lines.push(`  * (${e.score.toFixed(2)}) ${e.summary} [rank #${i + 1}, ${e.accessCount}x accessed]`)
       }
       console.log(lines.join('\n'))
@@ -130,15 +149,17 @@ const handlers = {
       console.log(`[INTELLIGENCE] Loaded ${result.nodes} patterns, ${result.edges} edges`)
     }
 
-    // Inject patterns (replaces inject-patterns.js)
+    // Inject only high-confidence patterns as lightweight project context.
+    // The agent can use quoth_search_patterns for on-demand semantic search.
     if (db) {
       try {
-        const project = (process.env.CLAUDE_PROJECT_DIR || '').split('/').pop() || 'default'
-        const patterns = db.getProjectPatterns(project, 8)
-        if (patterns && patterns.length > 0) {
+        const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+        const patterns = db.getProjectPatterns(project, 3)
+          .filter(p => (p.confidence || 0) >= 0.6)
+        if (patterns.length > 0) {
           const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
           for (const p of patterns) {
-            lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
+            lines.push(`- [${p.confidence.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
           }
           console.log(lines.join('\n'))
         }
@@ -187,6 +208,51 @@ const handlers = {
     console.log('[OK] Command validated')
   },
 
+  'subagent-start': async (hookInput) => {
+    const db = getDb()
+    if (!db) return
+
+    const agentType = hookInput.agent_type || ''
+    const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+
+    // Search patterns by agent type keyword + project namespace
+    const projectPatterns = db.getProjectPatterns(project, 10)
+    if (projectPatterns.length === 0) return
+
+    // Filter patterns relevant to the agent's domain
+    const typeWords = agentType.toLowerCase().split(/[-_\s]+/).filter(w => w.length > 2)
+    const DOMAIN_MAP = {
+      coder: ['code', 'implement', 'write', 'function', 'module', 'refactor'],
+      tester: ['test', 'spec', 'coverage', 'assert', 'mock', 'fixture'],
+      reviewer: ['review', 'quality', 'lint', 'convention', 'style'],
+      researcher: ['search', 'find', 'explore', 'document', 'investigate'],
+      planner: ['plan', 'design', 'architect', 'structure', 'organize'],
+      security: ['security', 'auth', 'token', 'credential', 'vulnerability'],
+    }
+    const domainWords = DOMAIN_MAP[agentType] || typeWords
+
+    const scored = projectPatterns.map(p => {
+      const text = `${p.name} ${p.condition || ''} ${p.action || ''} ${(p.tags || []).join(' ')}`.toLowerCase()
+      const hits = domainWords.filter(w => text.includes(w)).length
+      return { ...p, relevance: hits }
+    }).filter(p => p.relevance > 0 || (p.confidence || 0) >= 0.7)
+      .sort((a, b) => b.relevance - a.relevance || (b.confidence || 0) - (a.confidence || 0))
+      .slice(0, 5)
+
+    if (scored.length === 0) return
+
+    // Output as additionalContext for the subagent
+    const context = scored.map(p =>
+      `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
+    ).join('\n')
+
+    const output = {
+      additionalContext: `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
+    }
+    // Claude Code reads JSON from stdout for SubagentStart hooks
+    console.log(JSON.stringify(output))
+  },
+
   'stats': () => {
     const intel = getIntelligence()
     const result = intel.getStats()
@@ -212,8 +278,8 @@ async function main() {
     try {
       if (command === 'route') {
         handlers[command](prompt)
-      } else if (command === 'post-edit' || command === 'pre-bash') {
-        handlers[command](hookInput)
+      } else if (command === 'post-edit' || command === 'pre-bash' || command === 'subagent-start') {
+        await handlers[command](hookInput)
       } else {
         handlers[command]()
       }
@@ -223,7 +289,7 @@ async function main() {
   } else if (command) {
     console.log(`[OK] Hook: ${command}`)
   } else {
-    console.log('Usage: hook-dispatch.js <route|session-restore|session-end|post-edit|post-task|pre-bash|stats>')
+    console.log('Usage: hook-dispatch.js <route|session-restore|session-end|post-edit|post-task|pre-bash|subagent-start|stats>')
   }
 }
 

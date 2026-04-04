@@ -17,7 +17,7 @@ echo "[quoth] Setting up from $PLUGIN_DIR"
 mkdir -p "$HOOKS_DIR" "$QUOTH_HOME/intelligence" "$QUOTH_HOME/trajectories"
 
 # 2. Symlink hook files
-for f in hook-dispatch.js inject-patterns.js rl-annotate.js trajectory-capture.js; do
+for f in hook-dispatch.js trajectory-capture.js; do
   src="$HOOKS_SRC/$f"
   dst="$HOOKS_DIR/$f"
   if [ ! -f "$src" ]; then
@@ -98,6 +98,20 @@ else
           type: 'command',
           command: \"sh -c 'exec node \\\"\\\$HOME/.quoth/hooks/hook-dispatch.js\\\" session-end'\",
           timeout: 10000
+        }]
+      }],
+      PreCompact: [{
+        hooks: [{
+          type: 'command',
+          command: \"sh -c 'exec node \\\"\\\$HOME/.quoth/hooks/hook-dispatch.js\\\" session-end'\",
+          timeout: 6000
+        }]
+      }],
+      SubagentStart: [{
+        hooks: [{
+          type: 'command',
+          command: \"sh -c 'exec node \\\"\\\$HOME/.quoth/hooks/hook-dispatch.js\\\" subagent-start'\",
+          timeout: 3000
         }]
       }],
       SubagentStop: [{

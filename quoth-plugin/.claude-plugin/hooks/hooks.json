@@ -1,37 +1,50 @@
 {
-  "description": "Quoth self-learning hooks: trajectory capture on tool use, pattern injection on session start, RL annotation on MCP tools",
+  "description": "Quoth unified hook dispatcher: intelligence routing, trajectory capture, pattern injection, subagent context",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" pre-bash", "timeout": 2000 }]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit|Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/trajectory-capture.js\"",
-            "timeout": 3000
-          }
-        ]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/trajectory-capture.js\"", "timeout": 3000 }]
       },
       {
-        "matcher": "mcp__quoth-learning__*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/rl-annotate.js\"",
-            "timeout": 2000
-          }
-        ]
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" post-edit", "timeout": 2000 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" route", "timeout": 3000 }]
       }
     ],
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/inject-patterns.js\"",
-            "timeout": 5000
-          }
-        ]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" session-restore", "timeout": 15000 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" session-end", "timeout": 10000 }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" session-end", "timeout": 6000 }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" subagent-start", "timeout": 3000 }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/hook-dispatch.js\" post-task", "timeout": 5000 }]
       }
     ]
   }
