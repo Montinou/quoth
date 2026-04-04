@@ -35,7 +35,7 @@ A Sonnet-powered memory interface that:
 
 | Tool | Description |
 |------|-------------|
-| `quoth_search_index` | Semantic search with Vercel AI Gateway embeddings (text-embedding-3-small, 1536d) |
+| `quoth_search_index` | Semantic search with Vercel AI Gateway embeddings (text-embedding-3-large, 2000d) |
 | `quoth_read_doc` | Retrieve full document content by ID |
 | `quoth_read_chunks` | Retrieve document chunks for granular access |
 | `quoth_memory_store` | Store a memory entry for the current agent/session |
@@ -218,7 +218,7 @@ Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types b
 | `CLERK_SECRET_KEY` | Clerk authentication secret key |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (client-side) |
 | `DATABASE_URL` | Neon PostgreSQL connection string |
-| `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` | Vercel AI Gateway — text-embedding-3-small (1536d vectors) |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway — text-embedding-3-large (2000d vectors) |
 | `JWT_SECRET` | MCP token generation |
 | `RESEND_API_KEY` | Email delivery (optional) |
 

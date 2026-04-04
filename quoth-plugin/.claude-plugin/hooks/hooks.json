@@ -1,5 +1,5 @@
 {
-  "description": "Quoth self-learning hooks: trajectory capture on tool use, pattern injection on session start, RL annotation",
+  "description": "Quoth self-learning hooks: trajectory capture on tool use, pattern injection on session start, RL annotation on MCP tools",
   "hooks": {
     "PostToolUse": [
       {
@@ -9,6 +9,16 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/trajectory-capture.js\"",
             "timeout": 3000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__quoth-learning__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/rl-annotate.js\"",
+            "timeout": 2000
           }
         ]
       }

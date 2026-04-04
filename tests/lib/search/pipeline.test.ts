@@ -10,7 +10,7 @@ vi.mock('@/db/connection', () => ({
   getDb: () => ({ execute: mockExecute }),
 }));
 
-const mockGenerateEmbedding = vi.fn().mockResolvedValue(new Array(1536).fill(0.1));
+const mockGenerateEmbedding = vi.fn().mockResolvedValue(new Array(2000).fill(0.1));
 vi.mock('@/lib/embeddings/gateway', () => ({
   generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
 }));

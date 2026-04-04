@@ -70,9 +70,13 @@ vi.mock('ai', () => ({
   embedMany: vi.fn(),
 }));
 
-vi.mock('@ai-sdk/openai', () => ({
-  openai: { embedding: vi.fn((model: string) => ({ model })) },
-}));
+vi.mock('@ai-sdk/openai', () => {
+  const embeddingFn = vi.fn((model: string) => ({ model }));
+  return {
+    openai: { embedding: embeddingFn },
+    createOpenAI: vi.fn(() => ({ embedding: embeddingFn })),
+  };
+});
 
 // ── Mock Upstash ─────────────────────────────────────────────────────────────
 vi.mock('@upstash/redis', () => ({

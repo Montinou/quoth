@@ -58,7 +58,7 @@ export interface CachedSearchEntry {
 
 export const SEARCH_CONFIG = {
   /** Default embedding model */
-  EMBEDDING_MODEL: 'text-embedding-3-small' as const,
+  EMBEDDING_MODEL: 'text-embedding-3-large' as const,
 
   /** RRF constant k — controls how much rank position matters */
   RRF_K: 60,

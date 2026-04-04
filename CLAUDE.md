@@ -187,15 +187,23 @@ npx @claude-flow/cli@latest doctor --fix
 - Documentation: https://github.com/ruvnet/claude-flow
 - Issues: https://github.com/ruvnet/claude-flow/issues
 
-## Quoth Plugin (Self-Learning)
+## Quoth Plugin v3.1.0 (Self-Learning)
 
-Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autonomous self-learning.
+Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous self-learning, intelligence routing, and agent coordination. Modular architecture: 4 handler modules, 22 MCP tools.
+
+### Setup
+```bash
+bash quoth-plugin/scripts/setup.sh
+```
+This symlinks hooks to `~/.quoth/hooks/`, injects hook declarations into `~/.claude/settings.json`, and adds permissions. Idempotent — safe to re-run.
 
 ### What It Does
 - Logs all agent trajectories to `~/.quoth/trajectories/{session}.jsonl`
 - Background daemon processes trajectories using Haiku subagents (JUDGE → DISTILL → CONSOLIDATE)
 - Maintains confidence-scored pattern library in `~/.quoth/memory.db`
-- Injects top patterns into every agent's context at session start
+- Injects top patterns into every agent's context at session start (token-optimized, ~200 tokens)
+- Routes tasks to optimal agents using keyword matching + PageRank intelligence
+- RL annotations on MCP tool outputs with pattern confidence scores
 
 ### Daemon
 - Auto-starts via `session-start` hook
@@ -208,16 +216,40 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin that provides autono
 - Decision Attribution: tracks which patterns caused success/failure outcomes
 - Source tagging: distilled, exolar-seeded, healer-learned, attributed, skill-derived
 
-### New MCP Tools (quoth-learning)
-- `quoth_log_outcome` — record pattern success/failure (+0.03/-0.03 confidence delta)
-- `quoth_score_pattern` — manually adjust a pattern's confidence score
-- `quoth_top_patterns` — get top-N scored patterns (optionally filtered by tags)
-- `quoth_seed_from_exolar` — import Exolar clustered failures as pattern candidates
-- `quoth_daemon_status` — check daemon health (running, PID, last log lines)
-- `quoth_propose_update` — manually promote a local pattern to the Quoth cloud (no wait for 3am)
-- `quoth_extract_skill` — extract a reusable test skill from a passing test (Sonnet 4.6)
-- `quoth_list_skills` — list all extracted skills from local pattern database
+### MCP Tools (22 total via quoth-learning server)
 
-### Skills
-- `/patterns` — browse confidence-scored pattern library
-- `/learn` — trigger manual consolidation
+**Patterns (8):** `quoth_log_outcome`, `quoth_score_pattern`, `quoth_top_patterns`, `quoth_search_patterns`, `quoth_project_patterns`, `quoth_promote_global`, `quoth_seed_from_exolar`, `quoth_propose_update`
+
+**Agents (6):** `quoth_daemon_status`, `quoth_ingest_trajectory`, `quoth_agent_register`, `quoth_agent_heartbeat`, `quoth_agent_list`, `quoth_assign_task`
+
+**Intelligence (6):** `quoth_route_task`, `quoth_intelligence_init`, `quoth_intelligence_context`, `quoth_intelligence_consolidate`, `quoth_intelligence_stats`, `quoth_intelligence_feedback`
+
+**Skills (2):** `quoth_extract_skill`, `quoth_list_skills`
+
+### Hooks (via hook-dispatch.js)
+- `UserPromptSubmit` → route task to optimal agent
+- `SessionStart` → init intelligence graph + inject patterns
+- `SessionEnd` / `PreCompact` → consolidate intelligence
+- `PostToolUse (Write|Edit)` → record edit for intelligence
+- `PostToolUse (Bash|Write|Edit|Agent)` → trajectory capture
+- `SubagentStop` → implicit success feedback
+- `PreToolUse (Bash)` → command safety check
+
+### Plugin System (.claude-plugin/)
+- `plugin.json` — manifest with MCP server, hooks, commands, agents
+- `/quoth:patterns` — browse confidence-scored pattern library
+- `/quoth:learn` — trigger manual consolidation
+- `quoth:learner` — Haiku agent for trajectory review
+
+### Architecture
+```
+mcp/quoth-learning-server.js  — MCP protocol (~55 lines)
+mcp/handlers/                 — patterns.js, agents.js, intelligence.js, skills.js, index.js
+mcp/lib/                      — graph.js (PageRank), routing.js (task routing)
+hooks/                        — hook-dispatch.js, inject-patterns.js, rl-annotate.js, trajectory-capture.js
+daemon/                       — daemon.js, db.js (SQLite)
+scripts/                      — setup.sh (automated installation)
+```
+
+### Roadmap
+Future handlers (not yet implemented): browser automation, workflow engine, terminal management.

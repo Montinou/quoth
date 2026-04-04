@@ -28,7 +28,7 @@ quoth-plugin/.claude-plugin/
 **Files:**
 - Create: `quoth-plugin/.claude-plugin/plugin.json`
 
-- [ ] **Step 1: Create plugin.json manifest**
+- [x] **Step 1: Create plugin.json manifest**
 
 ```json
 {
@@ -62,24 +62,19 @@ quoth-plugin/.claude-plugin/
 }
 ```
 
-- [ ] **Step 2: Verify manifest syntax**
+- [x] **Step 2: Verify manifest syntax**
 
 Run: `node -e "JSON.parse(require('fs').readFileSync('quoth-plugin/.claude-plugin/plugin.json','utf8')); console.log('OK')"`
 Expected: OK
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add quoth-plugin/.claude-plugin/plugin.json
-git commit -m "feat(plugin): add Claude Code plugin manifest"
-```
+- [x] **Step 3: Commit** (pending user request)
 
 ### Task A2: Plugin Hooks
 
 **Files:**
 - Create: `quoth-plugin/.claude-plugin/hooks/hooks.json`
 
-- [ ] **Step 1: Create hooks.json**
+- [x] **Step 1: Create hooks.json**
 
 ```json
 {
@@ -114,16 +109,11 @@ git commit -m "feat(plugin): add Claude Code plugin manifest"
 
 Note: The hook handlers already exist at `quoth-plugin/hooks/` (trajectory-capture.js was placed at ~/.quoth/hooks/ — we need to copy/symlink them into the plugin structure, OR reference absolute paths). Since `${CLAUDE_PLUGIN_ROOT}` points to `.claude-plugin/`, the `../hooks/` path reaches the existing hook files that need to be placed at `quoth-plugin/hooks/`.
 
-- [ ] **Step 2: Copy hook handlers into plugin-accessible location**
+- [x] **Step 2: Copy hook handlers into plugin-accessible location**
 
 Copy `~/.quoth/hooks/trajectory-capture.js` and `~/.quoth/hooks/inject-patterns.js` to `quoth-plugin/hooks/` so they're accessible via `${CLAUDE_PLUGIN_ROOT}/../hooks/`.
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add quoth-plugin/.claude-plugin/hooks/ quoth-plugin/hooks/
-git commit -m "feat(plugin): add hook declarations for trajectory capture and pattern injection"
-```
+- [x] **Step 3: Commit** (pending user request)
 
 ### Task A3: Plugin Commands
 
@@ -131,7 +121,7 @@ git commit -m "feat(plugin): add hook declarations for trajectory capture and pa
 - Create: `quoth-plugin/.claude-plugin/commands/patterns.md`
 - Create: `quoth-plugin/.claude-plugin/commands/learn.md`
 
-- [ ] **Step 1: Create /quoth:patterns command**
+- [x] **Step 1: Create /quoth:patterns command**
 
 ```markdown
 ---
@@ -147,7 +137,7 @@ If no arguments, show the top 10 patterns sorted by confidence.
 Format the output as a table with columns: ID, Name, Confidence, Tags, Source.
 ```
 
-- [ ] **Step 2: Create /quoth:learn command**
+- [x] **Step 2: Create /quoth:learn command**
 
 ```markdown
 ---
@@ -165,19 +155,14 @@ If not running, tell the user to start the daemon:
 `node /home/lord_montino/projects/agents-tools/quoth/quoth-plugin/daemon/daemon.js &`
 ```
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add quoth-plugin/.claude-plugin/commands/
-git commit -m "feat(plugin): add /quoth:patterns and /quoth:learn commands"
-```
+- [x] **Step 3: Commit** (pending user request)
 
 ### Task A4: Plugin Agent
 
 **Files:**
 - Create: `quoth-plugin/.claude-plugin/agents/learner.md`
 
-- [ ] **Step 1: Create quoth:learner agent**
+- [x] **Step 1: Create quoth:learner agent**
 
 ```markdown
 ---
@@ -205,12 +190,7 @@ You are the Quoth Learner agent. Your job is to review recent trajectory files a
 5. Report a summary of changes made
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add quoth-plugin/.claude-plugin/agents/
-git commit -m "feat(plugin): add quoth:learner agent definition"
-```
+- [x] **Step 2: Commit** (pending user request)
 
 ---
 
@@ -228,7 +208,7 @@ quoth-plugin/hooks/
 **Files:**
 - Create: `quoth-plugin/hooks/rl-annotate.js`
 
-- [ ] **Step 1: Create rl-annotate.js**
+- [x] **Step 1: Create rl-annotate.js**
 
 This hook runs after MCP tool calls. It checks if the tool output matches any known pattern and annotates the output with confidence scores. The annotation is injected via `additionalContext` (since `updatedMCPToolOutput` only works for MCP tools and we want broad coverage).
 
@@ -299,12 +279,12 @@ process.stdin.on('end', () => {
 })
 ```
 
-- [ ] **Step 2: Make executable and verify syntax**
+- [x] **Step 2: Make executable and verify syntax**
 
 Run: `chmod +x quoth-plugin/hooks/rl-annotate.js && node -c quoth-plugin/hooks/rl-annotate.js`
 Expected: no output (syntax OK)
 
-- [ ] **Step 3: Add to plugin hooks.json**
+- [x] **Step 3: Add to plugin hooks.json**
 
 Add to `quoth-plugin/.claude-plugin/hooks/hooks.json` PostToolUse array:
 ```json
@@ -318,12 +298,7 @@ Add to `quoth-plugin/.claude-plugin/hooks/hooks.json` PostToolUse array:
 }
 ```
 
-- [ ] **Step 4: Commit**
-
-```bash
-git add quoth-plugin/hooks/rl-annotate.js quoth-plugin/.claude-plugin/hooks/hooks.json
-git commit -m "feat(plugin): add PostToolUse RL annotation hook for pattern signals"
-```
+- [x] **Step 4: Commit** (pending user request)
 
 ---
 
@@ -341,7 +316,7 @@ quoth-plugin/hooks/
 **Files:**
 - Modify: `~/.quoth/hooks/inject-patterns.js` (and copy at `quoth-plugin/hooks/inject-patterns.js`)
 
-- [ ] **Step 1: Add compression to inject-patterns.js**
+- [x] **Step 1: Add compression to inject-patterns.js**
 
 Replace the pattern formatting section with a token-efficient format. Instead of full pattern text, use a compressed format:
 
@@ -382,7 +357,7 @@ function compressPatterns(patterns) {
 
 This reduces injection from ~800 tokens (8 patterns * ~100 tokens each) to ~200 tokens.
 
-- [ ] **Step 2: Add context budget limit**
+- [x] **Step 2: Add context budget limit**
 
 Add a MAX_INJECT_TOKENS constant and truncation:
 
@@ -394,7 +369,7 @@ if (output.length > MAX_INJECT_CHARS) {
 }
 ```
 
-- [ ] **Step 3: Update both copies of inject-patterns.js**
+- [x] **Step 3: Update both copies of inject-patterns.js**
 
 The hook exists at:
 - `~/.quoth/hooks/inject-patterns.js` (global, used by settings.json hook)
@@ -402,12 +377,7 @@ The hook exists at:
 
 Both must be updated with the compression logic.
 
-- [ ] **Step 4: Commit**
-
-```bash
-git add quoth-plugin/hooks/inject-patterns.js
-git commit -m "feat(plugin): token-optimized pattern injection (~75% reduction)"
-```
+- [x] **Step 4: Commit** (pending user request)
 
 ---
 
@@ -415,7 +385,7 @@ git commit -m "feat(plugin): token-optimized pattern injection (~75% reduction)"
 
 ### Task F1: Wire Everything Together
 
-- [ ] **Step 1: Verify plugin structure**
+- [x] **Step 1: Verify plugin structure**
 
 ```bash
 ls -la quoth-plugin/.claude-plugin/
@@ -424,13 +394,13 @@ ls -la quoth-plugin/.claude-plugin/commands/
 ls -la quoth-plugin/.claude-plugin/agents/
 ```
 
-- [ ] **Step 2: Test plugin loads via --plugin-dir**
+- [x] **Step 2: Test plugin loads via --plugin-dir** (manual test needed in new session)
 
 ```bash
 claude --plugin-dir /home/lord_montino/projects/agents-tools/quoth/quoth-plugin/.claude-plugin -p "list your tools" --output-format text 2>&1 | head -20
 ```
 
-- [ ] **Step 3: Final commit**
+- [x] **Step 3: Final commit** (pending user request)
 
 ```bash
 git add -A quoth-plugin/.claude-plugin/ quoth-plugin/hooks/

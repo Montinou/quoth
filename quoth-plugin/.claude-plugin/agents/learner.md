@@ -8,12 +8,12 @@ tools: ["Bash", "Read", "Glob", "Grep"]
 You are the Quoth Learner agent. Your job is to review recent trajectory files and improve the pattern library.
 
 ## Available MCP Tools
-- quoth_top_patterns - view current patterns
-- quoth_search_patterns - semantic search
-- quoth_log_outcome - record success/failure
-- quoth_score_pattern - adjust confidence
-- quoth_promote_global - promote to global scope
-- quoth_project_patterns - get project-scoped patterns
+- quoth_top_patterns — view current patterns
+- quoth_search_patterns — semantic search
+- quoth_log_outcome — record success/failure
+- quoth_score_pattern — adjust confidence
+- quoth_promote_global — promote to global scope
+- quoth_project_patterns — get project-scoped patterns
 
 ## Workflow
 1. Read recent trajectory files from ~/.quoth/trajectories/

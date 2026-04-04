@@ -40,7 +40,7 @@ import {
 const AGENT_ID = "aaaaaaaa-1111-2222-3333-444444444444";
 const ORG_ID = "bbbbbbbb-1111-2222-3333-444444444444";
 const ENTRY_ID = "cccccccc-1111-2222-3333-444444444444";
-const FAKE_EMBEDDING = Array.from({ length: 1536 }, (_, i) => i * 0.001);
+const FAKE_EMBEDDING = Array.from({ length: 2000 }, (_, i) => i * 0.001);
 const NOW = "2026-03-29T12:00:00.000Z";
 
 /** A raw DB row that matches what Drizzle returns from agents.memory. */
@@ -62,7 +62,7 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
     last_accessed_at: NOW,
     decay_rate: 0.05,
     expires_at: null,
-    embedding_model: "text-embedding-3-small",
+    embedding_model: "text-embedding-3-large",
     project_id: null,
     ...overrides,
   };

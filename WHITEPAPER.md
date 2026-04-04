@@ -1,7 +1,7 @@
 > **Note:** This whitepaper describes Quoth v1.0 architecture. The current version (v2.0+) uses a different tech stack:
 > - **Database:** Neon PostgreSQL (not Supabase)
 > - **Auth:** Clerk (not Supabase Auth)
-> - **Embeddings:** Vercel AI Gateway / text-embedding-3-small (not Jina)
+> - **Embeddings:** Vercel AI Gateway / text-embedding-3-large at 2000d (not Jina)
 > - **Memory:** Seamless auto-memory with local-first storage (not manual RAG)
 >
 > See README.md and the docs at quoth.triqual.dev for current documentation.

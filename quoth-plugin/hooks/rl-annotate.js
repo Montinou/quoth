@@ -11,7 +11,8 @@ const os = require('os')
 
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
-const DB_MODULE = process.env.QUOTH_DB_MODULE || path.join(__dirname, '..', 'daemon', 'db.js')
+const REAL_DIR = fs.realpathSync(__dirname)
+const DB_MODULE = process.env.QUOTH_DB_MODULE || path.join(REAL_DIR, '..', 'daemon', 'db.js')
 
 let input = ''
 process.stdin.setEncoding('utf8')
