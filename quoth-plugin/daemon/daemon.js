@@ -148,18 +148,42 @@ async function processQueue() {
  * Detect the actual project from file paths in the task description.
  * Corrects the namespace when sessions run from ~ but edit project-specific files.
  */
+// Workspace directory name → GitHub repo name mapping
+const WORKSPACE_REPO_MAP = {
+  ads: 'studio-pipeline',
+  billing: 'billing-processor',
+  curator: 'quoth',
+  deployer: 'agentical',
+  echo: 'ai-voice-platform',
+  interviews: 'interview-companion',
+  jardin: 'jardin-maternal',
+  multimedia: 'triqual',
+  omnichannel: 'omnichannel',
+  portfolio: 'portfolio',
+  sales: 'sales-companion',
+}
+
 function detectProjectFromTask(task, fallback) {
   if (!task) return fallback
-  // Match known project path patterns
+  // Match known project path patterns (order matters — most specific first)
   const patterns = [
-    /projects\/agents-tools\/([\w-]+)/,
-    /\.openclaw\/workspaces\/([\w-]+)\/repo/,
-    /IPS_audit\/([\w-]+)/,
-    /projects\/([\w-]+)\//,
+    [/projects\/agents-tools\/(quoth|exolar|triqual)/, null],
+    [/projects\/skill-registry/, 'skill-registry'],
+    [/projects\/claude-code-fork-main/, 'claude-code-fork-main'],
+    [/\.openclaw\/workspaces\/([\w-]+)\/repo/, 'workspace'],
+    [/IPS_audit\/IPS/, 'ips'],
+    [/shadcnblocks-registry/, 'shadcnblocks-registry'],
+    [/remotion-studio/, 'remotion-studio'],
+    [/prompt-to-motion-graphics/, 'prompt-to-motion-graphics'],
   ]
-  for (const re of patterns) {
+  for (const [re, override] of patterns) {
     const m = task.match(re)
-    if (m) return m[1].toLowerCase()
+    if (!m) continue
+    if (override === 'workspace') {
+      // Map workspace dir name to git repo name
+      return WORKSPACE_REPO_MAP[m[1]] || m[1].toLowerCase()
+    }
+    return override || m[1].toLowerCase()
   }
   return fallback
 }
