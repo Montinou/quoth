@@ -1,11 +1,11 @@
 ---
 name: quoth-init
-description: Initialize Quoth Memory v2 for a project. Creates .quoth/ folder, config.json with strictness/gates, and type files.
+description: Initialize Quoth local memory for a project. Creates .quoth/ folder, config.json with strictness/gates, and type files.
 ---
 
-# Quoth Memory v2 Initialization
+# Quoth Local Memory Initialization
 
-This skill initializes Quoth Memory v2 for the current project.
+This skill initializes Quoth local memory for the current project.
 
 ## Steps
 
@@ -53,7 +53,7 @@ mkdir -p .quoth/sessions
 # Create config.json with user choices
 cat > .quoth/config.json << 'EOF'
 {
-  "version": "2.0",
+  "version": "3.2.0",
   "project_id": "",
   "project_slug": "PROJECT_NAME",
   "strictness": "STRICTNESS_CHOICE",
@@ -190,7 +190,7 @@ grep -q ".quoth/sessions/" .gitignore 2>/dev/null || echo ".quoth/sessions/" >> 
 
 Output summary:
 ```
-Quoth Memory v2 initialized!
+Quoth Memory initialized!
 
 Configuration:
 - Strictness: {strictness}

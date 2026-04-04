@@ -1,19 +1,19 @@
 ---
 name: quoth-help
-description: Show Quoth plugin documentation - skills, tools, prompts, agents, setup, and troubleshooting. Pass a topic argument for specific help.
+description: Show Quoth plugin documentation - tools, hooks, daemon, skills, and troubleshooting. Pass a topic argument for specific help.
 user_invocable: true
 arguments: "[topic]"
 ---
 
 # Quoth Help
 
-Display documentation for the Quoth AI Memory plugin based on the requested topic.
+Display documentation for the Quoth self-learning plugin based on the requested topic.
 
 ## Behavior
 
 Parse the argument (if any) and display the matching section below. If no argument is given, show the **Overview** section.
 
-Valid topics: `skills`, `prompts`, `tools`, `agents`, `setup`, `troubleshooting`
+Valid topics: `tools`, `hooks`, `daemon`, `skills`, `cloud`, `troubleshooting`
 
 ---
 
@@ -22,24 +22,113 @@ Valid topics: `skills`, `prompts`, `tools`, `agents`, `setup`, `troubleshooting`
 Display this when no topic is provided:
 
 ```
-Quoth v2.0 — AI Memory for Claude Code
+Quoth v3.2.0 — Self-Learning Plugin for Claude Code
 
-Quoth gives Claude persistent memory across sessions through local-first
-storage (.quoth/) and remote knowledge bases (Supabase + RAG pipeline).
+Quoth gives Claude autonomous learning through trajectory capture,
+pattern extraction, and intelligence routing. Local SQLite + HNSW storage.
 
 Available topics (/quoth-help <topic>):
 
-  skills           /quoth-init, /quoth-genesis
-  prompts          /prompt quoth_architect, quoth_auditor, quoth_documenter
-  tools            8 MCP tools (search, read, propose, guidelines, templates, chunks, genesis)
-  agents           quoth-memory subagent
-  setup            Plugin install, MCP-only, public demo, CLI commands
+  tools            22 MCP tools (patterns, agents, intelligence, skills)
+  hooks            9 hook events (routing, capture, injection, safety)
+  daemon           Background trajectory processor (JUDGE → DISTILL → CONSOLIDATE)
+  skills           /quoth:patterns, /quoth:learn
+  cloud            Cloud MCP server (search, memory, agents, genesis)
   troubleshooting  Common issues and fixes
 
 Quick start:
-  /quoth-init        Initialize AI Memory for your project
-  /quoth-genesis     Bootstrap documentation from codebase
-  /quoth-help setup  See all installation methods
+  /quoth:patterns    View learned pattern library
+  /quoth:learn       Trigger manual consolidation
+  /quoth-help tools  See all 22 MCP tools
+```
+
+---
+
+## tools
+
+```
+Quoth MCP Tools (22 via quoth-learning stdio server)
+=====================================================
+
+PATTERNS (8):
+  quoth_log_outcome        Record success/failure for a pattern
+  quoth_score_pattern      Adjust pattern confidence manually
+  quoth_top_patterns       View highest-confidence patterns
+  quoth_search_patterns    Semantic search over pattern library
+  quoth_project_patterns   Get patterns scoped to current project
+  quoth_promote_global     Promote pattern to global scope
+  quoth_seed_from_exolar   Import patterns from external source
+  quoth_propose_update     Propose pattern text update
+
+AGENTS (6):
+  quoth_daemon_status      Check daemon health and stats
+  quoth_ingest_trajectory  Manually ingest a trajectory file
+  quoth_agent_register     Register an agent identity
+  quoth_agent_heartbeat    Send agent heartbeat
+  quoth_agent_list         List registered agents
+  quoth_assign_task        Assign task to an agent
+
+INTELLIGENCE (6):
+  quoth_route_task         Route task to optimal agent type
+  quoth_intelligence_init  Initialize intelligence graph
+  quoth_intelligence_context  Get context for current task
+  quoth_intelligence_consolidate  Consolidate graph, recompute PageRank
+  quoth_intelligence_stats  View graph statistics
+  quoth_intelligence_feedback  Provide feedback to intelligence
+
+SKILLS (2):
+  quoth_extract_skill      Extract a reusable skill from trajectory
+  quoth_list_skills        List extracted skills
+```
+
+---
+
+## hooks
+
+```
+Quoth Hooks (via hook-dispatch.js)
+===================================
+
+All hooks run through a unified dispatcher. Zero API calls in automatic hooks.
+
+UserPromptSubmit     Route task to optimal agent, show relevant patterns
+SessionStart         Init intelligence graph, inject top patterns (>= 0.6)
+SessionEnd           Consolidate intelligence graph, recompute PageRank
+PreCompact           Same as SessionEnd (pre-context-compression)
+PostToolUse(W/E)     Record edits for intelligence tracking
+PostToolUse(B/W/E/A) Capture tool calls to trajectory file
+PreToolUse(Bash)     Block dangerous commands (rm -rf /, fork bombs)
+SubagentStart        Inject domain-relevant patterns via additionalContext
+SubagentStop         Implicit positive feedback to intelligence
+```
+
+---
+
+## daemon
+
+```
+Quoth Daemon
+============
+
+Background process that converts raw trajectories into learned patterns.
+
+Pipeline: JUDGE → DISTILL → CONSOLIDATE (Haiku subagents)
+
+  JUDGE       Evaluates trajectory quality and relevance
+  DISTILL     Extracts reusable patterns from quality trajectories
+  CONSOLIDATE Merges into pattern library with Bayesian confidence
+
+Storage: ~/.quoth/memory.db (SQLite + HNSW vector index)
+PID:     ~/.quoth/daemon.pid
+Log:     ~/.quoth/daemon.log
+Debug:   QUOTH_DEBUG=true
+
+Auto-starts on SessionStart hook.
+Nightly promotion: patterns with confidence > 0.8 and > 10 uses
+  promote to Quoth cloud at 3am (requires QUOTH_API_KEY).
+
+Confidence scoring: Beta(alpha, beta) Bayesian distribution
+Source tags: distilled, exolar-seeded, healer-learned, attributed, skill-derived
 ```
 
 ---
@@ -50,182 +139,48 @@ Quick start:
 Quoth Skills
 ============
 
-/quoth-init
-  Initialize Quoth Memory v2 for a project.
-  Creates .quoth/ folder with config.json, strictness settings, gates,
-  and type files (decisions, patterns, errors, knowledge, selectors, api).
+/quoth:patterns
+  Browse the confidence-scored pattern library.
+  Shows top patterns sorted by confidence with scores, tags, and use counts.
+  Optional: pass tags to filter (e.g., /quoth:patterns react testing)
 
-  Usage: /quoth-init
-
-/quoth-genesis
-  Bootstrap project documentation from codebase with configurable depth.
-  Reads local files, generates docs, uploads to Quoth incrementally.
-
-  Depth levels:
-    minimal       3 docs   — project-overview, tech-stack, repo-structure
-    standard      5 docs   — + coding-conventions, testing-patterns
-    comprehensive 11 docs  — + api-schemas, database-models, shared-types,
-                              error-handling, security-patterns, tech-debt
-
-  Usage: /quoth-genesis
-
-/quoth-help
-  This command. Shows plugin documentation.
-
-  Usage: /quoth-help [topic]
+/quoth:learn
+  Trigger manual pattern consolidation from recent trajectories.
+  Sends SIGUSR1 to the daemon for immediate processing.
+  Shows updated pattern library after processing.
 ```
 
 ---
 
-## prompts
+## cloud
 
 ```
-Quoth Prompts (Personas)
-========================
+Quoth Cloud MCP Server
+=======================
 
-Prompts configure Claude's behavior for the conversation. They are NOT tools.
-Activate with /prompt <name> in Claude Code.
-
-/prompt quoth_architect
-  Code Generation persona. Enforces "Single Source of Truth" rules.
-  - Searches knowledge base before generating code
-  - Cites specific documents in suggestions
-  - Refuses to generate code that violates patterns
-  - Proposes documentation updates for new patterns
-
-/prompt quoth_auditor
-  Code Review persona. Distinguishes "New Features" from "Bad Code".
-  - Flags violations with specific document citations
-  - Suggests compliant alternatives
-  - Tracks drift patterns over time
-
-/prompt quoth_documenter
-  Incremental Documentation persona. Documents code as you build.
-  - Asks about documentation type before writing
-  - Fetches templates from Quoth
-  - Structures docs with H2 sections and YAML frontmatter
-
-Note: Only one prompt can be active at a time. Each /prompt command
-replaces the previous persona. The persona stays active for the entire
-conversation until a new one is activated or a new session starts.
-```
-
----
-
-## tools
-
-```
-Quoth MCP Tools
-===============
-
-These are called automatically by Claude when connected to the Quoth MCP server.
-
-quoth_search_index
-  Semantic vector search across documentation.
-  Params: query (string), limit (number, default 5)
-  Returns: Array of document IDs with relevance scores
-
-quoth_read_doc
-  Retrieves full document content from knowledge base.
-  Params: doc_id (string)
-  Returns: Full document content with metadata
-
-quoth_propose_update
-  Submits documentation update proposal when drift is detected.
-  Params: doc_id (string), proposed_change (string), evidence (string)
-  Returns: Proposal ID for tracking
-  Access: editor/admin only (viewers cannot propose)
-
-quoth_guidelines
-  Adaptive guidelines tool — returns context-relevant guidelines
-  based on the current task. Replaces heavy persona injection.
-  Params: context (string)
-  Returns: Relevant guidelines for the task
-
-quoth_list_templates
-  Lists available document templates for genesis and manual creation.
-  Returns: Array of template names with descriptions
-
-quoth_get_template
-  Fetches a specific template structure for document creation.
-  Params: template_name (string)
-  Returns: Template content with YAML frontmatter schema
-
-quoth_read_chunks
-  Fetches specific chunks by ID for granular retrieval.
-  Params: chunk_ids (string[])
-  Returns: Array of chunk contents
-
-quoth_genesis
-  Genesis v2.0 — phased documentation bootstrapping with depth levels.
-  Params: depth (minimal | standard | comprehensive)
-  Returns: Status and list of generated documents
-```
-
----
-
-## agents
-
-```
-Quoth Agents
-============
-
-quoth-memory
-  Sonnet-powered memory interface for context queries.
-  Produces ~500 token summaries from Quoth knowledge base.
-  Automatically invoked by hooks to inject relevant context
-  before subagent execution.
-
-  The quoth-memory agent:
-  - Receives the current task context
-  - Searches Quoth for relevant documentation
-  - Returns a concise summary for the requesting agent
-  - Excludes itself from recursive context injection
-```
-
----
-
-## setup
-
-```
-Quoth Setup
-===========
-
-OPTION 1: Plugin Install (Recommended)
-  Bundles MCP server + hooks + skills + agents.
-
-  # Add marketplace (one time)
-  /plugin marketplace add Montinou/quoth-mcp
-
-  # Install plugin
-  /plugin install quoth@quoth-marketplace
-
-  Alternative via Triqual marketplace:
-  /plugin marketplace add Montinou/triqual
-  /plugin install quoth@triqual
-
-OPTION 2: MCP Only (No Hooks)
-  Just the MCP server, no automatic enforcement.
+Separate from the plugin. Connect via HTTP for cloud features:
 
   claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 
-  Then run /mcp → select quoth → Authenticate
-
-OPTION 3: Public Demo (No Auth)
-  Read-only access for testing.
-
-  claude mcp add --transport http quoth-public https://quoth.triqual.dev/api/mcp/public
-
-CLI COMMANDS:
-  quoth login     Authenticate and configure Claude Code
-  quoth logout    Remove authentication (keeps public access)
-  quoth status    Show current configuration
-  quoth help      Show help message
-
-AFTER INSTALL:
-  1. /quoth-init        Configure local AI Memory
-  2. /quoth-genesis     Bootstrap documentation from codebase
-  3. Start coding — hooks enforce documentation automatically
+Cloud tools include:
+  quoth_search_index       Semantic search (text-embedding-3-large, 2000d)
+  quoth_read_doc           Read full document
+  quoth_read_chunks        Read document chunks
+  quoth_memory_store       Store memory entry
+  quoth_memory_search      Search memories
+  quoth_memory_list        List memories
+  quoth_memory_forget      Delete memory
+  quoth_agent_register     Register agent
+  quoth_agent_list         List agents
+  quoth_agent_assign       Assign agent to task
+  quoth_agent_send_message Inter-agent messaging
+  quoth_agent_inbox        Read inbox
+  quoth_agent_tasks        List assigned tasks
+  quoth_agent_task_reassign Reassign task
+  quoth_project_create     Create project
+  quoth_project_invite     Invite collaborator
+  quoth_token_generate     Generate MCP token
+  quoth_genesis            Bootstrap documentation
 ```
 
 ---
@@ -236,37 +191,28 @@ AFTER INSTALL:
 Quoth Troubleshooting
 =====================
 
-PROBLEM: "Prompts aren't working"
-  Prompts are NOT tools. Activate with: /prompt quoth_architect
-  Wrong: "Use quoth_architect to generate code"
-  Right: /prompt quoth_architect → then ask your question
+PROBLEM: "Daemon not running"
+  Check: cat ~/.quoth/daemon.pid && kill -0 $(cat ~/.quoth/daemon.pid)
+  Fix: Restart Claude Code session (daemon auto-starts on SessionStart)
 
-PROBLEM: "I don't see prompts available"
-  1. Verify MCP connected: claude mcp list (should show quoth)
-  2. Test a tool first: "search for test patterns in Quoth"
-  3. Reconnect: claude mcp remove quoth → then re-add
+PROBLEM: "No patterns showing"
+  The daemon needs trajectories to learn from. Work normally for a few
+  sessions, then check: quoth_top_patterns({ limit: 10 })
 
-PROBLEM: "MCP tools not responding"
-  Check server status: curl https://quoth.triqual.dev/api/mcp
-  If down, use public endpoint as fallback:
-  claude mcp add --transport http quoth-public https://quoth.triqual.dev/api/mcp/public
+PROBLEM: "Hooks not firing"
+  1. Verify hooks in ~/.claude/settings.json
+  2. Re-run: bash quoth-plugin/scripts/setup.sh
+  3. Check hook logs for errors
 
-PROBLEM: "Plugin not loading after install"
-  1. Restart Claude Code
-  2. Check /plugin list for errors
-  3. Verify .claude-plugin/plugin.json exists in project root
+PROBLEM: "Intelligence routing wrong agent"
+  Use quoth_intelligence_feedback to correct routing decisions.
+  The graph learns from feedback over time.
 
-PROBLEM: "Hooks blocking my edits"
-  Your strictness is set to "blocking". Options:
-  - Document your reasoning first (recommended)
-  - Change strictness in .quoth/config.json to "reminder" or "off"
-  - Re-run /quoth-init to reconfigure
+PROBLEM: "Cloud sync failing"
+  Check QUOTH_API_KEY is set (qth_* format).
+  Verify: curl https://quoth.triqual.dev/api/health
 
-PROBLEM: "Genesis not finding all files"
-  Genesis reads files using Claude's native file access.
-  Ensure you're running from the project root directory.
-  Try: /quoth-genesis (re-running skips unchanged content)
-
-Dashboard: https://quoth.triqual.dev/dashboard
-API Keys:  https://quoth.triqual.dev/dashboard/api-keys
+Plugin config:  ~/.quoth/hooks/ (symlinks)
+Plugin MCP:     ~/.mcp.json (quoth-learning server)
+Hook config:    ~/.claude/settings.json
 ```

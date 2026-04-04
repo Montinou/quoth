@@ -192,7 +192,19 @@ const handlers = {
 
   'post-task': () => {
     const intel = getIntelligence()
-    intel.applyFeedback(true)
+    const result = intel.applyFeedback(true)
+
+    // Also apply Bayesian update to actual DB patterns (not just intelligence graph JSON)
+    const db = getDb()
+    if (db && result.boosted && result.boosted.length > 0) {
+      for (const id of result.boosted) {
+        // Intelligence graph IDs are prefixed: pat-{realId} for patterns
+        const patternId = id.startsWith('pat-') ? id.slice(4) : null
+        if (patternId) {
+          db.applyBayesianUpdate(patternId, 'success')
+        }
+      }
+    }
     console.log('[OK] Task completed')
   },
 

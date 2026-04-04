@@ -1,41 +1,33 @@
-# Quoth v2.0 - AI Memory
+# Quoth — AI Memory & Self-Learning Platform
 
-> Transform your AI from "search and read" to "automatic memory" - Local-first knowledge capture with bidirectional learning
+> Persistent memory, autonomous learning, and agent coordination for AI-powered development
 
-Quoth is an **AI Memory** system that gives Claude persistent memory across sessions. Unlike traditional documentation tools, Quoth creates a learning loop: it both retrieves AND stores knowledge, mediated by an intelligent `quoth-memory` subagent.
+Quoth is a two-tier system:
+
+1. **Cloud Platform** (Next.js SaaS) — Multi-tenant knowledge management with dashboard, API, search, and team collaboration
+2. **Claude Code Plugin** (v3.2.0) — Local self-learning daemon that captures trajectories, learns patterns, routes tasks, and coordinates agents
+
+## Architecture
 
 ```
-RAG (Basic)           → Query → Vectors → Context → LLM
-Agentic RAG (v1)      → Query → LLM → Tools → Context → LLM
-AI Memory (v2)        → Query → LLM → Memory ⟷ Tools → Context → LLM
-                                        ↑___↓
-                                    Bidirectional
+Cloud Platform (src/)                    Plugin (quoth-plugin/)
+├── Next.js 16 + React 19               ├── 22 MCP tools (stdio)
+├── Neon PostgreSQL (Drizzle ORM)        ├── SQLite + HNSW (local)
+├── Clerk authentication                 ├── Background daemon
+├── Vercel AI Gateway embeddings         ├── Trajectory capture
+│   (text-embedding-3-large, 2000d)      ├── Pattern learning (Haiku)
+├── Cohere reranking                     ├── Intelligence routing
+├── Cloud MCP server (/api/mcp)          └── Hook-based automation
+└── Dashboard + API routes
 ```
 
-## Key Features
+## Cloud MCP Tools
 
-### 🧠 AI Memory Architecture
-
-| Feature | Description |
-|---------|-------------|
-| **Local-first storage** | `.quoth/` folder persists knowledge across sessions |
-| **Session logging** | Every action logged to `.quoth/sessions/{id}/` |
-| **Knowledge promotion** | User-approved transfer from session → local → remote |
-| **Configurable strictness** | `blocking`, `reminder`, or `off` modes |
-
-### 🤖 quoth-memory Subagent
-
-A Sonnet-powered memory interface that:
-- Summarizes relevant context at session start (~500 tokens)
-- Answers questions without bloating main context
-- Prepares knowledge promotion proposals
-- Exempt from all hooks (prevents loops)
-
-### 🔧 MCP Tools
+Available via HTTP at `https://quoth.triqual.dev/api/mcp`:
 
 | Tool | Description |
 |------|-------------|
-| `quoth_search_index` | Semantic search with Vercel AI Gateway embeddings (text-embedding-3-large, 2000d) |
+| `quoth_search_index` | Semantic search with text-embedding-3-large (2000d) + Cohere reranking |
 | `quoth_read_doc` | Retrieve full document content by ID |
 | `quoth_read_chunks` | Retrieve document chunks for granular access |
 | `quoth_memory_store` | Store a memory entry for the current agent/session |
@@ -54,162 +46,55 @@ A Sonnet-powered memory interface that:
 | `quoth_token_generate` | Generate an MCP access token |
 | `quoth_genesis` | Bootstrap project documentation (minimal/standard/comprehensive) |
 
-### 🪝 Hook-Enforced Documentation
+## Plugin MCP Tools (22)
 
-| Hook | Purpose |
-|------|---------|
-| `SessionStart` | Initialize `.quoth/sessions/`, inject context |
-| `PreToolUse` | Gate Edit/Write until reasoning documented (if blocking) |
-| `PostToolUse` | Log actions to session folder |
-| `SubagentStart/Stop` | Context injection and documentation prompts |
-| `Stop` | Propose knowledge promotion to user |
+Available locally via stdio (`quoth-learning` server):
+
+**Patterns (8):** `quoth_log_outcome`, `quoth_score_pattern`, `quoth_top_patterns`, `quoth_search_patterns`, `quoth_project_patterns`, `quoth_promote_global`, `quoth_seed_from_exolar`, `quoth_propose_update`
+
+**Agents (6):** `quoth_daemon_status`, `quoth_ingest_trajectory`, `quoth_agent_register`, `quoth_agent_heartbeat`, `quoth_agent_list`, `quoth_assign_task`
+
+**Intelligence (6):** `quoth_route_task`, `quoth_intelligence_init`, `quoth_intelligence_context`, `quoth_intelligence_consolidate`, `quoth_intelligence_stats`, `quoth_intelligence_feedback`
+
+**Skills (2):** `quoth_extract_skill`, `quoth_list_skills`
+
+## Plugin Hooks
+
+All hooks run through a unified dispatcher (`hook-dispatch.js`). Zero API calls in automatic hooks.
+
+| Hook Event | What It Does |
+|---|---|
+| `UserPromptSubmit` | Route task to optimal agent, show relevant patterns |
+| `SessionStart` | Init intelligence graph, inject top patterns (>= 0.6 confidence) |
+| `SessionEnd` | Consolidate intelligence graph, recompute PageRank |
+| `PreCompact` | Same as SessionEnd (pre-context-compression) |
+| `PostToolUse (Write/Edit)` | Record edit for intelligence |
+| `PostToolUse (Bash/Write/Edit/Agent)` | Capture tool calls to trajectory file |
+| `PreToolUse (Bash)` | Block dangerous commands |
+| `SubagentStart` | Inject domain-relevant patterns via additionalContext |
+| `SubagentStop` | Implicit positive feedback to intelligence |
 
 ## Installation
 
-### Recommended: Plugin Install (Full AI Memory)
-
-```bash
-# Add marketplace (one time)
-/plugin marketplace add Montinou/quoth-mcp
-
-# Install plugin (MCP + hooks + skills + agents)
-/plugin install quoth@quoth-marketplace
-```
-
-This bundles:
-- **MCP Server** - All tools for search, read, propose
-- **Hooks** - Automatic knowledge capture and enforcement
-- **Skills** - `/quoth-init` and `/quoth-genesis`
-- **Agents** - `quoth-memory` subagent for context queries
-
-### Alternative: MCP Server Only
-
-For just the MCP tools without local memory:
+### Cloud MCP Server
 
 ```bash
 claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
-## Quick Start
-
-### 1. Initialize AI Memory
+### Plugin (Full Self-Learning)
 
 ```bash
-# Run in your project
-/quoth-init
+cd quoth-plugin && bash scripts/setup.sh
 ```
 
-This creates your `.quoth/` folder:
-
-```
-.quoth/
-├── config.json         # Strictness, types, gates
-├── decisions.md        # Architecture choices
-├── patterns.md         # Code patterns
-├── errors.md           # Failures and fixes
-├── knowledge.md        # General context
-└── sessions/           # Session logs (gitignored)
-```
-
-### 2. Configure Strictness
-
-Choose how strictly Quoth enforces documentation:
-
-| Mode | Behavior |
-|------|----------|
-| **blocking** | Claude cannot edit code until reasoning is documented |
-| **reminder** | Gentle prompts to document, not blocking |
-| **off** | Manual capture only, no enforcement |
-
-### 3. Work Normally
-
-With Quoth active:
-
-1. **Session starts** → Context injected from `.quoth/*.md`
-2. **Before edits** → Gate checks reasoning documented (if blocking)
-3. **After actions** → Logged to `.quoth/sessions/{id}/log.md`
-4. **Session ends** → Prompted to promote learnings
-
-### 4. Auto-Memory
-
-After init, session learnings are captured and consolidated automatically — no user action needed. On session end, Quoth silently extracts key insights and merges them into your `.quoth/*.md` files. Knowledge promotion to the remote index happens seamlessly in the background.
-
-```
-Session complete. Learnings auto-extracted and consolidated:
-
-**Decisions:**
-- Chose retry-with-backoff over circuit-breaker for token refresh
-
-**Patterns:**
-- Token refresh uses mutex to prevent race conditions
-
-**Errors:**
-- Auth header missing on redirect (fixed by preserving headers)
-```
-
-## Local Folder Structure
-
-```
-.quoth/
-├── config.json              # Project configuration
-│
-├── decisions.md             # PERSISTENT: Architecture choices
-├── patterns.md              # PERSISTENT: Code patterns
-├── errors.md                # PERSISTENT: Failures and fixes
-├── knowledge.md             # PERSISTENT: General context
-├── [custom].md              # PERSISTENT: Project-specific types
-│
-└── sessions/
-    └── {session-id}/        # EPHEMERAL: Current session only
-        ├── context.md       # Injected context at start
-        ├── log.md           # Actions taken this session
-        └── pending.md       # Learnings awaiting promotion
-```
-
-### Persistence Rules
-
-| Type | Survives Session | Survives Compaction | Synced to Quoth |
-|------|------------------|---------------------|-----------------|
-| Config | ✓ | ✓ | ✗ (local only) |
-| Type files | ✓ | ✓ | On promotion |
-| Session logs | Current only | ✓ | On promotion |
-
-## Using quoth-memory
-
-Query the memory subagent directly:
-
-```
-"Ask quoth-memory: What's our error handling pattern?"
-```
-
-The subagent:
-1. Searches Quoth and local `.quoth/*.md` files
-2. Returns a concise answer (not raw documents)
-3. Keeps main context clean
-
-## Genesis v3.0
-
-Bootstrap documentation with configurable depth:
-
-```bash
-# In Claude Code
-"Run Genesis on this project"
-```
-
-| Depth | Documents | Time | Use Case |
-|-------|-----------|------|----------|
-| `minimal` | 3 | ~3 min | Quick overview |
-| `standard` | 5 | ~7 min | Team onboarding |
-| `comprehensive` | 11 | ~20 min | Enterprise audit |
-
-Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types before generating docs.
+Symlinks hooks to `~/.quoth/hooks/`, injects hook declarations into `~/.claude/settings.json`, and adds MCP server config. Idempotent.
 
 ## Team Collaboration
 
-- **Multi-user projects** - Share knowledge bases with team members
-- **Role-based access** - Admin, Editor, and Viewer roles
-- **Email invitations** - Invite collaborators via secure tokens
-- **Approval workflows** - Proposals require admin review (optional)
+- **Multi-user projects** — Share knowledge bases with team members
+- **Role-based access** — Admin, Editor, and Viewer roles
+- **Email invitations** — Invite collaborators via secure tokens
 
 ## Environment Variables
 
@@ -218,16 +103,24 @@ Genesis v3.0 adds **Phase 0: Configuration** - asks about strictness and types b
 | `CLERK_SECRET_KEY` | Clerk authentication secret key |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (client-side) |
 | `DATABASE_URL` | Neon PostgreSQL connection string |
-| `AI_GATEWAY_API_KEY` | Vercel AI Gateway — text-embedding-3-large (2000d vectors) |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway — text-embedding-3-large (2000d) |
 | `JWT_SECRET` | MCP token generation |
 | `RESEND_API_KEY` | Email delivery (optional) |
+| `QUOTH_API_KEY` | Plugin cloud sync (qth_* key) |
+
+## Build & Test
+
+```bash
+npm run build    # Build Next.js app
+npm test         # Run Vitest tests
+npm run lint     # ESLint
+```
 
 ## Links
 
 - **Website**: https://quoth.triqual.dev
 - **Documentation**: https://quoth.triqual.dev/docs
 - **Changelog**: https://quoth.triqual.dev/changelog
-- **GitHub**: https://github.com/Montinou/quoth-mcp
 
 ## License
 

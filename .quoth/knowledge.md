@@ -4,14 +4,16 @@ General context and learnings for this project.
 
 ## Project Identity
 
-Quoth v2.0 is an AI Memory system built with Next.js 16, React 19, Supabase, and MCP Protocol. Production at https://quoth.triqual.dev. Multi-tenant with RLS, project-based isolation.
+Quoth is a two-tier AI Memory & Self-Learning platform:
+1. **Cloud Platform** — Next.js 16, React 19, Neon PostgreSQL (Drizzle ORM), Clerk auth, deployed at https://quoth.triqual.dev
+2. **Claude Code Plugin** (v3.2.0) — 22 MCP tools, self-learning daemon, SQLite + HNSW
 
 ## Key Numbers
 
-- 33 API routes, 31 DB migrations, 13 MCP modules, 35 React components
-- 9 MCP tools registered in `src/lib/quoth/tools.ts`
-- RAG pipeline: 512d vectors, fetch 50 candidates, rerank to top 15
-- Auth: 90-day API key expiration, SHA256 hashed storage
+- Cloud: 18 MCP tools, 6 DB schemas, 30+ tables, 6 migrations
+- Plugin: 22 MCP tools (patterns 8, agents 6, intelligence 6, skills 2)
+- RAG pipeline: text-embedding-3-large (2000d) via Vercel AI Gateway, Cohere reranking
+- Auth: Clerk (web), custom JWT (MCP API keys, SHA256 hashed, 90-day expiry)
 - Design: "Intellectual Neo-Noir" — obsidian/charcoal/violet palette, Cinzel + Geist fonts
 
 ## Genesis Documentation

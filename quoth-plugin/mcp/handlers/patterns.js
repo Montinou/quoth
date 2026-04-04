@@ -120,7 +120,12 @@ async function handle(name, args, db) {
       return { logged: true, patternId: args.patternId, result: args.result, confidence: p?.confidence }
     }
     case 'quoth_score_pattern': {
-      db.applyConfidenceDelta(args.patternId, args.delta)
+      // Use Bayesian update when delta direction is clear, fall back to direct delta for fine-grained adjustments
+      if (args.delta > 0) {
+        db.applyBayesianUpdate(args.patternId, 'success')
+      } else if (args.delta < 0) {
+        db.applyBayesianUpdate(args.patternId, 'failure')
+      }
       const p = db.getPattern(args.patternId)
       return { updated: true, pattern: p }
     }
@@ -199,7 +204,22 @@ One line per cluster. Use the mcp__plugin_triqual-plugin_exolar-qa__query_exolar
       if (args.includeSkills === false) {
         results = results.filter(p => p.pattern_type !== 'skill' && p.source !== 'skill-derived')
       }
-      return { query: args.query, count: results.length, patterns: results.slice(0, limit) }
+      const finalResults = results.slice(0, limit)
+      // Mark last_matched_at on returned patterns so decay/feedback can target them
+      const now = Date.now()
+      for (const p of finalResults) {
+        if (p.id) {
+          db.prepare('UPDATE patterns SET last_matched_at = ? WHERE id = ?').run(now, p.id)
+        }
+      }
+      // Write matched IDs for feedback loop (intelligence.js applyFeedback reads this)
+      try {
+        const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
+        if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true })
+        const matchedIds = finalResults.map(p => `pat-${p.id}`)
+        fs.writeFileSync(path.join(STATE_DIR, 'last-matched.json'), JSON.stringify(matchedIds))
+      } catch {}
+      return { query: args.query, count: finalResults.length, patterns: finalResults }
     }
     case 'quoth_project_patterns': {
       const patterns = db.getProjectPatterns(args.project, args.limit || 10)

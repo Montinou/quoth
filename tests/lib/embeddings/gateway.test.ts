@@ -13,12 +13,12 @@ const mockEmbed = vi.mocked(embed);
 const mockEmbedMany = vi.mocked(embedMany);
 
 describe('gateway constants', () => {
-  it('EMBEDDING_MODEL is text-embedding-3-large', () => {
-    expect(EMBEDDING_MODEL).toBe('text-embedding-3-large');
+  it('EMBEDDING_MODEL is voyage/voyage-4-lite', () => {
+    expect(EMBEDDING_MODEL).toBe('voyage/voyage-4-lite');
   });
 
-  it('EMBEDDING_DIMS is 2000', () => {
-    expect(EMBEDDING_DIMS).toBe(2000);
+  it('EMBEDDING_DIMS is 1024', () => {
+    expect(EMBEDDING_DIMS).toBe(1024);
   });
 });
 
@@ -26,14 +26,14 @@ describe('generateEmbedding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEmbed.mockResolvedValue({
-      embedding: new Array(2000).fill(0.1),
+      embedding: new Array(1024).fill(0.1),
       usage: { tokens: 10 },
     } as never);
   });
 
-  it('returns a 2000-dimensional vector', async () => {
+  it('returns a 1024-dimensional vector', async () => {
     const result = await generateEmbedding('hello world');
-    expect(result).toHaveLength(2000);
+    expect(result).toHaveLength(1024);
     expect(result[0]).toBe(0.1);
   });
 
@@ -78,15 +78,15 @@ describe('generateEmbeddingsBatch', () => {
     const result = await generateEmbeddingsBatch(['', '  ', '\n\n']);
     expect(result).toHaveLength(3);
     for (const vec of result) {
-      expect(vec).toHaveLength(2000);
+      expect(vec).toHaveLength(1024);
       expect(vec.every((v) => v === 0)).toBe(true);
     }
     expect(mockEmbedMany).not.toHaveBeenCalled();
   });
 
   it('embeds valid texts and maps zero vectors for empty strings', async () => {
-    const fakeEmbedding1 = new Array(2000).fill(0.5);
-    const fakeEmbedding2 = new Array(2000).fill(0.7);
+    const fakeEmbedding1 = new Array(1024).fill(0.5);
+    const fakeEmbedding2 = new Array(1024).fill(0.7);
 
     mockEmbedMany.mockResolvedValue({
       embeddings: [fakeEmbedding1, fakeEmbedding2],
@@ -105,10 +105,10 @@ describe('generateEmbeddingsBatch', () => {
     const texts = new Array(2050).fill('text');
     const batch1Embeddings = new Array(2048)
       .fill(null)
-      .map(() => new Array(2000).fill(0.1));
+      .map(() => new Array(1024).fill(0.1));
     const batch2Embeddings = new Array(2)
       .fill(null)
-      .map(() => new Array(2000).fill(0.2));
+      .map(() => new Array(1024).fill(0.2));
 
     mockEmbedMany
       .mockResolvedValueOnce({
@@ -132,8 +132,8 @@ describe('generateEmbeddingsBatch', () => {
   });
 
   it('maps results back to correct indices with mixed empty/valid', async () => {
-    const e1 = new Array(2000).fill(1);
-    const e2 = new Array(2000).fill(2);
+    const e1 = new Array(1024).fill(1);
+    const e2 = new Array(1024).fill(2);
 
     mockEmbedMany.mockResolvedValue({
       embeddings: [e1, e2],

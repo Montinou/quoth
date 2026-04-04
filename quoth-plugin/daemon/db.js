@@ -330,13 +330,26 @@ function createDb(dbPath) {
   }
 
   db.applyHourlyDecay = function() {
+    // Gradual alpha decay — floor at 0.1 to keep valid Beta distribution
     db.prepare(`
       UPDATE patterns
-      SET alpha = MAX(1.0, alpha - (decay_rate * alpha * 0.01)),
-          confidence = MAX(0.0, MAX(1.0, alpha - (decay_rate * alpha * 0.01)) / (MAX(1.0, alpha - (decay_rate * alpha * 0.01)) + beta)),
+      SET alpha = MAX(0.1, alpha - (decay_rate * alpha * 0.01)),
+          confidence = MAX(0.0, MAX(0.1, alpha - (decay_rate * alpha * 0.01)) / (MAX(0.1, alpha - (decay_rate * alpha * 0.01)) + beta)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
     `).run()
+
+    // Inactivity penalty: patterns not matched in >7 days get beta incremented
+    // This causes confidence to decay naturally via Bayesian scoring
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000)
+    db.prepare(`
+      UPDATE patterns
+      SET beta = beta + 0.02,
+          confidence = alpha / (alpha + beta + 0.02),
+          updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND (last_matched_at IS NULL OR last_matched_at < ?)
+    `).run(sevenDaysAgo)
   }
 
   db.archiveWeakPatterns = function() {

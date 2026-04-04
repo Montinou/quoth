@@ -213,10 +213,10 @@ async function processEntry({ entry, filePath, line }) {
     const consolidation = consolidate(distilled, similarPatterns)
 
     if (consolidation.action === 'strengthen' && consolidation.targetId) {
-      db.applyConfidenceDelta(consolidation.targetId, 0.03)
+      db.applyBayesianUpdate(consolidation.targetId, 'success')
       db.emitEvent('pattern.strengthened', entry.agent || 'daemon', project, {
         patternId: consolidation.targetId,
-        delta: 0.03
+        update: 'bayesian-success'
       })
       log('info', 'Strengthened pattern', { id: consolidation.targetId })
     } else {
@@ -323,7 +323,7 @@ Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives"
       db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(id)
     }
     for (const merge of (result.merges || [])) {
-      db.applyConfidenceDelta(merge.keep, 0.05)
+      db.applyBayesianUpdate(merge.keep, 'success')
       db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(merge.archive)
     }
     log('info', 'Deep consolidation done', { merged: (result.merges||[]).length, archived: (result.archives||[]).length })

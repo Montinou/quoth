@@ -9,7 +9,7 @@ Generates comprehensive documentation from your codebase with configurable depth
 
 ## Prerequisites
 
-- Quoth MCP must be connected (`claude mcp add quoth`)
+- Quoth cloud MCP must be connected (`claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp`)
 - Project should be initialized (`/quoth-init` or existing `.quoth/config.json`)
 
 ## Phase 0: Configuration Check
@@ -158,7 +158,7 @@ Your project is now ready for AI Memory!
 Next steps:
 1. Review generated documentation in Quoth dashboard
 2. Start coding - hooks will enforce documentation as configured
-3. Use /prompt quoth_architect for code generation with pattern enforcement
+3. Use /quoth:patterns to view learned patterns
 ```
 
 ## Usage
@@ -184,8 +184,6 @@ Run:
 claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
-Then authenticate via the `/mcp` menu.
-
 ### "Project not initialized"
 
 Run `/quoth-init` first to create `.quoth/config.json` with your preferences.
@@ -197,4 +195,4 @@ Verify Quoth MCP connection:
 claude mcp list
 ```
 
-Should show `quoth` in the list. If not, re-add the MCP server.
+Should show `quoth` in the list. If not, re-add the cloud MCP server.
