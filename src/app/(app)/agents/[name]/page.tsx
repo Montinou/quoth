@@ -9,6 +9,7 @@ import { sql } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, ArrowLeft, Circle, Server, Cpu, FolderOpen, Calendar } from 'lucide-react';
+import { UnassignButton } from '@/components/agents/UnassignButton';
 export const revalidate = 60;
 
 interface UserRow {
@@ -242,15 +243,17 @@ export default async function AgentDetailPage({ params }: { params: Promise<{ na
           ) : (
             <div className="space-y-3">
               {agentData.agent_projects.map(({ project_id, role, assigned_at, assigned_by, projects }) => (
-                <Link
+                <div
                   key={project_id}
-                  href={`/dashboard/${projects.slug}`}
-                  className="block p-4 rounded-xl border border-charcoal hover:border-violet-spectral/30 bg-charcoal/30 hover:bg-violet-spectral/5 transition-all group"
+                  className="p-4 rounded-xl border border-charcoal hover:border-violet-spectral/30 bg-charcoal/30 hover:bg-violet-spectral/5 transition-all group"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-violet-spectral transition-colors" />
-                      <div>
+                    <Link
+                      href={`/dashboard/${projects.slug}`}
+                      className="flex items-center gap-3 flex-1 min-w-0"
+                    >
+                      <FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-violet-spectral transition-colors shrink-0" />
+                      <div className="min-w-0">
                         <p className="font-medium text-white group-hover:text-violet-ghost transition-colors">
                           {projects.slug}
                         </p>
@@ -259,9 +262,9 @@ export default async function AgentDetailPage({ params }: { params: Promise<{ na
                           {assigned_by && ` by ${assigned_by}`}
                         </p>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
+                    </Link>
+
+                    <div className="flex items-center gap-3 shrink-0">
                       {projects.is_public && (
                         <span className="px-2 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium">
                           Public
@@ -270,9 +273,10 @@ export default async function AgentDetailPage({ params }: { params: Promise<{ na
                       <span className="px-2.5 py-1 rounded-md bg-violet-spectral/10 border border-violet-spectral/30 text-violet-ghost text-xs font-medium capitalize">
                         {role}
                       </span>
+                      <UnassignButton agentId={agentData.id} projectId={project_id} />
                     </div>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}

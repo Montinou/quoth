@@ -175,13 +175,6 @@ export default async function AgentsPage() {
                   {agentList.length} agents • {projects?.length || 0} projects • {assignments?.length || 0} connections
                 </span>
               </div>
-              <Link
-                href="/agents/graph"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-spectral to-violet-glow hover:from-violet-glow hover:to-violet-spectral text-white transition-all text-sm font-medium"
-              >
-                <span>Full View</span>
-                <Network className="w-4 h-4" />
-              </Link>
             </div>
             
             {/* Embedded mini graph */}

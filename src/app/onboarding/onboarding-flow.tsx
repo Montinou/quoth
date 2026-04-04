@@ -978,7 +978,7 @@ export function OnboardingFlow({ initialStep, initialData }: OnboardingFlowProps
   const StepComponent = STEPS[currentStep] ?? STEPS[0];
 
   return (
-    <section className="min-h-screen bg-gradient-to-b from-[#0a0a0a] via-[#0d0d12] to-[#0a0a0a] py-12 md:py-20 relative overflow-hidden">
+    <section className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#0a0a0a] via-[#0d0d12] to-[#0a0a0a] py-12 md:py-20 relative overflow-hidden">
       {/* Background texture */}
       <div className="absolute inset-0 grid-bg opacity-20 pointer-events-none" />
       <div className="absolute top-0 left-1/3 w-[500px] h-[500px] bg-violet-600/5 rounded-full blur-[120px] pointer-events-none" />
