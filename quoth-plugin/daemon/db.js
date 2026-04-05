@@ -149,6 +149,13 @@ function createDb(dbPath) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_namespace ON patterns(namespace)")
   }
 
+  // Runtime migration: add exposure tracking + trigram caching columns
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN exposure_count INTEGER DEFAULT 0").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN last_exposed_at INTEGER").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN ignored_count INTEGER DEFAULT 0").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN embedding_text TEXT").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
+
   // --- HNSW index state ---
   const hnsw = new HnswIndex(1536)
   let hnswHealthy = false
