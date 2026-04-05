@@ -408,22 +408,47 @@ const handlers = {
       } catch {}
     } catch {}
 
-    // Apply soft-negatives + snapshot context for next session
+    // Apply feedback + snapshot context for next session
     try {
       const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
       const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
       const { createSessionMemory } = require('./session-memory.js')
       const { applySoftNegative } = require('../daemon/lib/scoring.js')
+      const { isSubFlag } = require('../daemon/lib/flags.js')
 
       const sm = createSessionMemory({
         dir: path.join(QUOTH_HOME, 'intelligence'),
         sessionId, project,
       })
 
-      // Soft-negative: penalize injected patterns that were never marked used
-      const stale = sm.getStaleInjections(0)  // any age at session end
-      if (stale.length > 0 && db) {
-        applySoftNegative(db, stale)
+      if (isSubFlag('injection') && db) {
+        // V2 feedback: update injection_log with session outcome reward
+        const state = sm._state()
+        const injectedIds = Object.keys(state.injectedPatterns || {})
+        // Compute session-level reward from trajectory (binary outcome for now)
+        const trajFile = path.join(QUOTH_HOME, 'trajectories', `${project}-${new Date().toISOString().slice(0,10)}.jsonl`)
+        let reward = 0.5
+        try {
+          if (fs.existsSync(trajFile)) {
+            const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
+            const events = []
+            for (const line of lines) {
+              try { const e = JSON.parse(line); if (e.session === sessionId && e.event === 'tool_use') events.push(e) } catch {}
+            }
+            const { sessionOutcomeReward } = require('../daemon/lib/attribution.js')
+            reward = sessionOutcomeReward(events)
+          }
+        } catch {}
+        for (const pid of injectedIds) {
+          const wasUsed = state.injectedPatterns[pid]?.used
+          // Used patterns get reward=1.0 (strong signal); unused get session outcome
+          const patternReward = wasUsed ? 1.0 : reward
+          db.updateInjectionOutcome(sessionId, pid, patternReward)
+        }
+      } else if (db) {
+        // V1 feedback: soft-negative on stale (un-used) injections
+        const stale = sm.getStaleInjections(0)
+        if (stale.length > 0) applySoftNegative(db, stale)
       }
 
       // Snapshot context for next session-restore
@@ -483,9 +508,18 @@ const handlers = {
         .filter(([, v]) => !v.used && v.at > fiveMinAgo)
         .map(([id]) => id)
 
+      const { isSubFlag } = require('../daemon/lib/flags.js')
+      const v2 = isSubFlag('injection')
       for (const id of recentUnused) {
         sm.markPatternUsed(id)
-        if (db) db.applyBayesianUpdate(id, 'success')
+        if (db) {
+          if (v2) {
+            // V2: record as strong reward in injection_log (nightly SNIPS aggregates)
+            db.updateInjectionOutcome(sessionId, id, 1.0)
+          } else {
+            db.applyBayesianUpdate(id, 'success')
+          }
+        }
       }
     } catch {}
 
