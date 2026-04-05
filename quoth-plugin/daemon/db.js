@@ -4,6 +4,7 @@ const Database = require('better-sqlite3')
 const path = require('path')
 const fs = require('fs')
 const { HnswIndex } = require('./lib/hnsw.js')
+const { trigrams } = require('./lib/injection.js')
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -157,6 +158,24 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
+  // One-time backfill for existing patterns without trigrams
+  try {
+    const needsTrigrams = db.prepare(`
+      SELECT id, name, action, condition FROM patterns
+      WHERE pattern_trigrams IS NULL AND status = 'active'
+    `).all()
+    if (needsTrigrams.length > 0) {
+      const update = db.prepare('UPDATE patterns SET pattern_trigrams = ? WHERE id = ?')
+      const tx = db.transaction((rows) => {
+        for (const r of rows) {
+          const text = `${r.name || ''} ${r.action || ''} ${r.condition || ''}`
+          update.run(JSON.stringify([...trigrams(text)]), r.id)
+        }
+      })
+      tx(needsTrigrams)
+    }
+  } catch {}
+
   // --- HNSW index state ---
   const hnsw = new HnswIndex(1536)
   let hnswHealthy = false
@@ -237,11 +256,14 @@ function createDb(dbPath) {
   }
 
   db.upsertPattern = function(p) {
+    const textForTrigrams = `${p.name || ''} ${p.action || ''} ${p.condition || ''}`
+    const patternTrigrams = JSON.stringify([...trigrams(textForTrigrams)])
+
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
-        confidence, tags, source, status, embedding, namespace)
+        confidence, tags, source, status, embedding, namespace, pattern_trigrams)
       VALUES (@id, @name, @pattern_type, @condition, @action, @description,
-        @confidence, @tags, @source, @status, @embedding, @namespace)
+        @confidence, @tags, @source, @status, @embedding, @namespace, @pattern_trigrams)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         condition = excluded.condition,
@@ -252,6 +274,7 @@ function createDb(dbPath) {
         source = excluded.source,
         embedding = COALESCE(excluded.embedding, patterns.embedding),
         namespace = excluded.namespace,
+        pattern_trigrams = excluded.pattern_trigrams,
         updated_at = strftime('%s','now') * 1000
     `).run({
       id: p.id,
@@ -265,7 +288,8 @@ function createDb(dbPath) {
       source: p.source || 'distilled',
       status: p.status || 'active',
       embedding: p.embedding || null,
-      namespace: p.namespace || 'default'
+      namespace: p.namespace || 'default',
+      pattern_trigrams: patternTrigrams
     })
 
     if (p.embedding && hnswHealthy) {
