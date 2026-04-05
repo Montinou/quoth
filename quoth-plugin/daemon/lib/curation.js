@@ -83,7 +83,56 @@ function backfillDistinctiveness(db) {
   return patterns.length
 }
 
+function cosineSim(a, b) {
+  if (!a || !b || a.length !== b.length) return 0
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i] }
+  return na > 0 && nb > 0 ? dot / Math.sqrt(na*nb) : 0
+}
+
+/**
+ * Find near-duplicate pattern pairs by cosine similarity of embeddings.
+ * O(N²) — acceptable at <10k patterns; supplement with HNSW neighbor pruning above that.
+ */
+function findNearDuplicates(db, threshold = 0.92, maxPairs = 100) {
+  const rows = db.prepare("SELECT id, embedding, confidence FROM patterns WHERE status='active' AND embedding IS NOT NULL").all()
+  const parsed = []
+  for (const r of rows) {
+    try { parsed.push({ id: r.id, confidence: r.confidence, vec: JSON.parse(r.embedding) }) } catch {}
+  }
+  const pairs = []
+  for (let i = 0; i < parsed.length; i++) {
+    for (let j = i + 1; j < parsed.length; j++) {
+      const sim = cosineSim(parsed[i].vec, parsed[j].vec)
+      if (sim >= threshold) {
+        // Winner = higher confidence
+        const [a, b] = parsed[i].confidence >= parsed[j].confidence
+          ? [parsed[i], parsed[j]]
+          : [parsed[j], parsed[i]]
+        pairs.push({ keep: a.id, archive: b.id, similarity: sim })
+      }
+    }
+  }
+  return pairs.sort((x, y) => y.similarity - x.similarity).slice(0, maxPairs)
+}
+
+/**
+ * Enqueue near-duplicate pairs into judge_queue for LLM verification.
+ */
+function enqueueDedupPairs(db, pairs) {
+  const stmt = db.prepare(`
+    INSERT INTO judge_queue (session_id, pattern_a_id, pattern_b_id, trajectory_summary, priority)
+    VALUES ('dedup', ?, ?, ?, 0.9)
+  `)
+  let enqueued = 0
+  for (const p of pairs) {
+    stmt.run(p.keep, p.archive, `Near-duplicate detection (cosine=${p.similarity.toFixed(3)})`)
+    enqueued++
+  }
+  return enqueued
+}
+
 module.exports = {
   GENERIC_PATTERNS, isGenericName, distinctivenessScore, buildCommonTokens,
-  passesQualityGate, backfillDistinctiveness,
+  passesQualityGate, backfillDistinctiveness, findNearDuplicates, enqueueDedupPairs, cosineSim,
 }

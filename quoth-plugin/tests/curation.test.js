@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { isGenericName, distinctivenessScore, buildCommonTokens, passesQualityGate, backfillDistinctiveness } from '../daemon/lib/curation.js'
+import { isGenericName, distinctivenessScore, buildCommonTokens, passesQualityGate, backfillDistinctiveness, findNearDuplicates, cosineSim } from '../daemon/lib/curation.js'
 import { createDb } from '../daemon/db.js'
 import fs from 'fs'
 
@@ -72,6 +72,27 @@ describe('passesQualityGate', () => {
       maxSim: 0.95,
     })
     expect(r.reasons).toContain('near-duplicate')
+  })
+})
+
+describe('cosineSim', () => {
+  it('returns 1 for identical', () => expect(cosineSim([1,0,0], [1,0,0])).toBeCloseTo(1, 5))
+  it('returns 0 for orthogonal', () => expect(cosineSim([1,0,0], [0,1,0])).toBeCloseTo(0, 5))
+  it('returns 0 for empty', () => expect(cosineSim([], [])).toBe(0))
+})
+
+describe('findNearDuplicates', () => {
+  const tmpDup = `/tmp/quoth-dup-${Date.now()}.db`
+  it('finds pairs above threshold', () => {
+    const db = createDb(tmpDup)
+    db.prepare("INSERT INTO patterns (id, name, condition, action, status, namespace, confidence, embedding) VALUES ('a','name a','c','act','active','test',0.7,?)").run(JSON.stringify([1,0,0]))
+    db.prepare("INSERT INTO patterns (id, name, condition, action, status, namespace, confidence, embedding) VALUES ('b','name b','c','act','active','test',0.5,?)").run(JSON.stringify([0.99,0.01,0]))
+    db.prepare("INSERT INTO patterns (id, name, condition, action, status, namespace, confidence, embedding) VALUES ('c','name c','c','act','active','test',0.5,?)").run(JSON.stringify([0,0,1]))
+    const dups = findNearDuplicates(db, 0.9)
+    expect(dups.length).toBe(1)
+    expect(dups[0].keep).toBe('a')  // higher confidence wins
+    expect(dups[0].archive).toBe('b')
+    fs.unlinkSync(tmpDup)
   })
 })
 
