@@ -487,7 +487,37 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase C (cloud pull) failed', { error: err.message })
   }
 
+  // Phase D: V2 cluster rebuild (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('injection')) {
+    try { await rebuildClusters() }
+    catch (err) { log('error', 'Nightly Phase D (clusters) failed', { error: err.message }) }
+  }
+
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
+}
+
+async function rebuildClusters() {
+  const { clusterPatterns } = require('./lib/clustering.js')
+  const namespaces = db.prepare("SELECT DISTINCT namespace FROM patterns WHERE status='active'").all()
+  for (const { namespace } of namespaces) {
+    const rows = db.prepare(`
+      SELECT id, embedding FROM patterns
+      WHERE status='active' AND namespace = ? AND embedding IS NOT NULL
+    `).all(namespace)
+    const patterns = rows.map(p => {
+      try { return { id: p.id, embedding: JSON.parse(p.embedding) } } catch { return null }
+    }).filter(Boolean)
+    if (patterns.length < 10) continue
+    const K = Math.min(50, Math.max(3, Math.floor(Math.sqrt(patterns.length))))
+    const { clusters, assignments } = clusterPatterns(patterns, K, { maxIter: 30 })
+    if (clusters.length === 0) continue
+    const tx = db.transaction(() => {
+      for (const a of assignments) db.assignPatternCluster(a.patternId, a.cluster)
+      for (const c of clusters) db.upsertClusterStats(c.id, namespace, c.centroid, c.memberCount)
+    })
+    tx()
+    log('info', 'Cluster rebuild', { namespace, K, patterns: patterns.length })
+  }
 }
 
 async function runDeepConsolidate() {
