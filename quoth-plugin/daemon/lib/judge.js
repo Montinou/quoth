@@ -97,10 +97,31 @@ function parseJudgeVerdict(raw, positionMap) {
 }
 
 /**
- * Call Haiku via Claude CLI for pairwise verdict.
- * Uses `claude -p` (print mode) with haiku model. Returns raw answer (or null on error).
+ * Call LLM judge for pairwise verdict.
+ * Backend selected via QUOTH_JUDGE_MODEL env var:
+ *   - "kimi" (default if MOONSHOT_API_KEY set): Kimi K2.5 via Moonshot API (~3s/call)
+ *   - "haiku": Haiku 4.5 via `claude -p` CLI (~15s/call)
+ * Returns raw answer string or null on error/timeout.
  */
 async function callJudge(prompt, timeoutMs = 45000) {
+  const explicit = (process.env.QUOTH_JUDGE_MODEL || '').toLowerCase()
+  const hasKimi = !!(process.env.MOONSHOT_API_KEY || require('fs').existsSync(
+    require('path').join(require('os').homedir(), '.openclaw', 'credentials', 'moonshot-api-key')
+  ))
+  const useKimi = explicit === 'kimi' || (explicit !== 'haiku' && hasKimi)
+
+  if (useKimi) {
+    try {
+      const { callLLM } = require('./llm.js')
+      const out = await callLLM(prompt, 10)
+      return out ? out.trim() : null
+    } catch (e) {
+      // Fall through to Haiku on Kimi failure (e.g. balance exhausted)
+      if (explicit === 'kimi') return null  // explicit mode → no fallback
+    }
+  }
+
+  // Haiku via Claude CLI
   const { spawn } = require('child_process')
   return new Promise((resolve) => {
     const child = spawn('claude', ['-p', '--model', 'haiku', '--disable-slash-commands'], {

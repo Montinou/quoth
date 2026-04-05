@@ -267,6 +267,15 @@ async function processEntry({ entry, filePath, line }) {
         })
         log('info', 'Deduped → strengthened existing', { id: existing.id, method: dupByEmbed ? 'embedding' : 'name' })
       } else {
+        // V2 quality gate (feature-flagged): reject generic/low-distinctiveness patterns at ingest
+        if (require('./lib/flags.js').isSubFlag('curation')) {
+          const { isGenericName } = require('./lib/curation.js')
+          const rejectedName = distilled.pattern.slice(0, 80)
+          if (isGenericName(rejectedName)) {
+            log('info', 'Rejected at quality gate (generic-name)', { name: rejectedName.slice(0, 60) })
+            return
+          }
+        }
         db.upsertPattern({
           id: distilled.id,
           name: distilled.pattern.slice(0, 80),
@@ -443,9 +452,10 @@ function startCloudPullTimer() {
   }, 6 * 60 * 60 * 1000)
 }
 
-// --- V2 mini-pipeline every 4 hours (clusters + SNIPS + small judge batch) ---
-// Complements the nightly 3am run by draining the judge queue more frequently.
-// Only runs when at least one v2 flag is on.
+// --- V2 mini-pipeline every 2 hours (clusters + SNIPS + judge batch) ---
+// Complements the nightly 3am run by draining the judge queue frequently.
+// Each run: ~30 judges × 15s = ~7.5min of LLM time. 12 runs/day = 360 judges/day.
+// Combined with nightly (100/run) → 460 judges/day capacity.
 let v2MiniTimer = null
 function startV2MiniTimer() {
   v2MiniTimer = setInterval(async () => {
@@ -458,9 +468,8 @@ function startV2MiniTimer() {
         await updateClusterPosteriors()
       }
       if (flags.isSubFlag('judge')) {
-        // Small batch: 10 pairs per 4h = 60/day (vs 50/day at nightly)
         const origLimit = process.env.QUOTH_JUDGE_DAILY_LIMIT
-        process.env.QUOTH_JUDGE_DAILY_LIMIT = '10'
+        process.env.QUOTH_JUDGE_DAILY_LIMIT = process.env.QUOTH_V2_MINI_JUDGE_LIMIT || '30'
         await enqueueJudgePairs()
         await runJudgeBatch()
         if (origLimit != null) process.env.QUOTH_JUDGE_DAILY_LIMIT = origLimit
@@ -470,7 +479,7 @@ function startV2MiniTimer() {
     } catch (err) {
       log('error', 'V2 mini-pipeline failed', { error: err.message })
     }
-  }, 4 * 60 * 60 * 1000)
+  }, 2 * 60 * 60 * 1000)
 }
 
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
@@ -579,7 +588,7 @@ async function enqueueJudgePairs() {
 
 async function runJudgeBatch() {
   const { buildPairwisePrompt, callJudge, parseJudgeVerdict } = require('./lib/judge.js')
-  const maxBatch = parseInt(process.env.QUOTH_JUDGE_DAILY_LIMIT || '50', 10)
+  const maxBatch = parseInt(process.env.QUOTH_JUDGE_DAILY_LIMIT || '100', 10)
   const pending = db.prepare(`
     SELECT id, session_id, pattern_a_id, pattern_b_id, trajectory_summary
     FROM judge_queue WHERE status='pending' ORDER BY priority DESC LIMIT ?
