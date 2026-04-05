@@ -298,7 +298,7 @@ const handlers = {
       const date = new Date().toISOString().slice(0, 10)
       const trajFile = path.join(QUOTH_HOME, 'trajectories', `${project}-${date}.jsonl`)
 
-      if (!fs.existsSync(trajFile)) return
+      if (!fs.existsSync(trajFile)) throw new Error('no_traj')
 
       // Read session's tool calls from today's trajectory file
       const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
@@ -312,7 +312,7 @@ const handlers = {
         } catch {}
       }
 
-      if (sessionEntries.length === 0) return
+      if (sessionEntries.length === 0) throw new Error('no_entries')
 
       // Build summary
       const toolCounts = {}
@@ -362,6 +362,34 @@ const handlers = {
           process.kill(pid, 'SIGUSR1')
         }
       } catch {}
+    } catch {}
+
+    // Apply soft-negatives + snapshot context for next session
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const { applySoftNegative } = require('../daemon/lib/scoring.js')
+
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+
+      // Soft-negative: penalize injected patterns that were never marked used
+      const stale = sm.getStaleInjections(0)  // any age at session end
+      if (stale.length > 0 && db) {
+        applySoftNegative(db, stale)
+      }
+
+      // Snapshot context for next session-restore
+      const ctx = sm.getContextSummary()
+      const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
+      fs.mkdirSync(path.dirname(ctxPath), { recursive: true })
+      fs.writeFileSync(ctxPath, JSON.stringify(ctx))
+
+      // Clean up session memory file
+      sm.clear()
     } catch {}
   },
 
