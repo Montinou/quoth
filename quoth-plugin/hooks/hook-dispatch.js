@@ -422,6 +422,29 @@ const handlers = {
         }
       }
     }
+
+    // Positive feedback: mark recently-injected patterns as used (within last 5 min)
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+
+      const fiveMinAgo = Date.now() - 5 * 60 * 1000
+      const injections = sm._state().injectedPatterns || {}
+      const recentUnused = Object.entries(injections)
+        .filter(([, v]) => !v.used && v.at > fiveMinAgo)
+        .map(([id]) => id)
+
+      for (const id of recentUnused) {
+        sm.markPatternUsed(id)
+        if (db) db.applyBayesianUpdate(id, 'success')
+      }
+    } catch {}
+
     console.log('[OK] Task completed')
   },
 
