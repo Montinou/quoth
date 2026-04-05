@@ -617,6 +617,73 @@ function createDb(dbPath) {
     `).run(namespace, id)
   }
 
+  // --- V2: Cluster-level stats + injection logging + judge queue ---
+
+  db.assignPatternCluster = function(patternId, clusterId) {
+    db.prepare('UPDATE patterns SET cluster_id = ? WHERE id = ?').run(clusterId, patternId)
+  }
+
+  db.upsertClusterStats = function(cid, namespace, centroid, memberCount) {
+    db.prepare(`
+      INSERT INTO cluster_stats (cluster_id, namespace, centroid_embedding, member_count)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(cluster_id) DO UPDATE SET
+        centroid_embedding = excluded.centroid_embedding,
+        member_count = excluded.member_count,
+        updated_at = strftime('%s','now') * 1000
+    `).run(cid, namespace, JSON.stringify(centroid), memberCount)
+  }
+
+  db.getClusterStats = function(clusterId) {
+    const r = db.prepare('SELECT * FROM cluster_stats WHERE cluster_id = ?').get(clusterId)
+    if (!r) return null
+    let centroid = []
+    try { centroid = JSON.parse(r.centroid_embedding || '[]') } catch {}
+    return { ...r, centroid }
+  }
+
+  db.getAllClusterStats = function(namespace) {
+    const rows = namespace
+      ? db.prepare('SELECT * FROM cluster_stats WHERE namespace = ?').all(namespace)
+      : db.prepare('SELECT * FROM cluster_stats').all()
+    return rows
+  }
+
+  db.logInjection = function(entry) {
+    db.prepare(`
+      INSERT INTO injection_log
+      (session_id, namespace, pattern_id, cluster_id, rank, propensity, is_exploration, query_text, injected_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now') * 1000)
+    `).run(
+      entry.session_id, entry.namespace, entry.pattern_id, entry.cluster_id ?? null,
+      entry.rank, entry.propensity, entry.is_exploration ? 1 : 0, entry.query_text || null
+    )
+  }
+
+  db.updateInjectionOutcome = function(sessionId, patternId, reward) {
+    db.prepare(`
+      UPDATE injection_log
+      SET outcome_at = strftime('%s','now') * 1000, reward = ?
+      WHERE session_id = ? AND pattern_id = ? AND outcome_at IS NULL
+    `).run(reward, sessionId, patternId)
+  }
+
+  db.getPendingInjections = function(olderThanMs = 3600000) {
+    const cutoff = Date.now() - olderThanMs
+    return db.prepare(`
+      SELECT * FROM injection_log WHERE outcome_at IS NULL AND injected_at < ?
+      ORDER BY injected_at ASC LIMIT 500
+    `).all(cutoff)
+  }
+
+  db.getCompletedInjections = function(sinceMs = 0, limit = 5000) {
+    return db.prepare(`
+      SELECT * FROM injection_log
+      WHERE outcome_at IS NOT NULL AND reward IS NOT NULL AND injected_at > ?
+      ORDER BY injected_at DESC LIMIT ?
+    `).all(sinceMs, limit)
+  }
+
   // --- Agent Registry ---
 
   db.registerAgent = function(agent) {
