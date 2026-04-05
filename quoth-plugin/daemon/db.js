@@ -158,6 +158,71 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
+  // V2 runtime migrations: hierarchical Thompson + curation columns
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN cluster_id INTEGER DEFAULT NULL").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN cluster_rank_score REAL DEFAULT 0.5").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN effective_exposures REAL DEFAULT 0").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN distinctiveness REAL DEFAULT NULL").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN retired_at INTEGER DEFAULT NULL").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN retired_reason TEXT DEFAULT NULL").run() } catch {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_cluster ON patterns(cluster_id)") } catch {}
+
+  // V2 auxiliary tables
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cluster_stats (
+        cluster_id INTEGER PRIMARY KEY,
+        namespace TEXT NOT NULL DEFAULT 'default',
+        alpha REAL NOT NULL DEFAULT 1.0,
+        beta REAL NOT NULL DEFAULT 1.0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        centroid_embedding TEXT,
+        member_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cluster_stats_ns ON cluster_stats(namespace);
+    `)
+  } catch {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS injection_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        namespace TEXT NOT NULL,
+        pattern_id TEXT NOT NULL,
+        cluster_id INTEGER,
+        rank INTEGER NOT NULL,
+        propensity REAL NOT NULL,
+        is_exploration INTEGER NOT NULL DEFAULT 0,
+        query_text TEXT,
+        injected_at INTEGER NOT NULL,
+        outcome_at INTEGER,
+        reward REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_injection_log_session ON injection_log(session_id);
+      CREATE INDEX IF NOT EXISTS idx_injection_log_pattern ON injection_log(pattern_id);
+      CREATE INDEX IF NOT EXISTS idx_injection_log_pending ON injection_log(outcome_at) WHERE outcome_at IS NULL;
+    `)
+  } catch {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS judge_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        pattern_a_id TEXT NOT NULL,
+        pattern_b_id TEXT NOT NULL,
+        trajectory_summary TEXT,
+        priority REAL NOT NULL DEFAULT 0.5,
+        status TEXT NOT NULL DEFAULT 'pending',
+        verdict TEXT,
+        judged_at INTEGER,
+        cost_cents REAL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_judge_queue_status ON judge_queue(status, priority DESC);
+    `)
+  } catch {}
+
   // One-time backfill for existing patterns without trigrams
   try {
     const needsTrigrams = db.prepare(`
