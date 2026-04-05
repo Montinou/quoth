@@ -86,7 +86,45 @@ VALUES (?, ?, ?, ?, ?, ?, ?, now)
 ```
 Critical for offline SNIPS evaluation — DO NOT drop this log.
 
+## SNIPS: Self-Normalized IPS
+
+**Problem:** we log injections with propensities θ_i and observe rewards r_i. Naive IPS `(1/N) Σ r_i / θ_i` has unbounded variance when θ_i is small.
+
+**SNIPS (Swaminathan & Joachims 2015):**
+```
+r̂(cluster) = Σ_i (w_i · r_i) / Σ_i w_i     where w_i = clip(1/θ_i, cap)
+```
+
+Self-normalization removes the bias introduced by clipping. Bounded variance. Production-dominant at Netflix/Spotify.
+
+## SNIPS → Beta posterior update
+Given n observations and SNIPS estimate r̂:
+```
+α_new = α_old + n · r̂
+β_new = β_old + n · (1 - r̂)
+```
+Cap `n ≤ 10` per batch to prevent overshoot from correlated samples.
+
+## Hyperparameters
+- **cap = 10**: production standard. cap=1 loses variance reduction; cap=100 amplifies outliers
+- **min observations per update = 3**: avoid updating cluster with single noisy sample
+- **Look-back window = 7 days**: balance fresh signal vs sample size
+
+## Effective Sample Size (ESS)
+```
+ESS = (Σw)² / Σw²
+```
+If ESS << n, weights are concentrated (few observations dominate) → confidence interval wider.
+
+## Pitfalls
+- **SNIPS is self-normalized, not strictly unbiased** — for unbiased, use doubly-robust (Dudik et al. 2011)
+- **Don't update per-pattern with SNIPS directly** at 100k scale — use cluster-level, rely on within-cluster cosine for item-level differentiation
+- **Requires propensity logs** — without logged θ_i, SNIPS is meaningless
+
 ## Papers
+- Swaminathan & Joachims. *The Self-Normalized Estimator for Counterfactual Learning*, NeurIPS 2015
+- Joachims et al. *Unbiased Learning-to-Rank with Biased Feedback*, WSDM 2017
+- Dudik, Langford, Li. *Doubly Robust Policy Evaluation and Learning*, ICML 2011
 - Hong, Riquelme, Oh, Kveton. *Hierarchical Bayesian Bandits*, 2022
 - Agrawal & Goyal. *Thompson Sampling for Contextual Bandits*, ICML 2013
 - Li, Chu, Langford, Schapire. *A Contextual-Bandit Approach to Personalized News*, WWW 2010
