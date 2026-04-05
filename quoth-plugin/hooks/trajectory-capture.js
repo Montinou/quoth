@@ -33,7 +33,13 @@ process.stdin.on('end', () => {
     const toolName = hookData.tool_name || hookData.toolName || 'unknown'
     const toolInput = hookData.tool_input || hookData.input || {}
     const toolResult = hookData.tool_result || hookData.result || {}
-    const sessionId = process.env.CLAUDE_SESSION_ID || `session-${Date.now()}`
+    // Session id: prefer hookData.session_id (Claude Code provides this in PostToolUse payload),
+    // then CLAUDE_SESSION_ID env var, then a stable-per-process fallback (not per-tool-call).
+    const sessionId = hookData.session_id
+      || hookData.sessionId
+      || process.env.CLAUDE_SESSION_ID
+      || process.env.CLAUDE_CODE_SESSION_ID
+      || `fallback-${process.ppid}-${new Date().toISOString().slice(0,13)}`
 
     // Determine outcome from result
     const isError = toolResult.is_error === true ||

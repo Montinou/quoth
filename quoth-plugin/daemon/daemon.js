@@ -236,6 +236,10 @@ async function processEntry({ entry, filePath, line }) {
     }
 
     const distilled = await distill(entry)
+    if (!distilled) {
+      log('warn', 'Distill failed — skipping trajectory entry', { agent: entry.agent, task: (entry.task || '').slice(0, 60) })
+      return
+    }
     const similarTags = distilled.tags.length > 0 ? distilled.tags : []
     const similarPatterns = distilled.embedding
       ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
@@ -267,6 +271,15 @@ async function processEntry({ entry, filePath, line }) {
         })
         log('info', 'Deduped → strengthened existing', { id: existing.id, method: dupByEmbed ? 'embedding' : 'name' })
       } else {
+        // V2 quality gate (feature-flagged): reject generic/low-distinctiveness patterns at ingest
+        if (require('./lib/flags.js').isSubFlag('curation')) {
+          const { isGenericName } = require('./lib/curation.js')
+          const rejectedName = distilled.pattern.slice(0, 80)
+          if (isGenericName(rejectedName)) {
+            log('info', 'Rejected at quality gate (generic-name)', { name: rejectedName.slice(0, 60) })
+            return
+          }
+        }
         db.upsertPattern({
           id: distilled.id,
           name: distilled.pattern.slice(0, 80),
@@ -443,6 +456,36 @@ function startCloudPullTimer() {
   }, 6 * 60 * 60 * 1000)
 }
 
+// --- V2 mini-pipeline every 2 hours (clusters + SNIPS + judge batch) ---
+// Complements the nightly 3am run by draining the judge queue frequently.
+// Each run: ~30 judges × 15s = ~7.5min of LLM time. 12 runs/day = 360 judges/day.
+// Combined with nightly (100/run) → 460 judges/day capacity.
+let v2MiniTimer = null
+function startV2MiniTimer() {
+  v2MiniTimer = setInterval(async () => {
+    const flags = require('./lib/flags.js')
+    if (!flags.isSubFlag('injection') && !flags.isSubFlag('judge')) return
+    try {
+      log('info', 'V2 mini-pipeline start')
+      if (flags.isSubFlag('injection')) {
+        await rebuildClusters()
+        await updateClusterPosteriors()
+      }
+      if (flags.isSubFlag('judge')) {
+        const origLimit = process.env.QUOTH_JUDGE_DAILY_LIMIT
+        process.env.QUOTH_JUDGE_DAILY_LIMIT = process.env.QUOTH_V2_MINI_JUDGE_LIMIT || '30'
+        await enqueueJudgePairs()
+        await runJudgeBatch()
+        if (origLimit != null) process.env.QUOTH_JUDGE_DAILY_LIMIT = origLimit
+        else delete process.env.QUOTH_JUDGE_DAILY_LIMIT
+      }
+      log('info', 'V2 mini-pipeline done')
+    } catch (err) {
+      log('error', 'V2 mini-pipeline failed', { error: err.message })
+    }
+  }, 2 * 60 * 60 * 1000)
+}
+
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
 function scheduleNightlyPipeline() {
   const now = new Date()
@@ -487,7 +530,208 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase C (cloud pull) failed', { error: err.message })
   }
 
+  // Phase D: V2 cluster rebuild (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('injection')) {
+    try { await rebuildClusters() }
+    catch (err) { log('error', 'Nightly Phase D (clusters) failed', { error: err.message }) }
+  }
+
+  // Phase E: V2 SNIPS cluster posterior update (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('injection')) {
+    try { await updateClusterPosteriors() }
+    catch (err) { log('error', 'Nightly Phase E (posteriors) failed', { error: err.message }) }
+  }
+
+  // Phase F: V2 LLM-as-Judge pairwise (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('judge')) {
+    try {
+      await enqueueJudgePairs()
+      await runJudgeBatch()
+    } catch (err) { log('error', 'Nightly Phase F (judge) failed', { error: err.message }) }
+  }
+
+  // Phase G: V2 curation (quality gates, dedup, retirement) — flagged + weekly gate
+  if (require('./lib/flags.js').isSubFlag('curation')) {
+    try {
+      const { backfillDistinctiveness, findNearDuplicates, enqueueDedupPairs, retirePoorPatterns } = require('./lib/curation.js')
+      const n = backfillDistinctiveness(db)
+      log('info', 'Distinctiveness recomputed', { patterns: n })
+      // Weekly: dedup + retirement (Sunday UTC)
+      if (new Date().getUTCDay() === 0) {
+        const dups = findNearDuplicates(db, 0.92)
+        if (dups.length > 0) {
+          const enq = enqueueDedupPairs(db, dups)
+          log('info', 'Dedup pairs enqueued', { pairs: enq })
+        }
+        const retired = retirePoorPatterns(db)
+        log('info', 'Weekly retirement', { retired })
+      }
+    } catch (err) { log('error', 'Nightly Phase G (curation) failed', { error: err.message }) }
+  }
+
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
+}
+
+async function enqueueJudgePairs() {
+  const { selectUncertainPairs } = require('./lib/judge.js')
+  const clusters = db.prepare("SELECT cluster_id, alpha, beta, namespace FROM cluster_stats").all()
+  const pairs = selectUncertainPairs(clusters, { maxPairs: 20, widthThreshold: 0.3 })
+  let enqueued = 0
+  for (const p of pairs) {
+    const patA = db.prepare("SELECT id FROM patterns WHERE cluster_id=? AND status='active' ORDER BY confidence DESC LIMIT 1").get(p.a.cluster_id)
+    const patB = db.prepare("SELECT id FROM patterns WHERE cluster_id=? AND status='active' ORDER BY confidence DESC LIMIT 1").get(p.b.cluster_id)
+    if (!patA || !patB) continue
+    db.prepare(`
+      INSERT INTO judge_queue (session_id, pattern_a_id, pattern_b_id, trajectory_summary, priority)
+      VALUES ('v2-cluster-uncertainty', ?, ?, ?, ?)
+    `).run(patA.id, patB.id, `Cluster uncertainty: c${p.a.cluster_id} vs c${p.b.cluster_id}`, 0.7)
+    enqueued++
+  }
+  if (enqueued > 0) log('info', 'Judge pairs enqueued', { enqueued })
+}
+
+function mergeLoserIntoWinner(db, winnerId, loserId) {
+  // Skip if either pattern is already archived (idempotency)
+  const winner = db.prepare("SELECT id, alpha, beta, success_count, failure_count, exposure_count FROM patterns WHERE id=? AND status='active'").get(winnerId)
+  const loser = db.prepare("SELECT id, alpha, beta, success_count, failure_count, exposure_count FROM patterns WHERE id=? AND status='active'").get(loserId)
+  if (!winner || !loser) return false
+  // Transfer stats: sum counts, merge Beta posteriors additively (minus double-counted prior)
+  const tx = db.transaction(() => {
+    db.prepare(`
+      UPDATE patterns SET
+        alpha = ? + alpha - 1,
+        beta = ? + beta - 1,
+        success_count = success_count + ?,
+        failure_count = failure_count + ?,
+        exposure_count = exposure_count + ?,
+        updated_at = strftime('%s','now') * 1000
+      WHERE id = ?
+    `).run(loser.alpha, loser.beta, loser.success_count || 0, loser.failure_count || 0, loser.exposure_count || 0, winnerId)
+    db.prepare(`
+      UPDATE patterns SET
+        status = 'archived',
+        retired_at = strftime('%s','now') * 1000,
+        retired_reason = 'deduped-merged',
+        updated_at = strftime('%s','now') * 1000
+      WHERE id = ?
+    `).run(loserId)
+  })
+  tx()
+  return true
+}
+
+async function runJudgeBatch() {
+  const { buildPairwisePrompt, callJudge, parseJudgeVerdict } = require('./lib/judge.js')
+  const maxBatch = parseInt(process.env.QUOTH_JUDGE_DAILY_LIMIT || '100', 10)
+  const pending = db.prepare(`
+    SELECT id, session_id, pattern_a_id, pattern_b_id, trajectory_summary
+    FROM judge_queue WHERE status='pending' ORDER BY priority DESC LIMIT ?
+  `).all(maxBatch)
+  let judged = 0, failed = 0
+  for (const item of pending) {
+    const a = db.getPattern(item.pattern_a_id)
+    const b = db.getPattern(item.pattern_b_id)
+    if (!a || !b) {
+      db.prepare("UPDATE judge_queue SET status='skipped' WHERE id=?").run(item.id)
+      continue
+    }
+    const { prompt, positionMap } = buildPairwisePrompt(item.trajectory_summary || '', a, b)
+    let raw
+    try {
+      raw = await callJudge(prompt)
+    } catch (e) {
+      log('error', 'Judge LLM call failed', { itemId: item.id, error: e.message })
+      db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
+      failed++
+      continue
+    }
+    if (!raw) {
+      log('warn', 'Judge returned empty response', { itemId: item.id })
+      db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
+      failed++
+      continue
+    }
+    const verdict = parseJudgeVerdict(raw, positionMap)
+    db.prepare(`
+      UPDATE judge_queue SET status='judged', verdict=?, judged_at=strftime('%s','now')*1000, cost_cents=0.03
+      WHERE id=?
+    `).run(verdict, item.id)
+
+    const isDedup = item.session_id === 'dedup'
+    if (isDedup && (verdict === item.pattern_a_id || verdict === item.pattern_b_id)) {
+      // Merge: archive loser, transfer stats to winner (alpha/beta/exposure/success counts)
+      const winnerId = verdict
+      const loserId = winnerId === item.pattern_a_id ? item.pattern_b_id : item.pattern_a_id
+      mergeLoserIntoWinner(db, winnerId, loserId)
+    } else if (verdict === item.pattern_a_id) {
+      db.prepare('UPDATE patterns SET alpha = alpha + 0.5 WHERE id=?').run(item.pattern_a_id)
+      db.prepare('UPDATE patterns SET beta = beta + 0.5 WHERE id=?').run(item.pattern_b_id)
+    } else if (verdict === item.pattern_b_id) {
+      db.prepare('UPDATE patterns SET alpha = alpha + 0.5 WHERE id=?').run(item.pattern_b_id)
+      db.prepare('UPDATE patterns SET beta = beta + 0.5 WHERE id=?').run(item.pattern_a_id)
+    }
+    judged++
+  }
+  log('info', 'Judge batch complete', { judged, failed, skipped: pending.length - judged - failed })
+}
+
+async function updateClusterPosteriors() {
+  const { snipsEstimate } = require('./lib/snips.js')
+  const completed = db.prepare(`
+    SELECT cluster_id, namespace, reward, propensity FROM injection_log
+    WHERE outcome_at IS NOT NULL AND reward IS NOT NULL AND cluster_id IS NOT NULL
+      AND injected_at > (strftime('%s','now') - 86400*7) * 1000
+  `).all()
+  if (completed.length === 0) { log('info', 'SNIPS: no completed observations yet'); return }
+  const byCluster = new Map()
+  for (const row of completed) {
+    const key = `${row.namespace}::${row.cluster_id}`
+    if (!byCluster.has(key)) byCluster.set(key, [])
+    byCluster.get(key).push({ reward: row.reward, propensity: row.propensity })
+  }
+  let updated = 0
+  const tx = db.transaction(() => {
+    for (const [key, obs] of byCluster.entries()) {
+      if (obs.length < 3) continue  // need minimum data
+      const [ns, cid] = key.split('::')
+      const estimate = snipsEstimate(obs)
+      // Cap update magnitude: interpret SNIPS estimate as n pseudo-trials.
+      const n = Math.min(obs.length, 10)
+      db.prepare(`
+        UPDATE cluster_stats SET
+          alpha = alpha + ?, beta = beta + ?, attempts = attempts + ?,
+          updated_at = strftime('%s','now') * 1000
+        WHERE cluster_id = ? AND namespace = ?
+      `).run(n * estimate, n * (1 - estimate), obs.length, parseInt(cid), ns)
+      updated++
+    }
+  })
+  tx()
+  log('info', 'Cluster posteriors updated via SNIPS', { clusters: updated, observations: completed.length })
+}
+
+async function rebuildClusters() {
+  const { clusterPatterns } = require('./lib/clustering.js')
+  const namespaces = db.prepare("SELECT DISTINCT namespace FROM patterns WHERE status='active'").all()
+  for (const { namespace } of namespaces) {
+    const rows = db.prepare(`
+      SELECT id, embedding FROM patterns
+      WHERE status='active' AND namespace = ? AND embedding IS NOT NULL
+    `).all(namespace)
+    const patterns = rows.map(p => {
+      try { return { id: p.id, embedding: JSON.parse(p.embedding) } } catch { return null }
+    }).filter(Boolean)
+    if (patterns.length < 10) continue
+    const K = Math.min(50, Math.max(3, Math.floor(Math.sqrt(patterns.length))))
+    const { clusters, assignments } = clusterPatterns(patterns, K, { maxIter: 30 })
+    if (clusters.length === 0) continue
+    const tx = db.transaction(() => {
+      for (const a of assignments) db.assignPatternCluster(a.patternId, a.cluster)
+      for (const c of clusters) db.upsertClusterStats(c.id, namespace, c.centroid, c.memberCount)
+    })
+    tx()
+    log('info', 'Cluster rebuild', { namespace, K, patterns: patterns.length })
+  }
 }
 
 async function runDeepConsolidate() {
@@ -706,6 +950,7 @@ function clearTimers() {
   if (deepConsolidateTimer) clearTimeout(deepConsolidateTimer)
   if (hnswSaveTimer) clearInterval(hnswSaveTimer)
   if (cloudPullTimer) clearInterval(cloudPullTimer)
+  if (v2MiniTimer) clearInterval(v2MiniTimer)
   if (agentCleanupTimer) clearInterval(agentCleanupTimer)
   if (staleSessionTimer) clearInterval(staleSessionTimer)
 }
@@ -872,6 +1117,7 @@ watchTrajectories()
 startDecayTimer()
 startHnswSaveTimer()
 startCloudPullTimer()
+startV2MiniTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()

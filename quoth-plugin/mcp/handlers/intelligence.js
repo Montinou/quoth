@@ -463,7 +463,7 @@ function getStats(db) {
     }
   }
 
-  let exposure = null
+  let exposure = null, v2 = null
   if (db) {
     try {
       const row = db.prepare(`
@@ -481,6 +481,51 @@ function getStats(db) {
         avg_conversion_rate: row.avg_conversion != null ? +row.avg_conversion.toFixed(4) : 0,
       }
     } catch {}
+    try {
+      const clusters = db.prepare(`
+        SELECT COUNT(*) c, AVG(alpha/(alpha+beta)) avg_conf,
+               MIN(alpha/(alpha+beta)) min_conf, MAX(alpha/(alpha+beta)) max_conf,
+               SUM(attempts) total_attempts
+        FROM cluster_stats
+      `).get()
+      const injections = db.prepare(`
+        SELECT COUNT(*) total,
+               SUM(CASE WHEN is_exploration=1 THEN 1 ELSE 0 END) explorations,
+               AVG(propensity) avg_prop,
+               COUNT(CASE WHEN outcome_at IS NOT NULL THEN 1 END) with_outcome,
+               AVG(CASE WHEN reward IS NOT NULL THEN reward ELSE NULL END) avg_reward
+        FROM injection_log WHERE injected_at > (strftime('%s','now') - 86400*7) * 1000
+      `).get()
+      const judge = db.prepare(`
+        SELECT COUNT(*) total,
+               SUM(CASE WHEN status='judged' THEN 1 ELSE 0 END) judged,
+               SUM(cost_cents) cost_cents
+        FROM judge_queue WHERE created_at > (strftime('%s','now') - 86400*30) * 1000
+      `).get()
+      const retired = db.prepare("SELECT COUNT(*) c FROM patterns WHERE retired_at IS NOT NULL").get()
+      v2 = {
+        clusters: clusters && clusters.c ? {
+          count: clusters.c,
+          avg_conf: +(clusters.avg_conf || 0).toFixed(3),
+          min_conf: +(clusters.min_conf || 0).toFixed(3),
+          max_conf: +(clusters.max_conf || 0).toFixed(3),
+          total_attempts: clusters.total_attempts || 0,
+        } : null,
+        injections_7d: {
+          total: injections.total || 0,
+          explorations: injections.explorations || 0,
+          avg_propensity: injections.avg_prop ? +injections.avg_prop.toFixed(3) : null,
+          with_outcome: injections.with_outcome || 0,
+          avg_reward: injections.avg_reward != null ? +injections.avg_reward.toFixed(3) : null,
+        },
+        judge_30d: {
+          total: judge.total || 0,
+          judged: judge.judged || 0,
+          cost_cents: judge.cost_cents ? +judge.cost_cents.toFixed(2) : 0,
+        },
+        retired_total: retired.c || 0,
+      }
+    } catch {}
   }
 
   return {
@@ -492,7 +537,7 @@ function getStats(db) {
     access: { total: accessCounts.reduce((s, c) => s + c, 0), used: accessCounts.filter(c => c > 0).length },
     pageRank: { topNode: prMaxId, topNodeRank: +prMax.toFixed(4) },
     edgeTypes, pendingInsights: pending, snapshots: history.length,
-    topPatterns, delta, exposure,
+    topPatterns, delta, exposure, v2,
   }
 }
 

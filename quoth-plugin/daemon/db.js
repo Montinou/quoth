@@ -158,6 +158,80 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
+  // V2 runtime migrations: hierarchical Thompson + curation columns
+  // Helper: swallow "duplicate column" errors only (idempotency); log everything else.
+  function v2Migrate(label, fn) {
+    try { fn() } catch (e) {
+      if (!/duplicate column|already exists/i.test(e.message)) {
+        console.error(`[db v2 migration] ${label} failed:`, e.message)
+        throw e
+      }
+    }
+  }
+  v2Migrate('add cluster_id', () => db.prepare("ALTER TABLE patterns ADD COLUMN cluster_id INTEGER DEFAULT NULL").run())
+  v2Migrate('add cluster_rank_score', () => db.prepare("ALTER TABLE patterns ADD COLUMN cluster_rank_score REAL DEFAULT 0.5").run())
+  v2Migrate('add effective_exposures', () => db.prepare("ALTER TABLE patterns ADD COLUMN effective_exposures REAL DEFAULT 0").run())
+  v2Migrate('add distinctiveness', () => db.prepare("ALTER TABLE patterns ADD COLUMN distinctiveness REAL DEFAULT NULL").run())
+  v2Migrate('add retired_at', () => db.prepare("ALTER TABLE patterns ADD COLUMN retired_at INTEGER DEFAULT NULL").run())
+  v2Migrate('add retired_reason', () => db.prepare("ALTER TABLE patterns ADD COLUMN retired_reason TEXT DEFAULT NULL").run())
+  v2Migrate('create idx_patterns_cluster', () => db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_cluster ON patterns(cluster_id)"))
+
+  // V2 auxiliary tables
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cluster_stats (
+        cluster_id INTEGER PRIMARY KEY,
+        namespace TEXT NOT NULL DEFAULT 'default',
+        alpha REAL NOT NULL DEFAULT 1.0,
+        beta REAL NOT NULL DEFAULT 1.0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        centroid_embedding TEXT,
+        member_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cluster_stats_ns ON cluster_stats(namespace);
+    `)
+  } catch (e) { console.error('[db v2] table create failed:', e.message); throw e }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS injection_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        namespace TEXT NOT NULL,
+        pattern_id TEXT NOT NULL,
+        cluster_id INTEGER,
+        rank INTEGER NOT NULL,
+        propensity REAL NOT NULL,
+        is_exploration INTEGER NOT NULL DEFAULT 0,
+        query_text TEXT,
+        injected_at INTEGER NOT NULL,
+        outcome_at INTEGER,
+        reward REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_injection_log_session ON injection_log(session_id);
+      CREATE INDEX IF NOT EXISTS idx_injection_log_pattern ON injection_log(pattern_id);
+      CREATE INDEX IF NOT EXISTS idx_injection_log_pending ON injection_log(outcome_at) WHERE outcome_at IS NULL;
+    `)
+  } catch (e) { console.error('[db v2] table create failed:', e.message); throw e }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS judge_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        pattern_a_id TEXT NOT NULL,
+        pattern_b_id TEXT NOT NULL,
+        trajectory_summary TEXT,
+        priority REAL NOT NULL DEFAULT 0.5,
+        status TEXT NOT NULL DEFAULT 'pending',
+        verdict TEXT,
+        judged_at INTEGER,
+        cost_cents REAL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_judge_queue_status ON judge_queue(status, priority DESC);
+    `)
+  } catch (e) { console.error('[db v2] judge_queue create failed:', e.message); throw e }
+
   // One-time backfill for existing patterns without trigrams
   try {
     const needsTrigrams = db.prepare(`
@@ -550,6 +624,73 @@ function createDb(dbPath) {
       UPDATE patterns SET namespace = ?, updated_at = strftime('%s','now') * 1000
       WHERE id = ?
     `).run(namespace, id)
+  }
+
+  // --- V2: Cluster-level stats + injection logging + judge queue ---
+
+  db.assignPatternCluster = function(patternId, clusterId) {
+    db.prepare('UPDATE patterns SET cluster_id = ? WHERE id = ?').run(clusterId, patternId)
+  }
+
+  db.upsertClusterStats = function(cid, namespace, centroid, memberCount) {
+    db.prepare(`
+      INSERT INTO cluster_stats (cluster_id, namespace, centroid_embedding, member_count)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(cluster_id) DO UPDATE SET
+        centroid_embedding = excluded.centroid_embedding,
+        member_count = excluded.member_count,
+        updated_at = strftime('%s','now') * 1000
+    `).run(cid, namespace, JSON.stringify(centroid), memberCount)
+  }
+
+  db.getClusterStats = function(clusterId) {
+    const r = db.prepare('SELECT * FROM cluster_stats WHERE cluster_id = ?').get(clusterId)
+    if (!r) return null
+    let centroid = []
+    try { centroid = JSON.parse(r.centroid_embedding || '[]') } catch {}
+    return { ...r, centroid }
+  }
+
+  db.getAllClusterStats = function(namespace) {
+    const rows = namespace
+      ? db.prepare('SELECT * FROM cluster_stats WHERE namespace = ?').all(namespace)
+      : db.prepare('SELECT * FROM cluster_stats').all()
+    return rows
+  }
+
+  db.logInjection = function(entry) {
+    db.prepare(`
+      INSERT INTO injection_log
+      (session_id, namespace, pattern_id, cluster_id, rank, propensity, is_exploration, query_text, injected_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now') * 1000)
+    `).run(
+      entry.session_id, entry.namespace, entry.pattern_id, entry.cluster_id ?? null,
+      entry.rank, entry.propensity, entry.is_exploration ? 1 : 0, entry.query_text || null
+    )
+  }
+
+  db.updateInjectionOutcome = function(sessionId, patternId, reward) {
+    db.prepare(`
+      UPDATE injection_log
+      SET outcome_at = strftime('%s','now') * 1000, reward = ?
+      WHERE session_id = ? AND pattern_id = ? AND outcome_at IS NULL
+    `).run(reward, sessionId, patternId)
+  }
+
+  db.getPendingInjections = function(olderThanMs = 3600000) {
+    const cutoff = Date.now() - olderThanMs
+    return db.prepare(`
+      SELECT * FROM injection_log WHERE outcome_at IS NULL AND injected_at < ?
+      ORDER BY injected_at ASC LIMIT 500
+    `).all(cutoff)
+  }
+
+  db.getCompletedInjections = function(sinceMs = 0, limit = 5000) {
+    return db.prepare(`
+      SELECT * FROM injection_log
+      WHERE outcome_at IS NOT NULL AND reward IS NOT NULL AND injected_at > ?
+      ORDER BY injected_at DESC LIMIT ?
+    `).all(sinceMs, limit)
   }
 
   // --- Agent Registry ---

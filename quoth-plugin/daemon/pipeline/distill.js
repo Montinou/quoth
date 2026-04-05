@@ -55,38 +55,23 @@ async function distill(entry) {
   try {
     const raw = await callLLM(prompt, 200)
     const start = raw.indexOf('{')
-    if (start === -1) throw new Error('No JSON')
+    if (start === -1) throw new Error('LLM response has no JSON object')
     const result = JSON.parse(raw.slice(start))
+    if (!result.pattern) throw new Error('LLM response missing "pattern" field')
     const id = makeId(result.pattern)
     let embedding = null
     try {
       const { generateEmbedding } = require('../lib/embed.js')
       embedding = await generateEmbedding(result.pattern)
-    } catch {}
-    return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow', embedding, source: 'distilled' }
-  } catch {
-    // Build a meaningful fallback instead of raw tool call
-    const task = (entry.task || '').slice(0, 200)
-    const agent = entry.agent || 'agent'
-    // Strip file paths and commands to extract the intent
-    const cleaned = task
-      .replace(/\/home\/[^\s]+/g, '')
-      .replace(/\/tmp\/[^\s]+/g, '')
-      .replace(/~\/[^\s]+/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-    const fallbackContent = cleaned.length > 10
-      ? `${agent}: ${cleaned}`.slice(0, 80)
-      : `${agent}: task execution`
-    return {
-      id: makeId(fallbackContent),
-      pattern: fallbackContent,
-      tags: [],
-      applicability: 'narrow',
-      fallback: true,
-      embedding: null,
-      source: 'distilled'
+    } catch (e) {
+      console.error('[distill] embedding generation failed:', e.message)
     }
+    return { id, pattern: result.pattern, tags: result.tags || [], applicability: result.applicability || 'narrow', embedding, source: 'distilled' }
+  } catch (e) {
+    // No heuristic fallback: if the LLM fails, surface the failure.
+    // Caller must decide whether to retry or drop this trajectory.
+    console.error('[distill] LLM call failed:', e.message)
+    return null
   }
 }
 

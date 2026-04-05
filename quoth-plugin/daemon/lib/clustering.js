@@ -70,4 +70,31 @@ function kmeans(vectors, k, opts = {}) {
   return { centroids, assignments }
 }
 
-module.exports = { kmeans, assignToCluster, cosineDist, meanVector }
+/**
+ * Pattern-aware wrapper around kmeans.
+ * Accepts pattern objects with {id, embedding} and returns cluster assignments
+ * plus centroid metadata suitable for persistence.
+ */
+function clusterPatterns(patterns, K, opts = {}) {
+  const valid = patterns.filter(p => Array.isArray(p.embedding) || (p.embedding && typeof p.embedding === 'object' && p.embedding.length > 0))
+  if (valid.length < Math.max(2, K)) return { clusters: [], assignments: [] }
+  // Normalize to Float32Array for kmeans
+  const vectors = valid.map(p => {
+    const arr = Array.isArray(p.embedding) ? p.embedding : [...p.embedding]
+    const v = new Float32Array(arr.length)
+    let norm = 0
+    for (let i = 0; i < arr.length; i++) { v[i] = arr[i]; norm += arr[i] * arr[i] }
+    norm = Math.sqrt(norm) || 1
+    for (let i = 0; i < arr.length; i++) v[i] /= norm
+    return v
+  })
+  const { centroids, assignments } = kmeans(vectors, K, opts)
+  const counts = new Array(centroids.length).fill(0)
+  for (const a of assignments) counts[a]++
+  return {
+    clusters: centroids.map((c, i) => ({ id: i, centroid: Array.from(c), memberCount: counts[i] })),
+    assignments: valid.map((p, i) => ({ patternId: p.id, cluster: assignments[i] })),
+  }
+}
+
+module.exports = { kmeans, assignToCluster, cosineDist, meanVector, clusterPatterns }
