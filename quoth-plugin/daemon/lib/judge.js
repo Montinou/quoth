@@ -98,26 +98,26 @@ function parseJudgeVerdict(raw, positionMap) {
 
 /**
  * Call LLM judge for pairwise verdict.
- * Backend selected via QUOTH_JUDGE_MODEL env var:
- *   - "kimi" (default if MOONSHOT_API_KEY set): Kimi K2.5 via Moonshot API (~3s/call)
+ * Backend selection via QUOTH_JUDGE_MODEL env var:
+ *   - "gateway" (default if AI_GATEWAY_API_KEY set): via Vercel AI Gateway (~2-3s/call)
+ *     model defaults to google/gemini-2.5-flash-lite, overridable with QUOTH_LLM_MODEL
  *   - "haiku": Haiku 4.5 via `claude -p` CLI (~15s/call)
  * Returns raw answer string or null on error/timeout.
  */
 async function callJudge(prompt, timeoutMs = 45000) {
   const explicit = (process.env.QUOTH_JUDGE_MODEL || '').toLowerCase()
-  const hasKimi = !!(process.env.MOONSHOT_API_KEY || require('fs').existsSync(
-    require('path').join(require('os').homedir(), '.openclaw', 'credentials', 'moonshot-api-key')
-  ))
-  const useKimi = explicit === 'kimi' || (explicit !== 'haiku' && hasKimi)
+  const hasGateway = !!process.env.AI_GATEWAY_API_KEY
+  const useGateway = explicit === 'gateway' || explicit === 'kimi' ||
+    (explicit !== 'haiku' && hasGateway)
 
-  if (useKimi) {
+  if (useGateway) {
     try {
       const { callLLM } = require('./llm.js')
       const out = await callLLM(prompt, 10)
       return out ? out.trim() : null
     } catch (e) {
-      // Fall through to Haiku on Kimi failure (e.g. balance exhausted)
-      if (explicit === 'kimi') return null  // explicit mode → no fallback
+      if (explicit === 'gateway' || explicit === 'kimi') return null  // explicit → no fallback
+      // Fall through to Haiku
     }
   }
 

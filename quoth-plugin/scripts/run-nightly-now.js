@@ -12,8 +12,24 @@
 
 'use strict'
 
+const fs = require('fs')
 const path = require('path')
 const os = require('os')
+
+// Load .env like the daemon does
+const projectRoot = path.join(__dirname, '..', '..')
+for (const envFile of ['.env.local', '.env']) {
+  const envPath = path.join(projectRoot, envFile)
+  try {
+    const content = fs.readFileSync(envPath, 'utf8')
+    for (const line of content.split('\n')) {
+      const stripped = line.replace(/\s+#.*$/, '')
+      const m = stripped.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/)
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
+    }
+  } catch {}
+}
+
 const { createDb } = require('../daemon/db.js')
 const flags = require('../daemon/lib/flags.js')
 
