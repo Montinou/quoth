@@ -111,6 +111,18 @@ const handlers = {
       fs.writeFileSync(historyFile, JSON.stringify(history))
     } catch {}
 
+    // Record prompt in session memory for context-aware injection
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+      sm.recordPrompt(prompt)
+    } catch {}
+
     const intel = getIntelligence()
     // Get intelligence context — lightweight graph lookup, no API calls
     const ctx = intel.getContext(prompt, 5)
@@ -225,14 +237,41 @@ const handlers = {
       }
     } catch {}
 
-    // Inject only high-confidence patterns as lightweight project context.
-    // The agent can use quoth_search_patterns for on-demand semantic search.
+    // Context-aware semantic injection via Thompson + trigram
     if (db) {
       try {
         const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-        const patterns = db.getProjectPatterns(project, 3)
-          .filter(p => (p.confidence || 0) >= 0.6)
+        const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+        const { recordExposure } = require('../daemon/lib/scoring.js')
+        const { createSessionMemory } = require('./session-memory.js')
+
+        // Load last session's context snapshot for query
+        let queryText = ''
+        try {
+          const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
+          const ctx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'))
+          queryText = [
+            ...(ctx.recentPrompts || []).slice(-2),
+            (ctx.topTopics || []).slice(0, 5).join(' '),
+          ].filter(Boolean).join(' ')
+        } catch {}
+
+        const patterns = rankByThompsonAndTrigram(db, project, queryText, 3, {
+          minConfidence: 0.3,
+          excludeRecentMinutes: 5,
+        })
+
         if (patterns.length > 0) {
+          recordExposure(db, patterns.map(p => p.id))
+
+          // Track injection in session memory for feedback loop
+          const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+          const sm = createSessionMemory({
+            dir: path.join(QUOTH_HOME, 'intelligence'),
+            sessionId, project,
+          })
+          sm.recordInjection(patterns.map(p => p.id))
+
           const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
           for (const p of patterns) {
             lines.push(`- [${p.confidence.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
@@ -259,7 +298,7 @@ const handlers = {
       const date = new Date().toISOString().slice(0, 10)
       const trajFile = path.join(QUOTH_HOME, 'trajectories', `${project}-${date}.jsonl`)
 
-      if (!fs.existsSync(trajFile)) return
+      if (!fs.existsSync(trajFile)) throw new Error('no_traj')
 
       // Read session's tool calls from today's trajectory file
       const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
@@ -273,7 +312,7 @@ const handlers = {
         } catch {}
       }
 
-      if (sessionEntries.length === 0) return
+      if (sessionEntries.length === 0) throw new Error('no_entries')
 
       // Build summary
       const toolCounts = {}
@@ -324,6 +363,34 @@ const handlers = {
         }
       } catch {}
     } catch {}
+
+    // Apply soft-negatives + snapshot context for next session
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const { applySoftNegative } = require('../daemon/lib/scoring.js')
+
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+
+      // Soft-negative: penalize injected patterns that were never marked used
+      const stale = sm.getStaleInjections(0)  // any age at session end
+      if (stale.length > 0 && db) {
+        applySoftNegative(db, stale)
+      }
+
+      // Snapshot context for next session-restore
+      const ctx = sm.getContextSummary()
+      const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
+      fs.mkdirSync(path.dirname(ctxPath), { recursive: true })
+      fs.writeFileSync(ctxPath, JSON.stringify(ctx))
+
+      // Clean up session memory file
+      sm.clear()
+    } catch {}
   },
 
   'post-edit': (hookInput) => {
@@ -355,6 +422,29 @@ const handlers = {
         }
       }
     }
+
+    // Positive feedback: mark recently-injected patterns as used (within last 5 min)
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+
+      const fiveMinAgo = Date.now() - 5 * 60 * 1000
+      const injections = sm._state().injectedPatterns || {}
+      const recentUnused = Object.entries(injections)
+        .filter(([, v]) => !v.used && v.at > fiveMinAgo)
+        .map(([id]) => id)
+
+      for (const id of recentUnused) {
+        sm.markPatternUsed(id)
+        if (db) db.applyBayesianUpdate(id, 'success')
+      }
+    } catch {}
+
     console.log('[OK] Task completed')
   },
 
@@ -377,31 +467,29 @@ const handlers = {
     const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
 
-    // Search patterns by agent type keyword + project namespace
-    const projectPatterns = db.getProjectPatterns(project, 10)
-    if (projectPatterns.length === 0) return
+    const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+    const { recordExposure } = require('../daemon/lib/scoring.js')
+    const { createSessionMemory } = require('./session-memory.js')
 
-    // Filter patterns relevant to the agent's domain
-    const typeWords = agentType.toLowerCase().split(/[-_\s]+/).filter(w => w.length > 2)
-    const DOMAIN_MAP = {
-      coder: ['code', 'implement', 'write', 'function', 'module', 'refactor'],
-      tester: ['test', 'spec', 'coverage', 'assert', 'mock', 'fixture'],
-      reviewer: ['review', 'quality', 'lint', 'convention', 'style'],
-      researcher: ['search', 'find', 'explore', 'document', 'investigate'],
-      planner: ['plan', 'design', 'architect', 'structure', 'organize'],
-      security: ['security', 'auth', 'token', 'credential', 'vulnerability'],
-    }
-    const domainWords = DOMAIN_MAP[agentType] || typeWords
+    const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+    const sm = createSessionMemory({
+      dir: path.join(QUOTH_HOME, 'intelligence'),
+      sessionId, project,
+    })
 
-    const scored = projectPatterns.map(p => {
-      const text = `${p.name} ${p.condition || ''} ${p.action || ''} ${(p.tags || []).join(' ')}`.toLowerCase()
-      const hits = domainWords.filter(w => text.includes(w)).length
-      return { ...p, relevance: hits }
-    }).filter(p => p.relevance > 0 || (p.confidence || 0) >= 0.7)
-      .sort((a, b) => b.relevance - a.relevance || (b.confidence || 0) - (a.confidence || 0))
-      .slice(0, 5)
+    // Build query from task description + session context
+    const taskText = hookInput.prompt || hookInput.description || ''
+    const queryText = sm.getQueryText([taskText, agentType].filter(Boolean).join(' '))
+
+    const scored = rankByThompsonAndTrigram(db, project, queryText, 5, {
+      minConfidence: 0.3,
+      excludeRecentMinutes: 2,
+    })
 
     if (scored.length === 0) return
+
+    recordExposure(db, scored.map(p => p.id))
+    sm.recordInjection(scored.map(p => p.id))
 
     // Output as additionalContext for the subagent
     const context = scored.map(p =>
@@ -417,7 +505,7 @@ const handlers = {
 
   'stats': () => {
     const intel = getIntelligence()
-    const result = intel.getStats()
+    const result = intel.getStats(getDb())
     console.log(JSON.stringify(result, null, 2))
   },
 }

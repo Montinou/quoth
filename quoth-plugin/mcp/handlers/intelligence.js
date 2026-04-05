@@ -413,7 +413,7 @@ function saveSnapshot(nodes, edges, pageRanks, rankedEntries) {
   writeJSON('snapshots.json', history)
 }
 
-function getStats() {
+function getStats(db) {
   const graph = readJSON('graph-state.json')
   const ranked = readJSON('ranked-context.json')
   const history = readJSON('snapshots.json') || []
@@ -463,6 +463,26 @@ function getStats() {
     }
   }
 
+  let exposure = null
+  if (db) {
+    try {
+      const row = db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN exposure_count > 0 THEN 1 ELSE 0 END) as exposed,
+          SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) as used,
+          AVG(CASE WHEN exposure_count > 0 THEN (success_count * 1.0 / exposure_count) ELSE 0 END) as avg_conversion
+        FROM patterns WHERE status = 'active'
+      `).get()
+      exposure = {
+        total: row.total || 0,
+        exposed: row.exposed || 0,
+        used: row.used || 0,
+        avg_conversion_rate: row.avg_conversion != null ? +row.avg_conversion.toFixed(4) : 0,
+      }
+    } catch {}
+  }
+
   return {
     graph: { nodes: nodeCount, edges: edgeCount, density: +density.toFixed(4) },
     confidence: confidences.length ? {
@@ -472,7 +492,7 @@ function getStats() {
     access: { total: accessCounts.reduce((s, c) => s + c, 0), used: accessCounts.filter(c => c > 0).length },
     pageRank: { topNode: prMaxId, topNodeRank: +prMax.toFixed(4) },
     edgeTypes, pendingInsights: pending, snapshots: history.length,
-    topPatterns, delta,
+    topPatterns, delta, exposure,
   }
 }
 
@@ -494,7 +514,7 @@ async function handle(name, args, db) {
     case 'quoth_intelligence_consolidate':
       return consolidateGraph(db)
     case 'quoth_intelligence_stats':
-      return getStats()
+      return getStats(db)
     case 'quoth_intelligence_feedback':
       return applyFeedback(args.success)
     default:

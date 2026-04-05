@@ -4,6 +4,24 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+// --- Load .env from project root (no dependency on dotenv) ---
+const DAEMON_REAL_DIR = fs.realpathSync(__dirname)
+const _projectRoot = process.env.QUOTH_PROJECT_ROOT || path.join(DAEMON_REAL_DIR, '..', '..')
+for (const envFile of ['.env.local', '.env']) {
+  const envPath = path.join(_projectRoot, envFile)
+  try {
+    const content = fs.readFileSync(envPath, 'utf8')
+    for (const line of content.split('\n')) {
+      // Strip inline comments ( # comment) but preserve # inside values
+      const stripped = line.replace(/\s+#.*$/, '')
+      const match = stripped.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/)
+      if (match && !process.env[match[1]]) {
+        process.env[match[1]] = match[2].replace(/^["']|["']$/g, '').trim()
+      }
+    }
+  } catch {}
+}
+
 const { createDb } = require('./db.js')
 const { judge } = require('./pipeline/judge.js')
 const { distill } = require('./pipeline/distill.js')
@@ -22,9 +40,7 @@ const LOCK_FILE = path.join(QUOTH_HOME, 'processing.lock')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
 
-// Resolve project root: follow symlinks from daemon.js to find quoth-plugin/, then go up one level
-const DAEMON_REAL_DIR = fs.realpathSync(__dirname)
-const PROJECT_ROOT = process.env.QUOTH_PROJECT_ROOT || path.join(DAEMON_REAL_DIR, '..', '..')
+const PROJECT_ROOT = _projectRoot
 
 // --- Setup dirs ---
 ;[QUOTH_HOME, TRAJECTORIES_DIR].forEach(d => {
@@ -414,11 +430,24 @@ function startHnswSaveTimer() {
   }, 30 * 60 * 1000)
 }
 
+// --- Cloud pull every 6 hours ---
+let cloudPullTimer = null
+function startCloudPullTimer() {
+  cloudPullTimer = setInterval(async () => {
+    try {
+      const { syncFromCloud } = require('./lib/pull.js')
+      await syncFromCloud(db, log)
+    } catch (err) {
+      log('error', 'Cloud pull failed', { error: err.message })
+    }
+  }, 6 * 60 * 60 * 1000)
+}
+
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
 function scheduleNightlyPipeline() {
   const now = new Date()
   const next3am = new Date(now)
-  next3am.setHours(3, 0, 0, 0)
+  next3am.setUTCHours(6, 0, 0, 0) // 06:00 UTC = 03:00 ART (UTC-3)
   if (next3am <= now) next3am.setDate(next3am.getDate() + 1)
   const msUntil = next3am - now
 
@@ -440,15 +469,22 @@ async function runNightlyPipeline() {
   try {
     await runDeepConsolidate()
   } catch (err) {
-    log('error', 'Nightly Phase A (consolidation) failed', { error: err.message })
-    // Continue to Phase B regardless
+    log('error', 'Nightly Phase A (consolidation) failed', { error: err.message, stack: err.stack })
   }
 
   // Phase B: Doc auto-update
   try {
     await runDocUpdate()
   } catch (err) {
-    log('error', 'Nightly Phase B (doc update) failed', { error: err.message })
+    log('error', 'Nightly Phase B (doc update) failed', { error: err.message, stack: err.stack })
+  }
+
+  // Phase C: Cloud pull
+  try {
+    const { syncFromCloud } = require('./lib/pull.js')
+    await syncFromCloud(db, log)
+  } catch (err) {
+    log('error', 'Nightly Phase C (cloud pull) failed', { error: err.message })
   }
 
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
@@ -490,30 +526,114 @@ async function runDeepConsolidate() {
     }
     if (dedupCount > 0) log('info', 'Name-based dedup', { archived: dedupCount })
 
-    // Phase 2: LLM review of top patterns
+    // Phase 2: LLM review of top patterns — line-based approach, no JSON parsing
     const patterns = db.getTopPatterns(20)
-    if (patterns.length === 0) return
+    if (patterns.length === 0) {
+      log('info', 'Deep consolidation done (no patterns to review)', { garbageArchived: garbageArchived.changes, nameDedups: dedupCount })
+      return
+    }
 
-    const prompt = `Review these patterns and identify duplicates to merge or low-value patterns to archive.
-Patterns: ${JSON.stringify(patterns.map(p => ({ id: p.id, name: p.name, confidence: p.confidence, action: (p.action || '').slice(0, 100) })))}
+    const patternList = patterns.map(p => `${p.id} "${p.name}" (conf=${p.confidence.toFixed(2)}) → ${(p.action || '').slice(0, 80)}`).join('\n')
+    const prompt = `You are reviewing a pattern library for duplicates and low-value entries.
 
-Respond with ONLY JSON: {"merges": [{"keep": "id", "archive": "id"}], "archives": ["id"]}`
+${patternList}
+
+For each action, write ONE line using bare IDs (no brackets). Only output lines that need action:
+MERGE keep_id archive_id1 archive_id2 — reason (first ID is kept, rest archived)
+ARCHIVE id — reason
+
+If nothing needs action, write: NONE`
 
     const { callLLM } = require('./lib/llm.js')
     const raw = await callLLM(prompt, 500)
+    log('debug', 'LLM consolidation response', { response: raw.slice(0, 500) })
 
-    const start = raw.indexOf('{')
-    if (start === -1) return
-    const result = JSON.parse(raw.slice(start))
+    let llmMerged = 0, llmArchived = 0
+    // Extract bare hex IDs — strip optional brackets/quotes
+    const extractIds = (str) => [...str.matchAll(/\[?([a-f0-9]{12})\]?/g)].map(m => m[1])
 
-    for (const id of (result.archives || [])) {
-      db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(id)
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('MERGE')) {
+        const ids = extractIds(trimmed)
+        if (ids.length < 2) continue
+        const keepId = ids[0]
+        const keep = db.prepare("SELECT id FROM patterns WHERE id=? AND status='active'").get(keepId)
+        if (!keep) continue
+        // Merge all subsequent IDs into the first (pairwise)
+        for (let i = 1; i < ids.length; i++) {
+          const archive = db.prepare("SELECT id FROM patterns WHERE id=? AND status='active'").get(ids[i])
+          if (archive) {
+            db.applyBayesianUpdate(keepId, 'success')
+            db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(ids[i])
+            llmMerged++
+            log('debug', 'Merged pattern', { keep: keepId, archived: ids[i] })
+          }
+        }
+        continue
+      }
+      if (trimmed.startsWith('ARCHIVE')) {
+        const ids = extractIds(trimmed)
+        for (const id of ids) {
+          const exists = db.prepare("SELECT id FROM patterns WHERE id=? AND status='active'").get(id)
+          if (exists) {
+            db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(id)
+            llmArchived++
+            log('debug', 'Archived pattern', { id })
+          }
+        }
+      }
     }
-    for (const merge of (result.merges || [])) {
-      db.applyBayesianUpdate(merge.keep, 'success')
-      db.prepare("UPDATE patterns SET status='archived' WHERE id=?").run(merge.archive)
+    log('info', 'Deep consolidation done', { garbageArchived: garbageArchived.changes, nameDedups: dedupCount, llmMerged, llmArchived })
+
+    // Phase 2.5: Conversion-rate rebalancing
+    try {
+      // Penalize patterns shown a lot but rarely used
+      const penalized = db.prepare(`
+        UPDATE patterns
+        SET beta = beta + 2,
+            confidence = alpha / NULLIF(alpha + beta + 2, 0)
+        WHERE status = 'active'
+          AND exposure_count > 20
+          AND (success_count * 1.0 / NULLIF(exposure_count, 0)) < 0.05
+      `).run()
+
+      // Boost patterns with high conversion
+      const boosted = db.prepare(`
+        UPDATE patterns
+        SET alpha = alpha + 1,
+            confidence = (alpha + 1) / NULLIF(alpha + 1 + beta, 0)
+        WHERE status = 'active'
+          AND exposure_count > 5
+          AND (success_count * 1.0 / NULLIF(exposure_count, 0)) > 0.5
+      `).run()
+
+      log('info', 'Conversion rebalancing', { penalized: penalized.changes, boosted: boosted.changes })
+    } catch (err) {
+      log('error', 'Rebalancing failed', { error: err.message })
     }
-    log('info', 'Deep consolidation done', { garbageArchived: garbageArchived.changes, nameDedups: dedupCount, llmMerged: (result.merges||[]).length, llmArchived: (result.archives||[]).length })
+
+    // Phase 2.6: Capacity pruning (when > 1000 patterns)
+    try {
+      const candidates = db.prepare(`
+        SELECT id, success_count, failure_count
+        FROM patterns WHERE status = 'active'
+      `).all()
+      if (candidates.length > 1000) {
+        const scored = candidates.map(p => {
+          const total = p.success_count + p.failure_count
+          const rate = total > 0 ? p.success_count / total : 0
+          return { id: p.id, score: rate * Math.log(1 + total) }
+        }).sort((a, b) => a.score - b.score)
+        const toArchive = scored.slice(0, candidates.length - 900).map(p => p.id)
+        const stmt = db.prepare("UPDATE patterns SET status='archived' WHERE id=?")
+        const tx = db.transaction((ids) => { for (const id of ids) stmt.run(id) })
+        tx(toArchive)
+        log('info', 'Capacity pruning', { pruned: toArchive.length, remaining: candidates.length - toArchive.length })
+      }
+    } catch (err) {
+      log('error', 'Pruning failed', { error: err.message })
+    }
 
     // Promote high-confidence patterns to Quoth cloud
     try {
@@ -585,6 +705,7 @@ function clearTimers() {
   if (decayTimer) clearInterval(decayTimer)
   if (deepConsolidateTimer) clearTimeout(deepConsolidateTimer)
   if (hnswSaveTimer) clearInterval(hnswSaveTimer)
+  if (cloudPullTimer) clearInterval(cloudPullTimer)
   if (agentCleanupTimer) clearInterval(agentCleanupTimer)
   if (staleSessionTimer) clearInterval(staleSessionTimer)
 }
@@ -750,6 +871,7 @@ log('info', 'Quoth daemon started', { pid: process.pid, home: QUOTH_HOME })
 watchTrajectories()
 startDecayTimer()
 startHnswSaveTimer()
+startCloudPullTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()
