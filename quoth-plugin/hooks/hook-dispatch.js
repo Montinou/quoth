@@ -111,6 +111,18 @@ const handlers = {
       fs.writeFileSync(historyFile, JSON.stringify(history))
     } catch {}
 
+    // Record prompt in session memory for context-aware injection
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const { createSessionMemory } = require('./session-memory.js')
+      const sm = createSessionMemory({
+        dir: path.join(QUOTH_HOME, 'intelligence'),
+        sessionId, project,
+      })
+      sm.recordPrompt(prompt)
+    } catch {}
+
     const intel = getIntelligence()
     // Get intelligence context — lightweight graph lookup, no API calls
     const ctx = intel.getContext(prompt, 5)
