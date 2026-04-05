@@ -493,7 +493,48 @@ async function runNightlyPipeline() {
     catch (err) { log('error', 'Nightly Phase D (clusters) failed', { error: err.message }) }
   }
 
+  // Phase E: V2 SNIPS cluster posterior update (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('injection')) {
+    try { await updateClusterPosteriors() }
+    catch (err) { log('error', 'Nightly Phase E (posteriors) failed', { error: err.message }) }
+  }
+
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
+}
+
+async function updateClusterPosteriors() {
+  const { snipsEstimate } = require('./lib/snips.js')
+  const completed = db.prepare(`
+    SELECT cluster_id, namespace, reward, propensity FROM injection_log
+    WHERE outcome_at IS NOT NULL AND reward IS NOT NULL AND cluster_id IS NOT NULL
+      AND injected_at > (strftime('%s','now') - 86400*7) * 1000
+  `).all()
+  if (completed.length === 0) { log('info', 'SNIPS: no completed observations yet'); return }
+  const byCluster = new Map()
+  for (const row of completed) {
+    const key = `${row.namespace}::${row.cluster_id}`
+    if (!byCluster.has(key)) byCluster.set(key, [])
+    byCluster.get(key).push({ reward: row.reward, propensity: row.propensity })
+  }
+  let updated = 0
+  const tx = db.transaction(() => {
+    for (const [key, obs] of byCluster.entries()) {
+      if (obs.length < 3) continue  // need minimum data
+      const [ns, cid] = key.split('::')
+      const estimate = snipsEstimate(obs)
+      // Cap update magnitude: interpret SNIPS estimate as n pseudo-trials.
+      const n = Math.min(obs.length, 10)
+      db.prepare(`
+        UPDATE cluster_stats SET
+          alpha = alpha + ?, beta = beta + ?, attempts = attempts + ?,
+          updated_at = strftime('%s','now') * 1000
+        WHERE cluster_id = ? AND namespace = ?
+      `).run(n * estimate, n * (1 - estimate), obs.length, parseInt(cid), ns)
+      updated++
+    }
+  })
+  tx()
+  log('info', 'Cluster posteriors updated via SNIPS', { clusters: updated, observations: completed.length })
 }
 
 async function rebuildClusters() {
