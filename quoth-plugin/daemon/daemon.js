@@ -584,6 +584,55 @@ If nothing needs action, write: NONE`
     }
     log('info', 'Deep consolidation done', { garbageArchived: garbageArchived.changes, nameDedups: dedupCount, llmMerged, llmArchived })
 
+    // Phase 2.5: Conversion-rate rebalancing
+    try {
+      // Penalize patterns shown a lot but rarely used
+      const penalized = db.prepare(`
+        UPDATE patterns
+        SET beta = beta + 2,
+            confidence = alpha / NULLIF(alpha + beta + 2, 0)
+        WHERE status = 'active'
+          AND exposure_count > 20
+          AND (success_count * 1.0 / NULLIF(exposure_count, 0)) < 0.05
+      `).run()
+
+      // Boost patterns with high conversion
+      const boosted = db.prepare(`
+        UPDATE patterns
+        SET alpha = alpha + 1,
+            confidence = (alpha + 1) / NULLIF(alpha + 1 + beta, 0)
+        WHERE status = 'active'
+          AND exposure_count > 5
+          AND (success_count * 1.0 / NULLIF(exposure_count, 0)) > 0.5
+      `).run()
+
+      log('info', 'Conversion rebalancing', { penalized: penalized.changes, boosted: boosted.changes })
+    } catch (err) {
+      log('error', 'Rebalancing failed', { error: err.message })
+    }
+
+    // Phase 2.6: Capacity pruning (when > 1000 patterns)
+    try {
+      const candidates = db.prepare(`
+        SELECT id, success_count, failure_count
+        FROM patterns WHERE status = 'active'
+      `).all()
+      if (candidates.length > 1000) {
+        const scored = candidates.map(p => {
+          const total = p.success_count + p.failure_count
+          const rate = total > 0 ? p.success_count / total : 0
+          return { id: p.id, score: rate * Math.log(1 + total) }
+        }).sort((a, b) => a.score - b.score)
+        const toArchive = scored.slice(0, candidates.length - 900).map(p => p.id)
+        const stmt = db.prepare("UPDATE patterns SET status='archived' WHERE id=?")
+        const tx = db.transaction((ids) => { for (const id of ids) stmt.run(id) })
+        tx(toArchive)
+        log('info', 'Capacity pruning', { pruned: toArchive.length, remaining: candidates.length - toArchive.length })
+      }
+    } catch (err) {
+      log('error', 'Pruning failed', { error: err.message })
+    }
+
     // Promote high-confidence patterns to Quoth cloud
     try {
       const candidates = db.getPromotionCandidates()
