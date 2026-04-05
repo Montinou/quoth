@@ -428,6 +428,19 @@ function startHnswSaveTimer() {
   }, 30 * 60 * 1000)
 }
 
+// --- Cloud pull every 6 hours ---
+let cloudPullTimer = null
+function startCloudPullTimer() {
+  cloudPullTimer = setInterval(async () => {
+    try {
+      const { syncFromCloud } = require('./lib/pull.js')
+      await syncFromCloud(db, log)
+    } catch (err) {
+      log('error', 'Cloud pull failed', { error: err.message })
+    }
+  }, 6 * 60 * 60 * 1000)
+}
+
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
 function scheduleNightlyPipeline() {
   const now = new Date()
@@ -462,6 +475,14 @@ async function runNightlyPipeline() {
     await runDocUpdate()
   } catch (err) {
     log('error', 'Nightly Phase B (doc update) failed', { error: err.message, stack: err.stack })
+  }
+
+  // Phase C: Cloud pull
+  try {
+    const { syncFromCloud } = require('./lib/pull.js')
+    await syncFromCloud(db, log)
+  } catch (err) {
+    log('error', 'Nightly Phase C (cloud pull) failed', { error: err.message })
   }
 
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
@@ -633,6 +654,7 @@ function clearTimers() {
   if (decayTimer) clearInterval(decayTimer)
   if (deepConsolidateTimer) clearTimeout(deepConsolidateTimer)
   if (hnswSaveTimer) clearInterval(hnswSaveTimer)
+  if (cloudPullTimer) clearInterval(cloudPullTimer)
   if (agentCleanupTimer) clearInterval(agentCleanupTimer)
   if (staleSessionTimer) clearInterval(staleSessionTimer)
 }
@@ -798,6 +820,7 @@ log('info', 'Quoth daemon started', { pid: process.pid, home: QUOTH_HOME })
 watchTrajectories()
 startDecayTimer()
 startHnswSaveTimer()
+startCloudPullTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()
