@@ -98,18 +98,17 @@ function parseJudgeVerdict(raw, positionMap) {
 
 /**
  * Call Haiku via Claude CLI for pairwise verdict.
- * Returns raw answer string (or null on error/timeout).
+ * Uses `claude -p` (print mode) with haiku model. Returns raw answer (or null on error).
  */
-async function callJudge(prompt, timeoutMs = 30000) {
+async function callJudge(prompt, timeoutMs = 45000) {
   const { spawn } = require('child_process')
   return new Promise((resolve) => {
-    const child = spawn('claude', ['--model', 'haiku', '--max-tokens', '20'], {
+    const child = spawn('claude', ['-p', '--model', 'haiku', '--disable-slash-commands'], {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    let stdout = '', stderr = '', done = false
+    let stdout = '', done = false
     const timer = setTimeout(() => { if (!done) { child.kill('SIGTERM'); resolve(null) } }, timeoutMs)
     child.stdout.on('data', d => { stdout += d.toString() })
-    child.stderr.on('data', d => { stderr += d.toString() })
     child.on('exit', code => {
       done = true; clearTimeout(timer)
       if (code === 0 && stdout) resolve(stdout.trim())
