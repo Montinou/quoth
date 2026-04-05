@@ -416,31 +416,29 @@ const handlers = {
     const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
 
-    // Search patterns by agent type keyword + project namespace
-    const projectPatterns = db.getProjectPatterns(project, 10)
-    if (projectPatterns.length === 0) return
+    const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+    const { recordExposure } = require('../daemon/lib/scoring.js')
+    const { createSessionMemory } = require('./session-memory.js')
 
-    // Filter patterns relevant to the agent's domain
-    const typeWords = agentType.toLowerCase().split(/[-_\s]+/).filter(w => w.length > 2)
-    const DOMAIN_MAP = {
-      coder: ['code', 'implement', 'write', 'function', 'module', 'refactor'],
-      tester: ['test', 'spec', 'coverage', 'assert', 'mock', 'fixture'],
-      reviewer: ['review', 'quality', 'lint', 'convention', 'style'],
-      researcher: ['search', 'find', 'explore', 'document', 'investigate'],
-      planner: ['plan', 'design', 'architect', 'structure', 'organize'],
-      security: ['security', 'auth', 'token', 'credential', 'vulnerability'],
-    }
-    const domainWords = DOMAIN_MAP[agentType] || typeWords
+    const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+    const sm = createSessionMemory({
+      dir: path.join(QUOTH_HOME, 'intelligence'),
+      sessionId, project,
+    })
 
-    const scored = projectPatterns.map(p => {
-      const text = `${p.name} ${p.condition || ''} ${p.action || ''} ${(p.tags || []).join(' ')}`.toLowerCase()
-      const hits = domainWords.filter(w => text.includes(w)).length
-      return { ...p, relevance: hits }
-    }).filter(p => p.relevance > 0 || (p.confidence || 0) >= 0.7)
-      .sort((a, b) => b.relevance - a.relevance || (b.confidence || 0) - (a.confidence || 0))
-      .slice(0, 5)
+    // Build query from task description + session context
+    const taskText = hookInput.prompt || hookInput.description || ''
+    const queryText = sm.getQueryText([taskText, agentType].filter(Boolean).join(' '))
+
+    const scored = rankByThompsonAndTrigram(db, project, queryText, 5, {
+      minConfidence: 0.3,
+      excludeRecentMinutes: 2,
+    })
 
     if (scored.length === 0) return
+
+    recordExposure(db, scored.map(p => p.id))
+    sm.recordInjection(scored.map(p => p.id))
 
     // Output as additionalContext for the subagent
     const context = scored.map(p =>
