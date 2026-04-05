@@ -280,7 +280,7 @@ const handlers = {
           const clusterMap = new Map()
           for (const c of candidates) {
             if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
-              const stats = db.getClusterStats(c.cluster_id)
+              const stats = db.getClusterStats(c.cluster_id, project)
               if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
             }
           }
@@ -591,7 +591,7 @@ const handlers = {
       const clusterMap = new Map()
       for (const c of candidates) {
         if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
-          const stats = db.getClusterStats(c.cluster_id)
+          const stats = db.getClusterStats(c.cluster_id, project)
           if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
         }
       }

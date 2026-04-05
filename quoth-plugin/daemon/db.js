@@ -178,19 +178,43 @@ function createDb(dbPath) {
 
   // V2 auxiliary tables
   try {
+    // Cluster ids are local per namespace (0..K-1), so PK must be compound.
     db.exec(`
       CREATE TABLE IF NOT EXISTS cluster_stats (
-        cluster_id INTEGER PRIMARY KEY,
+        cluster_id INTEGER NOT NULL,
         namespace TEXT NOT NULL DEFAULT 'default',
         alpha REAL NOT NULL DEFAULT 1.0,
         beta REAL NOT NULL DEFAULT 1.0,
         attempts INTEGER NOT NULL DEFAULT 0,
         centroid_embedding TEXT,
         member_count INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
+        PRIMARY KEY (cluster_id, namespace)
       );
       CREATE INDEX IF NOT EXISTS idx_cluster_stats_ns ON cluster_stats(namespace);
     `)
+    // One-time migration from legacy single-PK table: detect + rebuild if needed
+    const pk = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='cluster_stats'").get()
+    if (pk && !/PRIMARY KEY \(cluster_id, namespace\)/i.test(pk.sql)) {
+      console.error('[db v2] migrating cluster_stats to compound PK')
+      db.exec(`
+        ALTER TABLE cluster_stats RENAME TO cluster_stats_legacy;
+        CREATE TABLE cluster_stats (
+          cluster_id INTEGER NOT NULL,
+          namespace TEXT NOT NULL DEFAULT 'default',
+          alpha REAL NOT NULL DEFAULT 1.0,
+          beta REAL NOT NULL DEFAULT 1.0,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          centroid_embedding TEXT,
+          member_count INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
+          PRIMARY KEY (cluster_id, namespace)
+        );
+        INSERT INTO cluster_stats SELECT * FROM cluster_stats_legacy;
+        DROP TABLE cluster_stats_legacy;
+        CREATE INDEX IF NOT EXISTS idx_cluster_stats_ns ON cluster_stats(namespace);
+      `)
+    }
   } catch (e) { console.error('[db v2] table create failed:', e.message); throw e }
   try {
     db.exec(`
@@ -636,15 +660,17 @@ function createDb(dbPath) {
     db.prepare(`
       INSERT INTO cluster_stats (cluster_id, namespace, centroid_embedding, member_count)
       VALUES (?, ?, ?, ?)
-      ON CONFLICT(cluster_id) DO UPDATE SET
+      ON CONFLICT(cluster_id, namespace) DO UPDATE SET
         centroid_embedding = excluded.centroid_embedding,
         member_count = excluded.member_count,
         updated_at = strftime('%s','now') * 1000
     `).run(cid, namespace, JSON.stringify(centroid), memberCount)
   }
 
-  db.getClusterStats = function(clusterId) {
-    const r = db.prepare('SELECT * FROM cluster_stats WHERE cluster_id = ?').get(clusterId)
+  db.getClusterStats = function(clusterId, namespace) {
+    const r = namespace
+      ? db.prepare('SELECT * FROM cluster_stats WHERE cluster_id = ? AND namespace = ?').get(clusterId, namespace)
+      : db.prepare('SELECT * FROM cluster_stats WHERE cluster_id = ? LIMIT 1').get(clusterId)
     if (!r) return null
     let centroid = []
     try { centroid = JSON.parse(r.centroid_embedding || '[]') } catch {}
