@@ -33,31 +33,42 @@ Before you begin, make sure you have:
 
 ## Step 2: Connect Your AI Tool
 
-### Claude Code (Recommended)
+### Claude Code — Local Plugin (Recommended)
 
-Install the Quoth Plugin to get everything: MCP server, lightweight hooks, and the `/quoth-genesis` skill:
+The local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon:
 
 ```bash
-# Add the Quoth marketplace (one time)
-/plugin marketplace add Montinou/quoth-mcp
+# Clone the repo (if you haven't)
+git clone https://github.com/Montinou/quoth.git
+cd quoth
 
-# Install the plugin
-/plugin install quoth@quoth-marketplace
+# Run setup (creates symlinks, injects hooks, adds permissions)
+bash quoth-plugin/scripts/setup.sh
 ```
 
+This gives you:
+- **22 local MCP tools** for patterns, intelligence, agents, and skills
+- **9 hooks** for automatic trajectory capture, task routing, pattern injection
+- **Background daemon** that learns from your sessions autonomously
+- **Session-level batch distill** for high-quality pattern extraction
+
 <Callout type="info">
-  The plugin includes ~60 tokens of lightweight hooks that gently remind Claude to use `quoth_guidelines` when relevant.
+  The local plugin captures every tool interaction with full context (user intent, LLM reasoning, sanitized I/O) and distills reusable patterns automatically. No manual steps needed.
 </Callout>
 
-### MCP-Only Setup
+### Claude Code — Cloud MCP
 
-If you prefer just the MCP tools without hooks:
+For cross-team knowledge sharing, semantic search, and agent-to-agent communication:
 
 ```bash
 claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
 ```
 
 When prompted, select "Authenticate" from the `/mcp` menu. Your browser will open for login.
+
+### Both Together
+
+For the full experience, install both. The local plugin handles self-learning and pattern management, while the cloud MCP provides cross-team sharing, semantic search, and agent coordination. High-confidence local patterns are automatically promoted to the cloud nightly.
 
 ## Step 3: Initialize Your Knowledge Base
 
@@ -144,7 +155,7 @@ quoth_task_create({
   />
   <Card
     title="MCP Tools Reference"
-    description="Explore all 18 MCP tools including the A2A Bus"
+    description="Explore all cloud MCP tools including the A2A Bus"
     icon="Wrench"
     href="/docs/reference/mcp-tools"
   />

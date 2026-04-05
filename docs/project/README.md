@@ -18,7 +18,7 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 
 | Document | Description |
 |----------|-------------|
-| [04 — Hook System](./04-hook-system.md) | All 8 hook events, dispatch flow, trajectory capture |
+| [04 — Hook System](./04-hook-system.md) | All 9 hook bindings, dispatch flow, context injection, trajectory capture |
 | [05 — Daemon & Pipeline](./05-daemon-pipeline.md) | Background processor, JUDGE → DISTILL → CONSOLIDATE |
 | [06 — MCP Server & Tools](./06-mcp-tools.md) | 22 MCP tools across 4 handler modules |
 | [07 — Intelligence Graph](./07-intelligence-graph.md) | PageRank, trigram matching, context ranking |
@@ -37,10 +37,16 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 
 | Document | Description |
 |----------|-------------|
-| [13 — Setup & Installation](./13-setup-installation.md) | setup.sh, symlinks, settings.json injection |
+| [13 — Setup & Installation](./13-setup-installation.md) | setup.sh, symlinks, settings.json injection, skill-registry sync |
 | [14 — Cloud Sync & Promotion](./14-cloud-sync.md) | Pattern promotion, nightly consolidation, Quoth API |
 | [15 — Agent Coordination](./15-agent-coordination.md) | Registry, heartbeats, task assignment, events |
 | [16 — Security Model](./16-security-model.md) | Auth (Clerk + agent keys), rate limiting, OAuth 2.1 |
+
+### Plugin Extensions (v3.2.0)
+
+| Document | Description |
+|----------|-------------|
+| [20 — Context Injection & Skills](./20-context-skills.md) | Project context files, session-start injection, 5 built-in skills |
 
 ### Reference
 

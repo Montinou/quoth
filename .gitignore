@@ -63,3 +63,4 @@ supabase/.temp/
 .claude
 !**/.claude-plugin
 docs/evidence-to-delete-later/
+docs/quoth-docs

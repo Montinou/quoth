@@ -156,10 +156,21 @@ if ! grep -q 'Bash(node .quoth' "$SETTINGS" 2>/dev/null; then
   "
 fi
 
+# 5. Sync skills to skill-registry (if available)
+SKILL_REGISTRY="$HOME/projects/skill-registry"
+if [ -d "$SKILL_REGISTRY" ] && command -v bun &>/dev/null; then
+  echo "[quoth] Syncing skills to skill-registry..."
+  (cd "$SKILL_REGISTRY" && QUOTH_SKILLS_DIR="$PLUGIN_DIR/skills" bun run sync:quoth 2>&1) || echo "[quoth] WARN: skill-registry sync failed (non-blocking)"
+else
+  echo "[quoth] Skill-registry not found or bun not available — skipping skill sync"
+  echo "  To sync manually: cd $SKILL_REGISTRY && QUOTH_SKILLS_DIR=$PLUGIN_DIR/skills bun run sync:quoth"
+fi
+
 echo ""
 echo "[quoth] Setup complete!"
 echo "  Hooks: $HOOKS_DIR/"
 echo "  Settings: $SETTINGS"
+echo "  Skills: $PLUGIN_DIR/skills/ ($(ls -d $PLUGIN_DIR/skills/*/SKILL.md 2>/dev/null | wc -l) skills)"
 echo ""
 echo "  Start daemon: node $PLUGIN_DIR/daemon/daemon.js &"
 echo "  Verify: node ~/.quoth/hooks/hook-dispatch.js stats"

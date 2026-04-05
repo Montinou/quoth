@@ -186,6 +186,48 @@ function createDb(dbPath) {
     } catch { hnswHealthy = false }
   }
 
+  // --- Dedup helpers ---
+  db.findDuplicateByName = function(name, threshold = 0.8) {
+    // Normalized prefix match: if two names share >80% of characters, they're dupes
+    const normalized = (name || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+    if (normalized.length < 10) return null
+    const candidates = db.prepare(`
+      SELECT id, name, confidence, alpha, beta FROM patterns
+      WHERE status = 'active' AND length(name) > 10
+      ORDER BY confidence DESC LIMIT 200
+    `).all()
+    for (const c of candidates) {
+      const cNorm = (c.name || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+      if (cNorm.length < 10) continue
+      // Check prefix overlap
+      const shorter = Math.min(normalized.length, cNorm.length)
+      const longer = Math.max(normalized.length, cNorm.length)
+      let matchLen = 0
+      for (let i = 0; i < shorter; i++) {
+        if (normalized[i] === cNorm[i]) matchLen++
+        else break
+      }
+      if (matchLen / longer >= threshold) return c
+    }
+    return null
+  }
+
+  db.findDuplicateByEmbedding = function(embedding, threshold = 0.92) {
+    if (!embedding || !hnswHealthy || hnsw.size === 0) return null
+    try {
+      const vec = typeof embedding === 'string' ? JSON.parse(embedding) : embedding
+      const candidates = hnsw.search(vec, 3)
+      if (candidates.length === 0) return null
+      // Get the closest match
+      const best = candidates[0]
+      const row = db.prepare('SELECT * FROM patterns WHERE id = ? AND status = ?').get(best.id, 'active')
+      if (!row) return null
+      const sim = cosineSimilarity(vec, JSON.parse(row.embedding))
+      if (sim >= threshold) return { ...row, _similarity: sim }
+      return null
+    } catch { return null }
+  }
+
   db.upsertPattern = function(p) {
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
@@ -334,30 +376,63 @@ function createDb(dbPath) {
     db.prepare(`
       UPDATE patterns
       SET alpha = MAX(0.1, alpha - (decay_rate * alpha * 0.01)),
-          confidence = MAX(0.0, MAX(0.1, alpha - (decay_rate * alpha * 0.01)) / (MAX(0.1, alpha - (decay_rate * alpha * 0.01)) + beta)),
+          confidence = MAX(0.05, MAX(0.1, alpha - (decay_rate * alpha * 0.01)) / (MAX(0.1, alpha - (decay_rate * alpha * 0.01)) + beta)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
     `).run()
 
-    // Inactivity penalty: patterns not matched in >7 days get beta incremented
-    // This causes confidence to decay naturally via Bayesian scoring
+    // Tier 1: Never matched patterns (last_matched_at IS NULL) — aggressive decay
+    // These likely never proved useful. beta += 0.1/hour → drops to ~0.3 in a week
+    db.prepare(`
+      UPDATE patterns
+      SET beta = beta + 0.1,
+          confidence = MAX(0.05, alpha / (alpha + beta + 0.1)),
+          updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND last_matched_at IS NULL
+        AND (success_count + failure_count) = 0
+    `).run()
+
+    // Tier 2: Matched but inactive >7 days — moderate decay
     const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000)
     db.prepare(`
       UPDATE patterns
-      SET beta = beta + 0.02,
-          confidence = alpha / (alpha + beta + 0.02),
+      SET beta = beta + 0.05,
+          confidence = MAX(0.05, alpha / (alpha + beta + 0.05)),
+          updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND last_matched_at IS NOT NULL
+        AND last_matched_at < ?
+    `).run(sevenDaysAgo)
+
+    // Tier 3: Inactive >30 days — stronger decay regardless of prior matches
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000)
+    db.prepare(`
+      UPDATE patterns
+      SET beta = beta + 0.15,
+          confidence = MAX(0.05, alpha / (alpha + beta + 0.15)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
         AND (last_matched_at IS NULL OR last_matched_at < ?)
-    `).run(sevenDaysAgo)
+    `).run(thirtyDaysAgo)
   }
 
   db.archiveWeakPatterns = function() {
+    // Archive patterns that decayed below threshold with enough observations
     db.prepare(`
       UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
       WHERE confidence < 0.1
-        AND (success_count + failure_count) > 5
+        AND (success_count + failure_count) > 3
         AND status = 'active'
+    `).run()
+    // Also archive raw-tool-call patterns that never got feedback
+    db.prepare(`
+      UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND confidence < 0.15
+        AND (success_count + failure_count) = 0
+        AND (name LIKE 'claude-code: Bash %' OR name LIKE 'claude-code: Write /%'
+             OR name LIKE 'claude-code: Edit /%' OR name LIKE 'claude-code: Read /%')
     `).run()
   }
 

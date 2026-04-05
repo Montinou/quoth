@@ -162,16 +162,29 @@ Extracts a reusable, generalizable pattern from an effective agent action.
 ```
 Agent: {entry.agent}
 Task: {entry.task}
-Pattern that was used: {entry.pattern_used || 'none'}
-Context: {"attempts": N, "tool_calls": N}
+User intent: {entry.user_intent || 'unknown'}
+Conversation context: {recent user messages + LLM reasoning, if available}
+Pattern used: {entry.pattern_used || 'none'}
 ```
+
+**Prompt rules (v3.2.1):**
+
+The DISTILL prompt includes explicit quality rules to prevent raw tool calls as pattern names:
+- Pattern name MUST describe the TECHNIQUE or STRATEGY, not the specific file/command
+- NEVER include file paths, directory names, or raw commands in the pattern name
+- Focus on WHAT was achieved and WHY it worked, not HOW (specific tool calls)
+- Pattern should be applicable across projects, not tied to one codebase
+
+The prompt includes examples of good vs bad patterns:
+- **Bad:** `"claude-code: Bash find /home/user/projects/foo"`, `"claude-code: Write /home/user/src/index.js"`
+- **Good:** `"Recursive file search before editing unfamiliar codebase"`, `"Read existing file before writing to preserve structure"`
 
 **Output schema:**
 
 ```json
 {
-  "pattern": "Use Bayesian confidence scoring for pattern learning feedback loops",
-  "tags": ["bayesian", "confidence", "patterns"],
+  "pattern": "technique/strategy description (max 80 chars)",
+  "tags": ["domain-tag", "technique-tag"],
   "applicability": "broad"
 }
 ```
@@ -184,7 +197,7 @@ Context: {"attempts": N, "tool_calls": N}
 2. Generate an embedding vector via `voyage-4-lite` (see [Embeddings Library](#embeddings-libembed-js)). Returns `null` on failure (graceful degradation).
 3. Set `source: 'distilled'`.
 
-**Fallback behavior:** If the LLM fails, use `entry.pattern_used` as the pattern text. If that is also null, use `"{agent}: {task}"` as a raw pattern. Tags are empty and applicability is `narrow`. The `fallback: true` flag is set on the result.
+**Fallback behavior:** If the LLM fails, the fallback strips file paths from the task description (removes `/home/...`, `/tmp/...`, `~/...` paths) to extract the intent. If the cleaned text is too short (<10 chars), it defaults to `"{agent}: task execution"`. Tags are empty and applicability is `narrow`. The `fallback: true` flag is set on the result.
 
 ### Stage 3: CONSOLIDATE (`pipeline/consolidate.js`)
 
@@ -192,11 +205,10 @@ Decides whether to merge the new pattern into an existing one or create a distin
 
 | Property | Value |
 |----------|-------|
-| LLM | Claude Haiku 4.5 via `claude` CLI |
-| Model flag | `claude-haiku-4-5-20251001` |
-| CLI flags | `-p --model ... --output-format text` |
-| Timeout | 30000ms |
-| Invocation | `child_process.spawnSync` (synchronous) |
+| LLM | Kimi K2.5 via Moonshot API (same as JUDGE and DISTILL) |
+| Max tokens | 300 |
+| Temperature | 0.6 |
+| Invocation | `callLLM()` (async, unified with other pipeline stages) |
 
 **Input:**
 
@@ -220,7 +232,7 @@ Decides whether to merge the new pattern into an existing one or create a distin
 | `strengthen` | New pattern is essentially the same as an existing one | Merge into existing via Bayesian success update |
 | `new` | New pattern is genuinely different | Create a new entry in the database |
 
-**Fallback behavior:** If the `claude` CLI subprocess fails or returns non-JSON, defaults to `action: 'new'` with `fallback: true` and the error message.
+**Fallback behavior:** If the LLM call fails or returns non-JSON, defaults to `action: 'new'` with `fallback: true` and the error message.
 
 ---
 
@@ -236,9 +248,21 @@ After the three pipeline stages complete:
 
 ### On `new`:
 
+Before inserting, a **pre-insert dedup check** runs:
+
+1. **Embedding dedup:** If the distilled pattern has an embedding, call `db.findDuplicateByEmbedding(embedding, 0.92)` to find patterns with cosine similarity >= 0.92 via HNSW.
+2. **Name dedup:** Call `db.findDuplicateByName(name, 0.8)` to find patterns whose normalized name shares >= 80% prefix match.
+
+If a duplicate is found (embedding match takes priority over name match):
+- Call `db.applyBayesianUpdate(existingId, 'success')` to strengthen the existing pattern.
+- Emit a `pattern.deduped` event with the dedup method (`embedding` or `name`).
+- Skip insertion entirely.
+
+If no duplicate exists, insert the new pattern:
+
 1. Call `db.upsertPattern()` with:
    - `id`: SHA-1 hash from distill stage
-   - `name`: First 60 characters of the pattern text
+   - `name`: First 80 characters of the pattern text
    - `pattern_type`: `'code-pattern'`
    - `condition`: The original task description
    - `action`: The full distilled pattern text
@@ -305,17 +329,77 @@ When a namespace correction occurs, a debug log entry is emitted showing the `fr
 
 ## Timers and Scheduled Tasks
 
-The daemon runs five recurring timers:
+The daemon runs six recurring timers:
 
 | Timer | Interval | Function | Description |
 |-------|----------|----------|-------------|
-| Hourly decay | 60 min | `db.applyHourlyDecay()` + `db.archiveWeakPatterns()` | Reduce confidence on unused patterns, archive patterns below threshold |
+| Hourly decay | 60 min | `db.applyHourlyDecay()` + `db.archiveWeakPatterns()` | Reduce confidence on unused patterns (3-tier decay), archive patterns below threshold |
 | HNSW save | 30 min | `db.saveHnsw()` | Persist the in-memory HNSW index to disk as JSON |
 | Agent cleanup | 5 min | `db.cleanupStaleAgents(300000)` | Mark agents as offline if no heartbeat in 5 minutes (300,000ms) |
-| Deep consolidation | Daily at 3:00 AM | `runDeepConsolidate()` | Full pattern review, dedup, merge, promotion (see below) |
+| Stale session detector | 10 min | `detectStaleSessions()` | Generate synthetic session summaries for orphaned sessions (see below) |
+| Nightly pipeline | Daily at 3:00 AM | `runNightlyPipeline()` | Phase A: deep consolidation (dedup, merge, promotion). Phase B: doc auto-update (hash scan, LLM update, git push) |
 | File watcher | Event-driven | `scanAndEnqueue()` + `processQueue()` | Triggered by filesystem events on trajectories directory |
 
 All timers are cleared on `SIGTERM` via `clearTimers()`.
+
+---
+
+## Session Batch Distill
+
+**File:** `pipeline/distill-batch.js`
+
+When the daemon encounters a `session_summary` entry (written by the `session-end` hook or the stale session detector), it switches from per-entry processing to session-level batch distill.
+
+### Process
+
+1. **Detect session_summary:** When `processEntry()` encounters `entry.event === 'session_summary'`, it delegates to `processSessionBatch()`.
+2. **Gather session entries:** Read all unprocessed `tool_use` entries from the same JSONL file that match the session ID.
+3. **Batch DISTILL:** Send a single LLM call (Kimi K2.5, 400 max tokens) with the full session context:
+   - Project name, tool call summary, success rate, overall outcome
+   - User intents collected during the session (from `user_intent` fields)
+   - Key actions with LLM reasoning (last 30 tool entries, each with tool name, task, reasoning, and failure flag)
+4. **Output:** 1-3 session-level patterns per call. These are higher-quality than per-entry patterns because the LLM sees the full workflow.
+5. **Consolidate + dedup:** Each batch pattern goes through the same CONSOLIDATE + pre-insert dedup pipeline as individual patterns.
+6. **Initial confidence:** Batch-distilled patterns start at `confidence = 0.55` (slightly above default 0.5) and get tagged with `batch-distilled`.
+7. **Mark processed:** All `tool_use` entries for the session AND the `session_summary` are marked as processed.
+
+### Advantages Over Per-Entry Distill
+
+| Aspect | Per-Entry | Session Batch |
+|--------|-----------|---------------|
+| LLM calls | 1 per tool call | 1 per session (or compact) |
+| Context | Single tool call | Full session workflow |
+| Pattern quality | Low — "Write to file X" | High — "Search-then-edit workflow for refactoring" |
+| Cost | N × $0.50/MTok | 1 × $0.50/MTok (larger prompt, but single call) |
+| Trigger | File watcher (continuous) | SessionEnd, PreCompact, SIGUSR1, or stale detection |
+
+### Trigger Points
+
+- **PreCompact:** When Claude Code compresses context mid-session — acts as a natural checkpoint for long sessions.
+- **SessionEnd:** Normal session close or Ctrl+C.
+- **SIGUSR1:** Manual flush signal.
+- **Stale session detector:** Synthetic summary generated for orphaned sessions (see below).
+
+---
+
+## Stale Session Detector
+
+**Interval:** Every 10 minutes via `startStaleSessionTimer()`.
+
+Handles the case where sessions die without a `SessionEnd` hook (e.g., terminal closed, process killed, network disconnect).
+
+### Detection Criteria
+
+A session is considered stale when:
+- The session has `tool_use` entries with no corresponding `session_summary`
+- The session has 3+ tool entries (skip tiny sessions)
+- The most recent entry is older than 30 minutes
+
+### Synthetic Summary
+
+The detector generates a `session_summary` entry with `source: 'stale-session-detector'`. It contains the same fields as a normal session summary (tool_counts, success_rate, user_intents, llm_reasonings) built from the orphaned tool entries.
+
+Once the synthetic summary is written to the JSONL, the file watcher triggers `scanAndEnqueue()` → `processQueue()`, which picks it up and routes it through `processSessionBatch()` for batch distill.
 
 ---
 
@@ -323,7 +407,33 @@ All timers are cleared on `SIGTERM` via `clearTimers()`.
 
 **Schedule:** Runs at 3:00 AM local time daily. The first execution is scheduled via `setTimeout` (milliseconds until next 3 AM), and subsequent executions use `setInterval` at 24-hour intervals.
 
-### Phase 1: Pattern Deduplication and Archival
+### Phase 0: Garbage Pattern Archival
+
+Archive patterns with raw tool-call names that never gained meaningful confidence:
+
+```sql
+UPDATE patterns SET status = 'archived'
+WHERE status = 'active'
+  AND (name LIKE 'claude-code: Bash %' OR name LIKE 'claude-code: Write /%'
+       OR name LIKE 'claude-code: Edit /%' OR name LIKE 'claude-code: Read /%'
+       OR name LIKE 'claude-code: Glob %' OR name LIKE 'claude-code: Grep %')
+  AND confidence <= 0.5
+  AND (success_count + failure_count) < 3
+```
+
+These are patterns created by the old distiller fallback that used raw tool calls as names. They have no reuse value.
+
+### Phase 1: Name-Based Deduplication
+
+1. Fetch all active patterns ordered by confidence DESC.
+2. Normalize each name: lowercase, strip non-alphanumeric, take first 50 chars.
+3. Group by normalized prefix — if two patterns share the same prefix:
+   - Keep the one with higher confidence (first seen, since sorted by confidence).
+   - Archive the duplicate.
+   - Apply Bayesian success update to the survivor.
+4. Log the number of deduplicated patterns.
+
+### Phase 2: LLM-Assisted Deduplication and Archival
 
 1. Fetch top 20 patterns by confidence from the database.
 2. Send to Kimi K2.5 with a prompt asking to identify:
@@ -339,7 +449,7 @@ All timers are cleared on `SIGTERM` via `clearTimers()`.
 4. Execute archival: Set `status='archived'` on identified patterns.
 5. Execute merges: Apply Bayesian success update to the "keep" pattern, archive the "archive" pattern.
 
-### Phase 2: Cloud Promotion
+### Phase 3: Cloud Promotion
 
 1. Call `db.getPromotionCandidates()` to get patterns meeting promotion criteria (confidence > 0.8, uses > 10).
 2. For each candidate, check if promotion is needed:
@@ -349,7 +459,7 @@ All timers are cleared on `SIGTERM` via `clearTimers()`.
 4. On success, call `db.markPromoted(id, documentId, confidence)` to record the promotion.
 5. Emit `pattern.promoted` event.
 
-### Phase 3: Global Namespace Promotion
+### Phase 4: Global Namespace Promotion
 
 1. Query for patterns meeting global promotion criteria:
    - `status = 'active'`
@@ -360,7 +470,7 @@ All timers are cleared on `SIGTERM` via `clearTimers()`.
 2. Call `db.promoteToGlobal(id)` for each qualifying pattern.
 3. Log the number of newly promoted global patterns.
 
-### Phase 4: Exolar Cross-Validation (Placeholder)
+### Phase 5: Exolar Cross-Validation (Placeholder)
 
 Currently logs the number of eligible patterns for cross-validation. Full implementation requires MCP context (the daemon runs outside Claude Code). Future plans include direct HTTP calls to the Exolar API.
 

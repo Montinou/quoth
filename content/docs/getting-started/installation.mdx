@@ -12,27 +12,29 @@ Quoth can be connected to any MCP-compatible AI tool. This guide covers installa
 
 ## Claude Code (CLI)
 
-### Plugin Installation (Recommended)
+### Local Plugin (Recommended)
 
-The Quoth Plugin bundles the MCP server, lightweight hooks (~60 tokens), and the `/quoth-genesis` skill:
+The Quoth local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon:
 
 ```bash
-# Add the Quoth marketplace (one time)
-/plugin marketplace add Montinou/quoth-mcp
+# Clone the repo
+git clone https://github.com/Montinou/quoth.git
+cd quoth
 
-# Install the plugin
-/plugin install quoth@quoth-marketplace
+# Run setup (idempotent — safe to re-run)
+bash quoth-plugin/scripts/setup.sh
 ```
 
 This gives you:
-- **18 MCP tools**: 3 search, 4 memory, 7 agent (A2A bus), 3 project management, 1 genesis
-- Lightweight hooks that hint Claude to use Quoth patterns
-- Agent-to-agent communication across instances
-- 🪶 Badge transparency when Quoth is used
+- **22 local MCP tools**: 8 patterns, 6 intelligence, 6 agents, 2 skills
+- **9 hooks**: trajectory capture, task routing, pattern injection, Bayesian feedback
+- **Background daemon**: JUDGE → DISTILL → CONSOLIDATE pipeline + session batch distill
+- **Context enrichment**: user intent, LLM reasoning, sanitized I/O in every trajectory
+- **Autonomous doc maintenance**: nightly content-hash-based doc updates with git push
 
-### MCP-Only Installation
+### Cloud MCP (Cross-Team Features)
 
-If you prefer just the MCP server without hooks:
+For cross-team knowledge sharing, semantic search, and agent-to-agent communication:
 
 ```bash
 claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
@@ -46,6 +48,10 @@ Then authenticate from the `/mcp` menu.
 claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp \
   --header "Authorization: Bearer YOUR_TOKEN"
 ```
+
+### Both Together
+
+Install both for the full experience. Local plugin handles self-learning, cloud MCP handles team sharing. High-confidence patterns auto-promote nightly.
 
 ## Claude Desktop
 

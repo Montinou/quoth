@@ -125,7 +125,7 @@ trajectory-capture.js
 
 ### Entry Format
 
-Each JSONL line contains a single JSON object:
+Each JSONL line contains a single JSON object with full context:
 
 ```json
 {
@@ -133,9 +133,18 @@ Each JSONL line contains a single JSON object:
   "agent": "claude-code",
   "project": "quoth",
   "session": "session-abc123",
-  "task": "Write /home/user/projects/quoth/src/index.js",
-  "tool": "Write",
+  "task": "Edit /home/user/src/db.js",
+  "tool": "Edit",
+  "tool_input": "file: /home/user/src/db.js, old: function foo()..., new: function bar()...",
+  "tool_output": "File updated successfully",
   "outcome": "success",
+  "user_intent": "arreglá el bug en la función de decay",
+  "conversation_context": [
+    "revisá el sistema de confidence scoring",
+    "el decay no está funcionando",
+    "arreglá el bug en la función de decay"
+  ],
+  "llm_reasoning": "Edit: replaced \"function foo()\" with \"function bar()\"",
   "pattern_used": null,
   "source": "claude-code",
   "timestamp": 1712188800000
@@ -146,20 +155,64 @@ Each JSONL line contains a single JSON object:
 
 | Field | Source | Description |
 |-------|--------|-------------|
-| `event` | Hardcoded | Always `"tool_use"` |
+| `event` | Hardcoded | Always `"tool_use"` for tool calls, `"session_summary"` for summaries |
 | `agent` | Hardcoded | Always `"claude-code"` |
 | `project` | Git remote or directory name | Resolved via `resolveProjectName()` |
 | `session` | `CLAUDE_SESSION_ID` env var | Falls back to `session-{timestamp}` |
-| `task` | Tool name + summarized input | e.g., `"Write /path/to/file.js"` or `"Bash npm test"` |
+| `task` | Tool name + summarized input | e.g., `"Edit /path/to/file.js"` or `"Bash npm test"` |
 | `tool` | `hookData.tool_name` | The Claude Code tool that was used |
+| `tool_input` | Sanitized tool input | Rich capture of what was passed to the tool (up to 500 chars) |
+| `tool_output` | Sanitized tool result | Truncated output (up to 300 chars) |
 | `outcome` | `hookData.tool_result.is_error` | `"success"` or `"failure"` |
+| `user_intent` | `prompt-history.json` | Most recent user prompt (if < 5 min old, same session) |
+| `conversation_context` | `prompt-history.json` | Last 3 user prompts in chronological order |
+| `llm_reasoning` | Tool input fields | LLM's decision-making context extracted per tool type |
 | `pattern_used` | (none) | Always `null` at capture time; set by daemon if applicable |
 | `source` | Hardcoded | Always `"claude-code"` |
 | `timestamp` | `Date.now()` | Unix milliseconds |
 
-### Input Summarization
+### Context Enrichment
 
-The `summarizeInput()` function extracts the most relevant piece of information from the tool input:
+**Prompt history:** The `route` handler (UserPromptSubmit) saves each user prompt to `~/.quoth/intelligence/prompt-history.json` as a rolling buffer of the last 5 prompts per session. Trajectory capture reads this to populate `user_intent` (latest) and `conversation_context` (last 3, chronological).
+
+**LLM reasoning extraction (`extractReasoning`):** Extracts the LLM's decision-making signals from tool input fields:
+
+| Tool Type | Reasoning Source | Example |
+|-----------|-----------------|---------|
+| Bash | `input.description` (LLM's explanation of the command) | `"Run tests to verify changes"` |
+| Agent | `input.prompt` (LLM's delegation plan, 300 chars) + `input.description` | `"Research the auth middleware..."` |
+| Write/Edit | Edit diff summary (`old_string` → `new_string`, 80 chars each) | `"Edit: replaced 'foo()' with 'bar()'"` |
+
+**Rich tool input/output (`summarizeToolInput`, `summarizeToolOutput`):** Captures sanitized tool data for downstream LLM analysis:
+
+| Tool | Input Captured | Max Length |
+|------|---------------|-----------|
+| Bash | Full command | 500 chars |
+| Write | File path + content start | 200 chars content |
+| Edit | File path + old/new strings | 150 chars each |
+| Read | File path + offset/limit | — |
+| Glob/Grep | Pattern + path + glob filter | — |
+| Agent | Type + description + prompt | 200 chars prompt |
+
+### Data Sanitization
+
+All `tool_input` and `tool_output` fields are passed through `sanitize()` before writing to JSONL. The sanitizer redacts:
+
+| Pattern | Example | Replacement |
+|---------|---------|-------------|
+| API keys (`sk_`, `qth_`, `ghp_`, `vck_`, etc.) | `qth_abc123def456...` | `[REDACTED_KEY]` |
+| JWT tokens | `eyJhbGciOi...` | `[REDACTED_JWT]` |
+| UUIDs | `550e8400-e29b-41d4-...` | `[REDACTED_UUID]` |
+| Long hex strings (32+ chars) | `a1b2c3d4e5f6...` | `[REDACTED_HEX]` |
+| Password URLs | `postgres://user:pass@host` | `postgres://user:[REDACTED]@host` |
+| Env-style secrets | `API_KEY=supersecret` | `API_KEY=[REDACTED]` |
+| Long base64 (60+ chars) | (base64 blob) | `[REDACTED_B64]` |
+
+Normal text, file paths, and code are preserved.
+
+### Input Summarization (legacy `task` field)
+
+The `summarizeInput()` function extracts the most relevant piece of information from the tool input for the compact `task` field:
 
 | Tool Type | Summary Source | Example |
 |-----------|---------------|---------|
@@ -191,21 +244,22 @@ The daemon's file watcher monitors this directory and processes new entries.
 
 ### `route` (UserPromptSubmit)
 
-Routes the user's prompt to an optimal agent type and displays relevant intelligence patterns.
+Routes the user's prompt to an optimal agent type and displays relevant intelligence patterns. Also persists the prompt for trajectory context enrichment.
 
 **Execution flow:**
 
-1. Call `intelligence.getContext(prompt, 5)` to search the intelligence graph for entries matching the prompt. Uses trigram-based Jaccard similarity weighted with PageRank scores. No API calls involved.
-2. Filter results to entries with `score >= 0.1`.
-3. Display up to 3 relevant patterns with their score, summary, rank, and access count:
+1. **Persist prompt history:** Save the user's prompt (truncated to 500 chars) to `~/.quoth/intelligence/prompt-history.json` as a rolling buffer of the last 5 prompts. The buffer resets when the session ID changes. This allows `trajectory-capture.js` to include nearby user intents with each tool call.
+2. Call `intelligence.getContext(prompt, 5)` to search the intelligence graph for entries matching the prompt. Uses trigram-based Jaccard similarity weighted with PageRank scores. No API calls involved.
+3. Filter results to entries with `score >= 0.1`.
+4. Display up to 3 relevant patterns with their score, summary, rank, and access count:
    ```
    [INTELLIGENCE] Relevant patterns for this task:
      * (0.42) Auth must not hard-fail on missing JWT claims [rank #1, 3x accessed]
      * (0.28) Drizzle arrays use {id1,id2} format [rank #2, 7x accessed]
    ```
-4. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (8 regex patterns mapping to agent types: coder, tester, reviewer, researcher, architect, backend-dev, frontend-dev, devops). Default: `coder` at 0.5 confidence.
-5. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
-6. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
+5. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
+6. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
+7. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
 
 **Output format:**
 
@@ -240,7 +294,7 @@ Estimated Metrics
 
 ### `session-restore` (SessionStart)
 
-Initializes the intelligence graph and injects high-confidence patterns for the current project.
+Initializes the intelligence graph, injects project context files, and injects high-confidence patterns for the current project.
 
 **Execution flow:**
 
@@ -253,21 +307,35 @@ Initializes the intelligence graph and injects high-confidence patterns for the 
    - Computes PageRank (damping factor 0.85, max 30 iterations, convergence threshold 1e-6).
    - Caches graph state to `graph-state.json` and ranked entries to `ranked-context.json`.
    - Cache TTL: 60 seconds. Returns early on cache hit.
-2. Load project patterns from SQLite filtered to `confidence >= 0.6`, max 3 results.
-3. Output pattern summaries:
+2. **Inject project context** (v3.2.0 addition): Resolves the current project name and searches three locations in order:
+   - **Plugin-bundled context** (`quoth-plugin/context/{project}.md`): Project-specific context files shipped with the plugin. If found, its contents are printed to stdout (injected into session context). Marks `contextInjected = true` and stops searching plugin-bundled files.
+   - **Fallback summary** (`quoth-plugin/context/project-summary.md`): Only used if no project-specific file was found AND the current project is `quoth` itself. Prevents the generic summary from being injected in non-quoth sessions.
+   - **Project-local context** (`{CLAUDE_PROJECT_DIR}/.quoth-context.md`): Checked independently — injected in addition to the above if it exists. Allows project-local overrides without modifying the plugin.
+3. Load project patterns from SQLite filtered to `confidence >= 0.6`, max 3 results.
+4. Output pattern summaries:
    ```
    [Quoth] 2 patterns loaded for project "quoth":
    - [0.85] auth-resilience: Use DB fallback for optional JWT claims
    - [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres ANY()
    ```
 
+**Context injection lookup order:**
+
+| Priority | Path | Condition |
+|----------|------|-----------|
+| 1 | `quoth-plugin/context/{project}.md` | Always checked first |
+| 2 | `quoth-plugin/context/project-summary.md` | Fallback, only if `project === 'quoth'` and no project-specific file found |
+| 3 | `{CLAUDE_PROJECT_DIR}/.quoth-context.md` | Always checked, injected in addition to above |
+
+The context files are printed as plain markdown to stdout. Claude Code injects stdout from `SessionStart` hooks into the session's system context, making the content available at the start of every conversation without occupying tool call budget.
+
 ### `session-end` (SessionEnd / PreCompact)
 
-Consolidates the intelligence graph by processing pending edits, refreshing from the pattern DB, and recomputing PageRank.
+Consolidates the intelligence graph, writes a session summary to the trajectory JSONL, and signals the daemon for batch processing.
 
 **Execution flow:**
 
-1. Call `intelligence.consolidateGraph(db)`:
+1. **Intelligence consolidation:** Call `intelligence.consolidateGraph(db)`:
    - Load `store.json` (the entry store).
    - Process `pending-insights.jsonl`: count edits per file. Files edited 3+ times in a session get a new "frequently edited" insight entry added to the store (type: `procedural`, namespace: `insights`).
    - Clear pending insights file.
@@ -279,6 +347,27 @@ Consolidates the intelligence graph by processing pending edits, refreshing from
    ```
    [INTELLIGENCE] Consolidated: 47 entries, 23 edges, 3 new, PageRank recomputed
    ```
+3. **Write session summary:** Read today's trajectory JSONL file, filter `tool_use` entries matching the current `CLAUDE_SESSION_ID`, and append a `session_summary` entry:
+   ```json
+   {
+     "event": "session_summary",
+     "session": "session-abc123",
+     "project": "quoth",
+     "task": "Session: 45 tool calls (Edit:18, Read:12, Bash:10). 43 ok, 2 fail.",
+     "tool_counts": {"Edit": 18, "Read": 12, "Bash": 10},
+     "total_calls": 45,
+     "success_rate": 0.955,
+     "user_intents": ["fix the auth bug", "update the docs"],
+     "llm_reasonings": ["Check git status", "Run tests after edit"],
+     "outcome": "success",
+     "source": "session-end",
+     "timestamp": 1712345678000
+   }
+   ```
+   The `user_intents` field collects unique prompts from `user_intent` fields across tool entries. The `llm_reasonings` field collects unique reasoning snippets (last 10, deduped).
+4. **Signal daemon:** Read `~/.quoth/daemon.pid` and send `SIGUSR1` to trigger immediate processing of the session summary via batch distill.
+
+This hook fires on both `SessionEnd` (normal session close, Ctrl+C) and `PreCompact` (context compression). PreCompact is the more frequent trigger — it acts as a natural "checkpoint" so batch distill processes manageable chunks rather than waiting for sessions that may last hours.
 
 ### `post-edit` (PostToolUse: Write/Edit/MultiEdit)
 

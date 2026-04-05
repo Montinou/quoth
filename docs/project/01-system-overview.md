@@ -8,7 +8,7 @@ Quoth is a self-learning knowledge system split into two independent but connect
 
 The plugin runs entirely on the developer's machine as a Claude Code extension. It provides:
 
-- **Hooks** (8 events) that intercept Claude Code lifecycle events (session start/end, tool use, subagent start/stop, prompt submit, context compaction). All hooks route through a single unified dispatcher (`hook-dispatch.js`) except trajectory capture which has its own handler.
+- **Hooks** (9 bindings across 8 events) that intercept Claude Code lifecycle events (session start/end, tool use, subagent start/stop, prompt submit, context compaction). All hooks route through a single unified dispatcher (`hook-dispatch.js`) except trajectory capture which has its own handler.
 - **Daemon** (background process) that watches trajectory JSONL files and runs a 3-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE) to extract reusable patterns from agent behavior.
 - **MCP Server** (`quoth-learning`) exposing 22 tools over stdio JSON-RPC for pattern management, agent coordination, intelligence routing, and skill extraction.
 - **SQLite Database** (`~/.quoth/memory.db`) with WAL mode, storing patterns, trajectories, trajectory steps, memory entries, agent registry, skills, and intelligence graph state. Includes a pure-JS HNSW vector index for approximate nearest neighbor search over pattern embeddings.
@@ -39,14 +39,17 @@ A developer opens a Claude Code session. The `SessionStart` hook fires, which:
 
 On every `PostToolUse` event for Bash, Write, Edit, MultiEdit, or Agent tools, the `trajectory-capture.js` hook fires. It:
 - Reads the tool call data from stdin (JSON from Claude Code).
+- Reads `~/.quoth/intelligence/prompt-history.json` for recent user prompts (rolling buffer of last 5).
+- Extracts LLM reasoning from tool input fields (Bash description, Agent prompt, Edit diff).
+- Captures sanitized tool input and output (API keys, tokens, JWTs, UUIDs redacted).
 - Appends a JSONL line to `~/.quoth/trajectories/{repo-name}-{date}.jsonl`.
-- Each line contains: timestamp, tool name, tool input summary, tool output summary, session ID, project name.
+- Each line contains: timestamp, tool name, sanitized tool input/output, outcome, user_intent, conversation_context (last 3 prompts), llm_reasoning, session ID, project name.
 
 ### 3. UserPromptSubmit Routes Task
 
 When the user submits a prompt, the `route` command in `hook-dispatch.js`:
 - Parses the prompt text.
-- Matches against keyword patterns in `routing.js` (8 agent types: coder, tester, reviewer, researcher, architect, backend-dev, frontend-dev, devops).
+- Matches against ~20 keyword pattern groups in `routing.js` (8 agent types: coder, tester, reviewer, researcher, architect, backend-dev, frontend-dev, devops). Supports both English and Spanish (Argentine voseo) task descriptions. Intent patterns (fix/debug/refactor) take priority over domain patterns (api/frontend/deploy).
 - Returns the optimal agent type with confidence score and reasoning.
 - Also queries patterns with score >= 0.1 relevant to the task for injection.
 
@@ -81,9 +84,9 @@ The daemon (`daemon.js`) runs as a persistent background process:
 
 1. **JUDGE** (`pipeline/judge.js`) — Evaluates trajectory effectiveness using Kimi K2.5 via Moonshot API. Assigns a verdict: effective, partially-effective, or ineffective. Only effective trajectories proceed.
 
-2. **DISTILL** (`pipeline/distill.js`) — Extracts reusable patterns from effective trajectories using Kimi K2.5. Generates: pattern name, condition (when to apply), action (what to do), description, tags. Also computes a 1024-dim embedding via voyage-4-lite for semantic similarity.
+2. **DISTILL** (`pipeline/distill.js`) — Extracts reusable patterns from effective trajectories using Kimi K2.5. The prompt enforces quality rules: pattern names must describe techniques/strategies, never raw file paths or tool calls. Generates: pattern name (max 80 chars), tags, applicability (broad/narrow). Also computes a 1024-dim embedding via voyage-4-lite. Includes pre-insert dedup check (embedding similarity >= 0.92 via HNSW, or name prefix match >= 80%) to strengthen existing patterns instead of creating duplicates.
 
-3. **CONSOLIDATE** (`pipeline/consolidate.js`) — Uses Claude Haiku 4.5 to decide whether the distilled pattern should merge into an existing pattern (if semantically similar enough via HNSW lookup) or be stored as new. Merging updates confidence, increments version, and blends embeddings.
+3. **CONSOLIDATE** (`pipeline/consolidate.js`) — Uses Kimi K2.5 to decide whether the distilled pattern should merge into an existing pattern (if semantically similar enough via HNSW lookup) or be stored as new. Merging updates confidence, increments version, and blends embeddings.
 
 **Attribution** (`lib/attribute.js`) — Uses Haiku to trace which patterns contributed to successful outcomes, updating their Bayesian confidence scores.
 
@@ -97,8 +100,8 @@ The pure-JS HNSW index (`lib/hnsw.js`) provides O(log n) approximate nearest nei
 
 At 3am (scheduled via `setInterval` in the daemon):
 
-- **Deep consolidation:** Re-scans all active patterns, merges near-duplicates using embedding similarity.
-- **Confidence decay:** Patterns not matched/used decay at their configured `decay_rate` per week (default 0.005/week).
+- **Deep consolidation:** Phase 0: archive garbage patterns (raw tool-call names). Phase 1: name-based dedup (normalize + prefix match). Phase 2: LLM-assisted dedup of top 20 patterns.
+- **Confidence decay:** Three-tier system: never-matched patterns decay aggressively (beta += 0.1/hr), inactive >7 days moderately (beta += 0.05/hr), inactive >30 days strongly (beta += 0.15/hr, stacking).
 - **Cloud promotion:** High-confidence patterns (>0.8 confidence, >10 uses) are promoted to the Quoth cloud API via `lib/promote.js`. This sends the pattern data to `POST /api/v1/patterns/promote` with the agent's `QUOTH_API_KEY`.
 - **HNSW save:** Persists the in-memory HNSW index to disk.
 - **Agent cleanup:** Removes stale agent registrations that haven't heartbeated.
@@ -131,7 +134,7 @@ The SaaS platform receives promoted patterns and:
 |----------|-------|----------|-------------|
 | Trajectory judging | Kimi K2.5 | Moonshot (OpenAI-compat API) | Low cost, high throughput |
 | Pattern distillation | Kimi K2.5 | Moonshot | Low cost |
-| Pattern consolidation | Claude Haiku 4.5 | Anthropic (via Vercel AI Gateway) | Low cost, high accuracy |
+| Pattern consolidation | Kimi K2.5 | Moonshot | Unified with JUDGE/DISTILL — single provider |
 | Pattern attribution | Claude Haiku 4.5 | Anthropic (via Vercel AI Gateway) | Low cost |
 | Skill extraction | Claude Sonnet 4.6 | Anthropic (via Vercel AI Gateway) | Higher cost, used sparingly |
 
@@ -196,7 +199,8 @@ User submits prompt
 Claude Code works (Bash, Write, Edit...)
   |
   v
-[PostToolUse hooks] --> trajectory-capture.js writes JSONL
+[PostToolUse hooks] --> trajectory-capture.js writes enriched JSONL
+                    --> (includes user_intent, conversation_context, llm_reasoning, sanitized I/O)
                     --> post-edit records to intelligence graph
   |
   v
@@ -215,10 +219,11 @@ Subagent completes
 Session ends (or context compaction)
   |
   v
-[SessionEnd / PreCompact hook] --> consolidate intelligence graph, recompute PageRank
+[SessionEnd / PreCompact hook] --> consolidate graph, write session_summary, SIGUSR1 daemon
   |
   v
-[Daemon] --> watches JSONL --> JUDGE --> DISTILL --> CONSOLIDATE --> SQLite + HNSW
+[Daemon] --> watches JSONL --> session_summary? batch distill : per-entry JUDGE→DISTILL→CONSOLIDATE
+  |                        --> stale session detector (10min) generates synthetic summaries
   |
   v
 [Nightly 3am] --> deep consolidation, dedup, decay, cloud promotion

@@ -139,7 +139,7 @@ Implemented in `db.js: applyHourlyDecay()`. Called every hour by the daemon's ti
 ```sql
 UPDATE patterns SET
   alpha = MAX(0.1, alpha - (decay_rate * alpha * 0.01)),
-  confidence = recalculated,
+  confidence = MAX(0.05, recalculated),
   updated_at = NOW()
 WHERE status = 'active'
 ```
@@ -148,36 +148,69 @@ WHERE status = 'active'
 - The decay is proportional to the current alpha value: `decay_rate * alpha * 0.01`.
 - With the default `decay_rate=0.005`, this removes `0.005 * alpha * 0.01 = 0.00005 * alpha` per hour.
 - Floor at `alpha=0.1` (not 1.0). This allows confidence to drop below the initial 0.5 because `0.1 / (0.1 + beta)` can be very small when beta is large.
-- Effect: patterns that are not being reinforced will gradually lose alpha, causing confidence to drift downward. Well-established patterns (high alpha) lose more absolute alpha per hour but the relative effect is the same.
+- Confidence floor at 0.05 (never reaches absolute zero).
+- Effect: patterns that are not being reinforced will gradually lose alpha, causing confidence to drift downward.
 
-### Inactivity Penalty (stale patterns)
+### Tiered Inactivity Penalties
 
+Three tiers of increasing severity replace the previous single inactivity penalty:
+
+**Tier 1 — Never matched (aggressive):**
 ```sql
 UPDATE patterns SET
-  beta = beta + 0.02,
-  confidence = alpha / (alpha + beta + 0.02),
-  updated_at = NOW()
+  beta = beta + 0.1,
+  confidence = MAX(0.05, alpha / (alpha + beta + 0.1))
 WHERE status = 'active'
-  AND (last_matched_at IS NULL OR last_matched_at < ?)
--- ? = Date.now() - 7 days
+  AND last_matched_at IS NULL
+  AND (success_count + failure_count) = 0
 ```
+- Applies to patterns that have NEVER been matched or used.
+- Rate: 0.1/hour = 2.4 beta/day → confidence drops to ~0.3 within a week.
+- Purpose: Quickly penalize patterns that were distilled but never proved useful.
 
-- Applied hourly to patterns where `last_matched_at` is NULL (never matched) or older than 7 days.
-- Adds 0.02 to beta each hour, increasing the "failure" evidence.
-- Rate: 0.02/hour x 24 hours = 0.48 beta per day, or ~3.36 beta per week of inactivity.
-- Combined with alpha decay, a pattern unused for weeks will see its confidence steadily erode.
+**Tier 2 — Inactive >7 days (moderate):**
+```sql
+UPDATE patterns SET
+  beta = beta + 0.05,
+  confidence = MAX(0.05, alpha / (alpha + beta + 0.05))
+WHERE status = 'active'
+  AND last_matched_at IS NOT NULL
+  AND last_matched_at < ?  -- 7 days ago
+```
+- Applies to patterns that WERE matched at some point but haven't been used recently.
+- Rate: 0.05/hour = 1.2 beta/day → ~8.4 beta per week.
+- Purpose: Moderate erosion for once-useful patterns that may have become stale.
+
+**Tier 3 — Inactive >30 days (strong):**
+```sql
+UPDATE patterns SET
+  beta = beta + 0.15,
+  confidence = MAX(0.05, alpha / (alpha + beta + 0.15))
+WHERE status = 'active'
+  AND (last_matched_at IS NULL OR last_matched_at < ?)  -- 30 days ago
+```
+- Applies to ALL patterns inactive for more than 30 days, regardless of history.
+- Rate: 0.15/hour = 3.6 beta/day → rapid confidence erosion.
+- Purpose: Aggressively prune long-abandoned patterns. Note: this stacks with Tier 1 or Tier 2 for those patterns.
 
 ### Decay Interaction
 
-Both decay mechanisms run in the same `applyHourlyDecay()` call. For an inactive pattern:
+All decay mechanisms run in the same `applyHourlyDecay()` call. For a never-matched pattern:
 
 1. Alpha decreases by `0.00005 * alpha` (small)
-2. Beta increases by 0.02 (significant)
+2. Beta increases by 0.1 (Tier 1, significant)
+3. After 30 days, additionally beta increases by 0.15 (Tier 3, stacking)
 
-The beta increase dominates for most patterns. A pattern at alpha=5, beta=2 with 7 days of inactivity:
-- After 1 week: beta increases by ~3.36, so confidence ~ 5/(5+5.36) ~ 0.48
-- After 2 weeks: beta increases by another ~3.36, so confidence ~ 5/(5+8.72) ~ 0.36
-- Eventually confidence drops below 0.1, triggering archival.
+A pattern at alpha=1, beta=1 (never matched, default state):
+- After 1 day: beta ~ 1 + 2.4 = 3.4, confidence ~ 1/(1+3.4) ~ 0.23
+- After 1 week: beta ~ 1 + 16.8 = 17.8, confidence ~ 1/(1+17.8) ~ 0.05
+- Triggers archival quickly, preventing garbage accumulation.
+
+A well-established pattern at alpha=8, beta=2 that stops being used:
+- After 7 days idle: Tier 2 kicks in, beta grows by ~8.4/week
+- After 2 weeks: beta ~ 2 + 8.4 = 10.4, confidence ~ 8/(8+10.4) ~ 0.43
+- After 30 days: Tier 3 stacks, accelerating decay further.
+- Patterns with strong evidence take longer to die, as expected.
 
 ## Archival
 
@@ -185,21 +218,31 @@ Implemented in `db.js: archiveWeakPatterns()`. Called hourly by the daemon along
 
 ### Criteria
 
-A pattern is archived when ALL of these conditions are met:
-- `confidence < 0.1`
-- `success_count + failure_count > 5` (has been tried multiple times)
-- `status = 'active'`
+Two archival rules run in `archiveWeakPatterns()`:
 
+**Rule 1 — Low confidence with evidence:**
 ```sql
-UPDATE patterns SET status = 'archived', updated_at = NOW()
+UPDATE patterns SET status = 'archived'
 WHERE confidence < 0.1
-  AND (success_count + failure_count) > 5
+  AND (success_count + failure_count) > 3
   AND status = 'active'
 ```
+Archives patterns that have been tried multiple times and found unreliable. The threshold of 3 total uses (reduced from 5) allows faster cleanup while still protecting untested patterns.
+
+**Rule 2 — Raw tool-call garbage with no feedback:**
+```sql
+UPDATE patterns SET status = 'archived'
+WHERE status = 'active'
+  AND confidence < 0.15
+  AND (success_count + failure_count) = 0
+  AND (name LIKE 'claude-code: Bash %' OR name LIKE 'claude-code: Write /%'
+       OR name LIKE 'claude-code: Edit /%' OR name LIKE 'claude-code: Read /%')
+```
+Archives patterns created by the old distiller fallback that produced raw tool calls as names. These patterns have no reuse value and were never validated by feedback.
 
 ### Purpose
 
-Archival removes patterns that have been repeatedly tried and found unreliable. The threshold of 5 total uses prevents new patterns (which may start with low confidence due to decay before they get a chance to be tested) from being prematurely archived.
+Archival removes patterns that are either unreliable (Rule 1) or structurally useless (Rule 2).
 
 Archived patterns:
 - Are excluded from `getTopPatterns` queries (which filter `WHERE status = 'active'`)
@@ -307,7 +350,9 @@ This is a simple linear decay (0.005 per day), much gentler than the Bayesian ho
 | `applyBayesianUpdate('failure')` | SQLite | Down | beta += 1, confidence recalculated |
 | `applyConfidenceDelta(id, delta)` | SQLite | Up/Down | confidence += delta (bypasses Bayesian) |
 | `applyHourlyDecay` alpha | SQLite | Down | alpha -= decay_rate * alpha * 0.01 |
-| `applyHourlyDecay` inactivity | SQLite | Down | beta += 0.02 (if >7 days stale) |
+| `applyHourlyDecay` Tier 1 | SQLite | Down | beta += 0.1 (never matched, no feedback) |
+| `applyHourlyDecay` Tier 2 | SQLite | Down | beta += 0.05 (matched but inactive >7 days) |
+| `applyHourlyDecay` Tier 3 | SQLite | Down | beta += 0.15 (inactive >30 days, stacking) |
 | `applyFeedback(true)` | JSON graph | Up | +0.05 to matched entries |
 | `applyFeedback(false)` | JSON graph | Down | -0.02 to matched entries |
 | `consolidateGraph` decay | JSON graph | Down | -0.005/day for unaccessed nodes |

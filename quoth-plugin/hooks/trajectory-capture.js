@@ -40,6 +40,36 @@ process.stdin.on('end', () => {
                     (typeof toolResult === 'string' && toolResult.includes('error'))
     const outcome = isError ? 'failure' : 'success'
 
+    // Read recent prompt history for context enrichment.
+    // Includes last 3 user prompts to capture intent + planning context around this tool call.
+    let userIntent = null
+    let conversationContext = null
+    try {
+      const historyFile = path.join(QUOTH_HOME, 'intelligence', 'prompt-history.json')
+      if (fs.existsSync(historyFile)) {
+        const history = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+        // Only use if recent (< 5 min) and same session
+        const recent = history.filter(h => {
+          const age = Date.now() - (h.timestamp || 0)
+          const sameSession = !h.session || !sessionId || h.session === sessionId
+          return age < 300000 && sameSession
+        })
+        if (recent.length > 0) {
+          userIntent = recent[0].prompt || null  // Most recent prompt
+          // Include last 3 as conversation context (oldest first for chronological order)
+          conversationContext = recent.slice(0, 3).reverse().map(h => h.prompt)
+        }
+      }
+    } catch {}
+
+    // Extract LLM reasoning from tool input fields.
+    const llmReasoning = extractReasoning(toolName, toolInput)
+
+    // Capture sanitized tool input and output for richer context.
+    // The full data lets downstream LLMs understand what happened, not just the tool name.
+    const sanitizedInput = sanitize(summarizeToolInput(toolName, toolInput))
+    const sanitizedOutput = sanitize(summarizeToolOutput(toolName, toolResult))
+
     // Build trajectory entry
     const entry = {
       event: 'tool_use',
@@ -48,7 +78,12 @@ process.stdin.on('end', () => {
       session: sessionId,
       task: `${toolName} ${summarizeInput(toolName, toolInput)}`.trim(),
       tool: toolName,
+      tool_input: sanitizedInput,
+      tool_output: sanitizedOutput,
       outcome,
+      user_intent: userIntent,
+      conversation_context: conversationContext,
+      llm_reasoning: llmReasoning,
       pattern_used: null,
       source: 'claude-code',
       timestamp: Date.now()
@@ -81,6 +116,98 @@ function resolveProjectName(dir) {
   if (wsMatch) return wsMatch[1]
   if (base === 'repo' || base === 'src') return path.basename(path.dirname(dir))
   return base
+}
+
+// --- Sanitizer: redact secrets, keys, tokens, passwords, UUIDs ---
+const REDACT_PATTERNS = [
+  // API keys (common prefixes)
+  [/\b(sk|pk|key|token|secret|Bearer|qth|vck|ghp|ghu|ghs|npm|pypi|AKIA)[_-]?[A-Za-z0-9_\-]{16,}\b/gi, '[REDACTED_KEY]'],
+  // Generic hex tokens (32+ chars)
+  [/\b[0-9a-f]{32,}\b/gi, '[REDACTED_HEX]'],
+  // UUIDs
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[REDACTED_UUID]'],
+  // Passwords in URLs
+  [/:\/\/([^:]+):([^@]+)@/g, '://$1:[REDACTED]@'],
+  // .env style KEY=value (value part)
+  [/(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY)\s*[=:]\s*\S+/gi, '$1=[REDACTED]'],
+  // JWT tokens
+  [/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[REDACTED_JWT]'],
+  // Base64 encoded secrets (long base64 strings that look like secrets)
+  [/\b(?:[A-Za-z0-9+/]{40,}={0,2})\b/g, (match) => {
+    // Only redact if it doesn't look like a file path or common base64 (e.g., git hashes)
+    if (match.length > 60) return '[REDACTED_B64]'
+    return match
+  }],
+]
+
+function sanitize(text) {
+  if (!text) return text
+  if (typeof text !== 'string') {
+    try { text = JSON.stringify(text) } catch { return null }
+  }
+  for (const [pattern, replacement] of REDACT_PATTERNS) {
+    text = text.replace(pattern, replacement)
+  }
+  return text
+}
+
+// --- Rich tool input/output capture (truncated, sanitized) ---
+function summarizeToolInput(tool, input) {
+  if (!input) return null
+  const maxLen = 500
+  switch (tool) {
+    case 'Bash':
+      return (input.command || '').slice(0, maxLen)
+    case 'Write':
+      return `file: ${input.file_path || '?'}, content: ${(input.content || '').slice(0, 200)}...`
+    case 'Edit':
+      return `file: ${input.file_path || '?'}, old: ${(input.old_string || '').slice(0, 150)}, new: ${(input.new_string || '').slice(0, 150)}`
+    case 'Read':
+      return `file: ${input.file_path || '?'}${input.offset ? `, offset: ${input.offset}` : ''}${input.limit ? `, limit: ${input.limit}` : ''}`
+    case 'Glob':
+      return `pattern: ${input.pattern || '?'}${input.path ? `, path: ${input.path}` : ''}`
+    case 'Grep':
+      return `pattern: ${input.pattern || '?'}${input.path ? `, path: ${input.path}` : ''}${input.glob ? `, glob: ${input.glob}` : ''}`
+    case 'Agent':
+      return `type: ${input.subagent_type || 'general'}, desc: ${(input.description || '').slice(0, 100)}, prompt: ${(input.prompt || '').slice(0, 200)}`
+    default:
+      try { return JSON.stringify(input).slice(0, maxLen) } catch { return null }
+  }
+}
+
+function summarizeToolOutput(tool, result) {
+  if (!result) return null
+  const maxLen = 300
+  if (typeof result === 'string') return result.slice(0, maxLen)
+  // Claude Code hook results can have various shapes
+  const text = result.content || result.output || result.stdout || result.text || ''
+  if (typeof text === 'string') return text.slice(0, maxLen)
+  try { return JSON.stringify(result).slice(0, maxLen) } catch { return null }
+}
+
+function extractReasoning(tool, input) {
+  if (!input) return null
+  const parts = []
+  // Bash: description field is the LLM's explanation of what the command does
+  if (tool === 'Bash' && input.description) {
+    parts.push(input.description.slice(0, 200))
+  }
+  // Agent: prompt field is the LLM's full planning/delegation text
+  if (tool === 'Agent' && input.prompt) {
+    parts.push(input.prompt.slice(0, 300))
+  }
+  // Agent: description field is a short summary of the task
+  if (tool === 'Agent' && input.description) {
+    parts.push(`Task: ${input.description}`)
+  }
+  // Write/Edit: the LLM chose to modify this file for a reason
+  if ((tool === 'Write' || tool === 'Edit') && input.file_path) {
+    if (input.old_string && input.new_string) {
+      // Edit: capture what changed (truncated)
+      parts.push(`Edit: replaced "${input.old_string.slice(0, 80)}" with "${input.new_string.slice(0, 80)}"`)
+    }
+  }
+  return parts.length > 0 ? parts.join(' | ') : null
 }
 
 function summarizeInput(tool, input) {

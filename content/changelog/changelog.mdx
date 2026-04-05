@@ -3,6 +3,96 @@ title: "Changelog"
 description: "All notable changes to Quoth"
 ---
 
+## April 2026
+
+### 2026-04-05
+
+**Quoth v3.3.0: Intelligent Self-Learning Pipeline**
+
+Major upgrade to the plugin's learning pipeline, pattern quality, and autonomous documentation maintenance.
+
+**Context-Enriched Trajectory Capture**
+
+Every tool call now captures full conversation context:
+- `user_intent` — last user prompt (from rolling history of 5)
+- `conversation_context` — last 3 user prompts in chronological order
+- `llm_reasoning` — LLM decision signals extracted from tool inputs (Bash `description`, Agent `prompt`, Edit diffs)
+- `tool_input` / `tool_output` — sanitized full I/O (redacts API keys, JWTs, UUIDs, passwords)
+
+**Session-Level Batch Distill**
+
+Instead of distilling patterns per tool call, Quoth now batches at session level:
+- SessionEnd/PreCompact writes a `session_summary` to the JSONL
+- Daemon processes entire sessions in one LLM call → produces 1-3 higher-quality strategy-level patterns
+- Stale session detector (every 10min) generates synthetic summaries for orphaned sessions
+
+**Improved Pattern Quality**
+
+- DISTILL prompt enforces meaningful names — never raw file paths or tool calls
+- Pre-insert dedup: embedding cosine ≥ 0.92 or name prefix match ≥ 80%
+- CONSOLIDATE fixed: was always falling back to `action: 'new'` due to markdown code block parsing bug
+- Batch-distilled patterns start at confidence 0.55 and get tagged `batch-distilled`
+
+**3-Tier Temporal Decay**
+
+| Tier | Condition | Rate | Effect |
+|------|-----------|------|--------|
+| 1 | Never matched, no feedback | beta += 0.1/hr | Drops to ~0.3 in 1 week |
+| 2 | Inactive >7 days | beta += 0.05/hr | Moderate erosion |
+| 3 | Inactive >30 days (stacking) | beta += 0.15/hr | Rapid decay |
+
+**Expanded Task Routing**
+
+- ~20 pattern groups (up from 8) with intent-first priority
+- Spanish language support (Argentine voseo: arreglá, investigá, desplegá...)
+- Word boundaries (`\b`) on English patterns to prevent false positives
+- New categories: fix/debug, refactor, config/setup
+
+**Autonomous Doc Maintenance**
+
+- Content hash tracking (SHA-256) per source file referenced in each doc
+- Nightly pipeline at 3am: Phase A (deep consolidation) → Phase B (doc auto-update)
+- LLM incremental update of stale docs with automatic version bump (1.0.0 → 1.0.1)
+- Git commit + push after updates
+- Session-start reports doc changes once (never repeated)
+
+**Unified LLM Provider**
+
+All daemon pipeline stages now use Kimi K2.5 via Moonshot API:
+- JUDGE, DISTILL, DISTILL-BATCH, CONSOLIDATE, doc-updater — single provider
+- Removed dependency on `claude` CLI subprocess for CONSOLIDATE
+
+**Pattern Cleanup**
+
+- One-time cleanup archived 699 garbage patterns (raw tool calls) + 109 name duplicates
+- Active patterns reduced from 1394 → 586, average confidence 0.50 → 0.67
+
+---
+
+### 2026-04-04
+
+**Quoth v3.2.0: Context Injection & Plugin System**
+
+- Project-specific context injection at session start (`quoth-plugin/context/{project}.md`)
+- 5 built-in skills: genesis, learn, patterns, quoth-help, quoth-init
+- `.claude-plugin/` manifest for Claude Code plugin system (hooks, commands, agents, MCP)
+- Cleanup legacy directories and obsolete migration scripts
+
+---
+
+## March 2026
+
+### 2026-03-31
+
+**Security Audit & Test Repairs**
+
+- Fixed all 8 security issues from Ruflo scan + deep agent audit
+- Repaired 23 broken tests across plugin and SaaS suites
+- Added 6 missing API routes
+- Fixed Vercel build issues
+
+---
+
 ## January 2026
 
 ### 2026-01-28

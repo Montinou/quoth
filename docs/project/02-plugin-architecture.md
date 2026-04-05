@@ -40,8 +40,16 @@ quoth-plugin/
 │       ├── graph.js             — PageRank, trigram generation, Jaccard similarity, edge building
 │       └── routing.js           — Task-to-agent routing engine (keyword patterns + alternatives)
 ├── agents/                      — Plugin agent definitions (quoth:learner)
+├── context/
+│   ├── project-summary.md       — Generic quoth project context (injected at SessionStart for quoth project)
+│   └── quoth.md                 — Project-specific context injected for the quoth repo
 ├── lib/                         — Shared utilities
-├── skills/                      — Extracted skills storage
+├── skills/                      — Built-in skill definitions (synced to skill-registry via setup.sh)
+│   ├── quoth-genesis/SKILL.md   — Deep codebase analyzer + docs generator
+│   ├── learn/SKILL.md           — Manual pattern consolidation trigger
+│   ├── patterns/SKILL.md        — Browse confidence-scored pattern library
+│   ├── quoth-help/SKILL.md      — Plugin documentation + troubleshooting
+│   └── quoth-init/SKILL.md      — Initialize project-local Quoth memory structure
 ├── scripts/
 │   └── setup.sh                 — Automated installation (symlinks, settings.json injection)
 ├── tests/
@@ -423,9 +431,9 @@ The setup script performs:
 
 1. Creates `~/.quoth/` directory structure (trajectories/, intelligence/, hooks/).
 2. Symlinks hook files from `quoth-plugin/hooks/` into `~/.quoth/hooks/`.
-3. Injects hook declarations into `~/.claude/settings.json` (creates backup first).
-4. Adds necessary permissions for the MCP server.
-5. Installs npm dependencies in `quoth-plugin/`.
+3. Injects hook declarations into `~/.claude/settings.json` (merges with existing hooks, never overwrites).
+4. Adds `Bash(node .quoth/*)` to `settings.json` permissions.allow.
+5. Syncs built-in skills from `quoth-plugin/skills/` to `~/projects/skill-registry` (if available, via `bun run sync:quoth`).
 
 The script is idempotent and safe to re-run.
 

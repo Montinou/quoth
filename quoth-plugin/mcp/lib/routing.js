@@ -13,23 +13,47 @@ const AGENT_CAPABILITIES = {
   devops: ['ci-cd', 'docker', 'deployment', 'infrastructure'],
 }
 
-const TASK_PATTERNS = {
-  'implement|create|build|add|write code': 'coder',
-  'test|spec|coverage|unit test|integration': 'tester',
-  'review|audit|check|validate|security': 'reviewer',
-  'research|find|search|documentation|explore': 'researcher',
-  'design|architect|structure|plan': 'architect',
-  'api|endpoint|server|backend|database': 'backend-dev',
-  'ui|frontend|component|react|css|style': 'frontend-dev',
-  'deploy|docker|ci|cd|pipeline|infrastructure': 'devops',
-}
+// Order matters: first match wins. Specific intent patterns before broad domain ones.
+// Use word boundaries (\b) on short/ambiguous keywords to avoid false positives.
+const TASK_PATTERNS = [
+  // Fix/debug — highest priority (explicit intent)
+  [/\b(?:fix|bug|debug|broken|crash|hotfix|patch)\b/i, 'coder'],
+  [/(?:arreglá|corregí|roto|crashea)/i, 'coder'],
+  // Refactor
+  [/\b(?:refactor|rename|extract|reorganize|cleanup|clean up|simplify)\b/i, 'coder'],
+  [/(?:refactoreá|renombrá|reorganizá|simplificá|limpiá)/i, 'coder'],
+  // Test
+  [/\b(?:test|spec|coverage|unit.?test|integration.?test|assert|mock|fixture|jest|vitest)\b/i, 'tester'],
+  [/(?:testea|probá|pruebas|test unitario)/i, 'tester'],
+  // Review/audit
+  [/\b(?:review|audit|security.?check|lint|inspect|validate)\b/i, 'reviewer'],
+  [/(?:revisá|auditá|chequeá|validá|seguridad)/i, 'reviewer'],
+  // Research/explore
+  [/\b(?:research|explore|investigate|look.?up|summarize|documentation)\b/i, 'researcher'],
+  [/(?:investigá|buscá|explorá|documentación|analizá|resumí)/i, 'researcher'],
+  // Design/architecture
+  [/\b(?:design|architect|blueprint|diagram|schema|model)\b/i, 'architect'],
+  [/(?:diseñá|arquitectura|planificá|diagrama|esquema)/i, 'architect'],
+  // Config/setup
+  [/\b(?:config(?:ure)?|setup|install|env(?:ironment)?|settings)\b/i, 'devops'],
+  [/(?:configurá|instalá|entorno|configuración)/i, 'devops'],
+  // Deploy/infra
+  [/\b(?:deploy|docker|ci.?cd|pipeline|infrastructure|vercel|nginx|systemd|cron)\b/i, 'devops'],
+  [/(?:desplegá|infraestructura|servidor)/i, 'devops'],
+  // Implement/create — broad coder intent
+  [/\b(?:implement|create|build|add|develop|scaffold|generate|write.?code|programá)\b/i, 'coder'],
+  [/(?:implementa|creá|construí|agregá|desarrollá|generá)/i, 'coder'],
+  // Domain: backend
+  [/\b(?:api|endpoint|backend|database|migration|postgres|sqlite|prisma|drizzle|query)\b/i, 'backend-dev'],
+  // Domain: frontend
+  [/\b(?:ui|frontend|component|react|css|style|layout|responsive|tailwind|shadcn)\b/i, 'frontend-dev'],
+]
 
 function routeTask(task) {
   const taskLower = task.toLowerCase()
-  for (const [pattern, agent] of Object.entries(TASK_PATTERNS)) {
-    const regex = new RegExp(pattern, 'i')
+  for (const [regex, agent] of TASK_PATTERNS) {
     if (regex.test(taskLower)) {
-      return { agent, confidence: 0.8, reason: `Matched pattern: ${pattern}` }
+      return { agent, confidence: 0.8, reason: `Matched pattern: ${regex.source}` }
     }
   }
   return { agent: 'coder', confidence: 0.5, reason: 'Default routing - no specific pattern matched' }

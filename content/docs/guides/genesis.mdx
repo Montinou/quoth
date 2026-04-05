@@ -59,12 +59,13 @@ Everything in standard, plus:
 
 ## Running Genesis
 
-Activate the architect persona and request Genesis:
+Run Genesis as a skill or ask Claude directly:
 
 ```
-/prompt quoth_architect
-"Run Genesis with comprehensive depth"
+/quoth:genesis
 ```
+
+Or: `"Run Genesis with comprehensive depth"`
 
 <Callout type="info">
   Genesis respects your `.gitignore` and won't document sensitive files like `.env` or `node_modules`.
@@ -72,24 +73,33 @@ Activate the architect persona and request Genesis:
 
 ## Updating Documentation
 
-Genesis creates initial documentation, but keeping it current is important. You have two options:
+Genesis creates initial documentation, but keeping it current is important. You have three options:
 
-### Incremental Updates
+### Automatic (Recommended)
 
-Use the documenter persona to update specific sections:
+The Quoth daemon automatically detects stale docs and updates them nightly:
+- Tracks content hashes (SHA-256) of every source file referenced in each doc
+- Compares hashes nightly — detects real content changes
+- Uses Kimi K2.5 to generate incremental updates to affected sections
+- Auto-bumps version (1.0.0 → 1.0.1), commits, and pushes to git
+- Reports changes at the next session start (once, never repeated)
+
+No manual intervention needed.
+
+### Manual Incremental Updates
+
+Re-run Genesis with `update_only` focus to refresh only changed sections:
 
 ```
-/prompt quoth_documenter
-"Update the API schemas documentation with the new /users endpoint"
+"Run Genesis with update_only focus to refresh documentation"
 ```
 
 ### Full Regeneration
 
-Run Genesis again with `update_only` focus:
+Re-run Genesis to rebuild all docs from scratch:
 
 ```
-/prompt quoth_architect
-"Run Genesis with update_only focus to refresh documentation"
+"Run Genesis to fully regenerate documentation"
 ```
 
 ## Best Practices

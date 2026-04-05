@@ -121,7 +121,26 @@ if (!settings.permissions.allow.includes('Bash(node .quoth/*)')) {
 }
 ```
 
-### Step 5: Idempotent Checks
+### Step 5: Sync Skills to skill-registry (v3.2.0)
+
+If `~/projects/skill-registry` exists and `bun` is available, the script syncs the plugin's built-in skills to the external skill-registry:
+
+```bash
+SKILL_REGISTRY="$HOME/projects/skill-registry"
+if [ -d "$SKILL_REGISTRY" ] && command -v bun &>/dev/null; then
+  (cd "$SKILL_REGISTRY" && QUOTH_SKILLS_DIR="$PLUGIN_DIR/skills" bun run sync:quoth 2>&1)
+fi
+```
+
+This step is non-blocking — if the sync fails or the registry is not found, setup continues with a warning. Skills live at `quoth-plugin/skills/` and include: `quoth-genesis`, `learn`, `patterns`, `quoth-help`, and `quoth-init`.
+
+To sync manually after setup:
+```bash
+cd ~/projects/skill-registry
+QUOTH_SKILLS_DIR=/path/to/quoth-plugin/skills bun run sync:quoth
+```
+
+### Idempotent Checks
 
 Each step checks for existing state before acting:
 
@@ -129,14 +148,15 @@ Each step checks for existing state before acting:
 - **Hook injection**: Greps for `hook-dispatch.js` in settings.json before injecting
 - **Permission**: Checks if `Bash(node .quoth/*)` string already exists in permissions array
 
-### Step 6: Output
+### Output
 
-Prints paths and instructions:
+Prints paths, skill count, and instructions:
 
 ```
 [quoth] Setup complete!
   Hooks: ~/.quoth/hooks/
   Settings: ~/.claude/settings.json
+  Skills: quoth-plugin/skills/ (5 skills)
 
   Start daemon: node quoth-plugin/daemon/daemon.js &
   Verify: node ~/.quoth/hooks/hook-dispatch.js stats

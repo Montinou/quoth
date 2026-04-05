@@ -87,6 +87,30 @@ async function readStdin() {
 
 const handlers = {
   'route': (prompt) => {
+    // Persist rolling prompt history for trajectory context enrichment.
+    // Keeps last 5 prompts so tool calls can reference nearby user intents + planning context.
+    try {
+      const historyFile = path.join(STATE_DIR, 'prompt-history.json')
+      if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true })
+      let history = []
+      try {
+        if (fs.existsSync(historyFile)) {
+          history = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+          // Reset if different session
+          const currentSession = process.env.CLAUDE_SESSION_ID || null
+          if (history.length > 0 && history[0].session !== currentSession) history = []
+        }
+      } catch { history = [] }
+      history.unshift({
+        prompt: (prompt || '').slice(0, 500),
+        timestamp: Date.now(),
+        session: process.env.CLAUDE_SESSION_ID || null
+      })
+      // Keep last 5
+      if (history.length > 5) history.length = 5
+      fs.writeFileSync(historyFile, JSON.stringify(history))
+    } catch {}
+
     const intel = getIntelligence()
     // Get intelligence context — lightweight graph lookup, no API calls
     const ctx = intel.getContext(prompt, 5)
@@ -149,6 +173,58 @@ const handlers = {
       console.log(`[INTELLIGENCE] Loaded ${result.nodes} patterns, ${result.edges} edges`)
     }
 
+    // Inject project summary context if available.
+    // Looks for: quoth-plugin/context/{project-name}.md, then project-summary.md as fallback.
+    // Also checks {CLAUDE_PROJECT_DIR}/.quoth-context.md for project-local context.
+    try {
+      const projectDir = process.env.CLAUDE_PROJECT_DIR || os.homedir()
+      const project = resolveProjectName(projectDir)
+      let contextInjected = false
+
+      // 1. Project-specific context in plugin: context/{project}.md
+      const projectContextPath = path.join(QUOTH_PLUGIN, 'context', `${project}.md`)
+      if (fs.existsSync(projectContextPath)) {
+        console.log(fs.readFileSync(projectContextPath, 'utf8'))
+        contextInjected = true
+      }
+
+      // 2. Fallback: generic project-summary.md (only for the quoth project itself)
+      if (!contextInjected) {
+        const fallbackPath = path.join(QUOTH_PLUGIN, 'context', 'project-summary.md')
+        if (fs.existsSync(fallbackPath) && project === 'quoth') {
+          console.log(fs.readFileSync(fallbackPath, 'utf8'))
+          contextInjected = true
+        }
+      }
+
+      // 3. Project-local context: {projectDir}/.quoth-context.md
+      const localContextPath = path.join(projectDir, '.quoth-context.md')
+      if (fs.existsSync(localContextPath)) {
+        console.log(fs.readFileSync(localContextPath, 'utf8'))
+      }
+    } catch {}
+
+    // Report doc auto-updates ONCE — track last-seen timestamp so updates aren't repeated
+    try {
+      const manifestPath = path.join(STATE_DIR, 'doc-manifest.json')
+      if (fs.existsSync(manifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+        const lastSeen = manifest.lastReportedAt || 0
+        const unseen = (manifest.recentUpdates || []).filter(u => u.timestamp > lastSeen)
+        if (unseen.length > 0) {
+          const lines = [`[Quoth] ${unseen.length} doc(s) auto-updated:`]
+          for (const u of unseen.slice(0, 5)) {
+            lines.push(`  - ${u.doc} → v${u.version}`)
+          }
+          if (unseen.length > 5) lines.push(`  ... and ${unseen.length - 5} more`)
+          console.log(lines.join('\n'))
+          // Mark as seen
+          manifest.lastReportedAt = Date.now()
+          fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+        }
+      }
+    } catch {}
+
     // Inject only high-confidence patterns as lightweight project context.
     // The agent can use quoth_search_patterns for on-demand semantic search.
     if (db) {
@@ -174,6 +250,80 @@ const handlers = {
     if (result.entries > 0) {
       console.log(`[INTELLIGENCE] Consolidated: ${result.entries} entries, ${result.edges} edges${result.newEntries > 0 ? `, ${result.newEntries} new` : ''}, PageRank recomputed`)
     }
+
+    // Write session summary to trajectory JSONL for downstream learning
+    try {
+      const sessionId = process.env.CLAUDE_SESSION_ID || null
+      const projectDir = process.env.CLAUDE_PROJECT_DIR || os.homedir()
+      const project = resolveProjectName(projectDir)
+      const date = new Date().toISOString().slice(0, 10)
+      const trajFile = path.join(QUOTH_HOME, 'trajectories', `${project}-${date}.jsonl`)
+
+      if (!fs.existsSync(trajFile)) return
+
+      // Read session's tool calls from today's trajectory file
+      const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
+      const sessionEntries = []
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line)
+          if (entry.session === sessionId && entry.event === 'tool_use') {
+            sessionEntries.push(entry)
+          }
+        } catch {}
+      }
+
+      if (sessionEntries.length === 0) return
+
+      // Build summary
+      const toolCounts = {}
+      const intents = new Set()
+      const reasonings = []
+      let successes = 0, failures = 0
+      for (const e of sessionEntries) {
+        toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1
+        if (e.outcome === 'success') successes++
+        else failures++
+        if (e.user_intent) intents.add(e.user_intent)
+        if (e.llm_reasoning) reasonings.push(e.llm_reasoning)
+      }
+
+      const toolSummary = Object.entries(toolCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([tool, count]) => `${tool}:${count}`)
+        .join(', ')
+
+      const uniqueIntents = [...intents].slice(0, 5)
+      // Keep unique reasoning snippets (deduped, last 10)
+      const uniqueReasonings = [...new Set(reasonings)].slice(-10)
+
+      const summary = {
+        event: 'session_summary',
+        agent: 'claude-code',
+        project,
+        session: sessionId,
+        task: `Session: ${sessionEntries.length} tool calls (${toolSummary}). ${successes} ok, ${failures} fail.`,
+        tool_counts: toolCounts,
+        total_calls: sessionEntries.length,
+        success_rate: sessionEntries.length > 0 ? successes / sessionEntries.length : 0,
+        user_intents: uniqueIntents,
+        llm_reasonings: uniqueReasonings,
+        outcome: failures === 0 ? 'success' : (successes > failures ? 'partial' : 'failure'),
+        source: 'session-end',
+        timestamp: Date.now()
+      }
+
+      fs.appendFileSync(trajFile, JSON.stringify(summary) + '\n')
+
+      // Signal daemon to process immediately (batch distill on session_summary)
+      try {
+        const pidFile = path.join(QUOTH_HOME, 'daemon.pid')
+        if (fs.existsSync(pidFile)) {
+          const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim())
+          process.kill(pid, 'SIGUSR1')
+        }
+      } catch {}
+    } catch {}
   },
 
   'post-edit': (hookInput) => {

@@ -1,198 +1,158 @@
 ---
 name: quoth-genesis
-description: Bootstrap Quoth documentation from codebase. Phase 0 configures memory settings, then generates documentation at chosen depth level.
+description: Deep codebase analyzer that generates comprehensive technical documentation. Reads every source file and produces numbered markdown docs covering architecture, subsystems, APIs, schemas, and configuration.
 ---
 
-# Quoth Genesis v3.0
+# Quoth Genesis — Documentation Generator
 
-Generates comprehensive documentation from your codebase with configurable depth.
+Analyzes the entire project codebase and generates a complete set of technical documentation as numbered markdown files in `docs/project/`.
 
-## Prerequisites
+## When to Use
 
-- Quoth cloud MCP must be connected (`claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp`)
-- Project should be initialized (`/quoth-init` or existing `.quoth/config.json`)
+- Bootstrapping documentation for a new or undocumented project
+- After major architectural changes that invalidate existing docs
+- Onboarding: generate docs for a codebase you're new to
+- Re-running to update docs incrementally after codebase evolution
 
-## Phase 0: Configuration Check
+## Phase 1: Discovery
 
-First, check if `.quoth/config.json` exists:
+Explore the project structure to build a documentation plan.
 
-```bash
-ls -la .quoth/config.json 2>/dev/null || echo "Not initialized"
-```
+1. **List all source files** (exclude node_modules, .next, build artifacts, test fixtures):
+   ```bash
+   find . -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.mjs' -o -name '*.py' -o -name '*.json' \) | grep -v node_modules | grep -v .next | grep -v dist | sort
+   ```
 
-**If not initialized:** Run `/quoth-init` first to configure:
-- Strictness level (blocking/reminder/off)
-- Knowledge types (decisions, patterns, errors, knowledge, selectors, api)
-- Documentation gates (require_reasoning_before_edit, require_quoth_search)
+2. **Read entry points**: package.json, CLAUDE.md, README.md, main index files, server entry points
 
-**If already initialized:** Proceed to Phase 1.
+3. **Identify subsystems**: Map directories to their purpose. Each major directory or cohesive module becomes a documentation topic.
 
-## Phase 1: Choose Depth
+4. **Check existing docs**: If `docs/project/` already exists, read them to understand what's documented and what needs updating.
 
-Ask the user to select documentation depth:
+5. **Create documentation plan**: A numbered list of XX-topic.md files to generate, targeting 10-20 docs depending on project complexity.
 
-| Depth | Documents | Time | Use Case |
-|-------|-----------|------|----------|
-| **minimal** | 3 | ~3 min | Quick overview, basic context |
-| **standard** | 5 | ~7 min | Team onboarding, regular development |
-| **comprehensive** | 11 | ~20 min | Enterprise audit, full documentation |
+## Phase 2: Deep Analysis & Generation
 
-### Document Coverage by Depth
+For each planned doc, systematically:
 
-**Minimal (3 docs):**
-- project-overview.md
-- tech-stack.md
-- repo-structure.md
+1. **Read ALL relevant source files** — not just the main file, follow imports, check related files
+2. **Extract**: schemas, types, function signatures, config values, constants, algorithms, error handling
+3. **Write** the markdown doc following the format below
 
-**Standard (5 docs):**
-- All minimal docs +
-- coding-conventions.md
-- testing-patterns.md
+### Document Format
 
-**Comprehensive (11 docs):**
-- All standard docs +
-- api-schemas.md
-- database-models.md
-- shared-types.md
-- error-handling.md
-- security-patterns.md
-- tech-debt.md
-
-## Phase 2-5: Documentation Generation
-
-Use the `quoth_genesis` tool with the selected depth:
-
-```
-quoth_genesis({ depth: "standard" })
-```
-
-The tool handles:
-- Reading local files using native file access
-- Analyzing codebase structure and patterns
-- Generating documentation with YAML frontmatter
-- Uploading to Quoth incrementally (not batched)
-- Automatic versioning via database triggers
-
-### Genesis Phases
-
-- **Phase 1: Foundation** (all depths) - `project-overview.md`, `tech-stack.md`
-- **Phase 2: Architecture** (all depths) - `repo-structure.md`
-- **Phase 3: Patterns** (standard+) - `coding-conventions.md`, `testing-patterns.md`
-- **Phase 4: Contracts** (comprehensive) - `api-schemas.md`, `database-models.md`, `shared-types.md`
-- **Phase 5: Advanced** (comprehensive) - `error-handling.md`, `security-patterns.md`, `tech-debt.md`
-
-## Phase 6: Local Integration
-
-After Genesis completes, synchronize local `.quoth/*.md` files with discovered patterns:
-
-### 1. Update patterns.md
-
-Extract coding patterns discovered during genesis and add to `.quoth/patterns.md`:
+Each doc must follow this structure:
 
 ```markdown
-## Pattern Name
+# Topic Title
 
-**When to use:** Context from genesis analysis
+Introductory paragraph explaining what this subsystem does, where it lives, why it exists.
 
-**Example:**
-```language
-code example from codebase
+Source files:
+- `path/to/main-file.ts` -- primary implementation
+- `path/to/related.ts` -- supporting module
+
+## Section Title
+
+Detailed documentation with:
+- Tables for schemas, APIs, configuration, enums, mappings
+- Code blocks for key data structures (types, interfaces, SQL)
+- Exact values: default values, timeouts, limits, column types
+- Source attribution: which file contains what
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| id     | TEXT | --      | Primary key |
+
+## Another Section
+
+Continue documenting...
+
+---
+
+Cross-references to related docs: [Related Topic](./XX-related.md)
 ```
 
-**Anti-pattern:** What to avoid
-```
+### What to Extract Per Subsystem
 
-### 2. Update decisions.md
+| Aspect | What to Document |
+|--------|-----------------|
+| **Purpose** | What does it do, why does it exist |
+| **Source files** | Exact paths to implementation files |
+| **Data model** | DB schemas, types, interfaces with column details |
+| **API surface** | Endpoints, functions, tools, commands with params |
+| **Configuration** | Env vars with defaults, options, feature flags |
+| **Algorithms** | Key logic: scoring, matching, processing flows |
+| **Error handling** | How failures are managed, fallbacks |
+| **Dependencies** | What does this subsystem import/require |
 
-Document any architectural decisions discovered:
+### Quality Rules
+
+- **100-400 lines per doc** — not too sparse, not bloated
+- **Tables over prose** for structured data (schemas, APIs, config)
+- **No filler** — every sentence should add information
+- **Exact values** — include actual defaults, timeouts, thresholds from the source code
+- **Source references** — always name which file(s) contain the documented code
+
+## Phase 3: README Index
+
+After all docs are generated, create `docs/project/README.md`:
 
 ```markdown
-## [YYYY-MM-DD] Decision Title
+# Project Name — Technical Documentation
 
-**Context:** Why this architecture was chosen
+> Version X.Y.Z | Last updated: YYYY-MM-DD
 
-**Decision:** The approach used
+One-paragraph project description.
 
-**Consequences:** Trade-offs and implications
+## Table of Contents
+
+### Category Name
+
+| Document | Description |
+|----------|-------------|
+| [01 — Title](./01-title.md) | One-line description |
+| [02 — Title](./02-title.md) | One-line description |
+
+### Another Category
+
+...
+
+## Quick Links
+
+- **Entry point:** `path/to/main.ts`
+- **Config:** `path/to/config`
+- **Tests:** `path/to/tests/`
 ```
 
-### 3. Update knowledge.md
+## Phase 4: Context File (Optional)
 
-Add general project context discovered:
+If the project uses Quoth, also generate a condensed `quoth-plugin/context/{project}.md` or `.quoth-context.md` in the project root. This file (under 100 lines) contains the essential architecture, subsystem map, and key technical details for session-start injection.
 
-```markdown
-## Project Context
+## Output Rules
 
-- Tech stack summary
-- Key dependencies
-- Development patterns
-```
+- Write all docs to `docs/project/`
+- Sequential numbering: `01-`, `02-`, etc. (zero-padded)
+- Kebab-case filenames: `XX-kebab-case-topic.md`
+- If docs exist, read them first, then update/replace as needed
+- Do NOT document node_modules, .next, build output, or test fixtures
+- Do NOT copy file contents verbatim — extract meaningful information
+- Use relative links between docs (`./XX-other.md`)
 
-## Output
+## Parallelization
 
-Upon completion, display summary:
+For large projects, spawn sub-agents to work in parallel:
+- One agent for frontend/UI documentation
+- One agent for backend/API documentation
+- One agent for database/schema documentation
 
-```
-Genesis Complete!
-
-Remote (Quoth):
-- project-overview.md
-- tech-stack.md
-- repo-structure.md
-- coding-conventions.md (standard+)
-- testing-patterns.md (standard+)
-- api-schemas.md (comprehensive)
-- database-models.md (comprehensive)
-- shared-types.md (comprehensive)
-- error-handling.md (comprehensive)
-- security-patterns.md (comprehensive)
-- tech-debt.md (comprehensive)
-
-Local (.quoth/):
-- patterns.md - Updated with discovered patterns
-- decisions.md - Updated with architectural decisions
-- knowledge.md - Updated with project context
-
-Your project is now ready for AI Memory!
-
-Next steps:
-1. Review generated documentation in Quoth dashboard
-2. Start coding - hooks will enforce documentation as configured
-3. Use /quoth:patterns to view learned patterns
-```
-
-## Usage
-
-```
-/quoth-genesis
-```
+Give each sub-agent explicit file lists and doc assignments.
 
 ## Re-running Genesis
 
-Running Genesis again will:
-1. Compare existing documentation with codebase
-2. Update changed documents (incremental re-indexing)
-3. Skip unchanged content (~90% token savings)
-4. Preserve version history automatically
-
-## Troubleshooting
-
-### "Quoth MCP not connected"
-
-Run:
-```bash
-claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
-```
-
-### "Project not initialized"
-
-Run `/quoth-init` first to create `.quoth/config.json` with your preferences.
-
-### "Genesis tool not available"
-
-Verify Quoth MCP connection:
-```bash
-claude mcp list
-```
-
-Should show `quoth` in the list. If not, re-add the cloud MCP server.
+When running on a project that already has `docs/project/`:
+1. Read existing docs to see what's there
+2. Compare with current codebase
+3. Update changed docs, add new ones for new subsystems
+4. Remove docs for deleted subsystems
+5. Update README.md index

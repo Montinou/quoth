@@ -149,6 +149,10 @@ The `createDb()` factory attaches all data access methods directly to the better
 
 ### Pattern Operations
 
+**`findDuplicateByName(name, threshold)`** -- Scan active patterns for a name-prefix match. Normalizes both names (lowercase, strip non-alphanumeric, trim), then checks if they share >= `threshold` (default 0.8) of characters as a common prefix. Returns the first match (highest confidence) or `null`. Scans top 200 patterns by confidence.
+
+**`findDuplicateByEmbedding(embedding, threshold)`** -- Search HNSW index for a vector with cosine similarity >= `threshold` (default 0.92). Returns the matching pattern row with `_similarity` score, or `null`. Requires HNSW to be healthy and non-empty.
+
 **`upsertPattern(p)`** -- Insert a new pattern or update an existing one. Uses `INSERT ... ON CONFLICT(id) DO UPDATE`. If the pattern includes an embedding and HNSW is healthy, the vector is also added to the in-memory HNSW index. Embedding on conflict uses `COALESCE(excluded.embedding, patterns.embedding)` to preserve existing embeddings when not explicitly overwritten.
 
 **`getPattern(id)`** -- Single pattern lookup by ID. Returns the row with `tags` parsed from JSON string to array, or `null` if not found.
@@ -174,11 +178,15 @@ The `createDb()` factory attaches all data access methods directly to the better
 - **Failure:** `beta += 1`, `confidence = alpha / (alpha + beta + 1)`
 - Both paths update `last_matched_at` and the corresponding count.
 
-**`applyHourlyDecay()`** -- Called by the daemon on a schedule. Two operations:
-1. **Alpha decay:** For all active patterns, reduce alpha by `decay_rate * alpha * 0.01` with floor at 0.1. Recomputes confidence from the new alpha/beta ratio.
-2. **Inactivity penalty:** Patterns not matched in >7 days get `beta += 0.02`, which naturally lowers confidence via the Bayesian formula.
+**`applyHourlyDecay()`** -- Called by the daemon on a schedule. Four operations:
+1. **Alpha decay:** For all active patterns, reduce alpha by `decay_rate * alpha * 0.01` with floor at 0.1. Confidence floor at 0.05.
+2. **Tier 1 — Never matched:** Patterns with `last_matched_at IS NULL` and zero feedback get `beta += 0.1` (aggressive — drops to ~0.3 in a week).
+3. **Tier 2 — Inactive >7 days:** Patterns matched before but idle >7 days get `beta += 0.05` (moderate).
+4. **Tier 3 — Inactive >30 days:** All patterns idle >30 days get `beta += 0.15` (strong, stacks with Tier 1 or 2).
 
-**`archiveWeakPatterns()`** -- Set `status = 'archived'` for patterns where `confidence < 0.1` AND total uses (success + failure) > 5. Prevents low-quality patterns from polluting results while preserving new, untested ones.
+**`archiveWeakPatterns()`** -- Two rules:
+1. Set `status = 'archived'` for patterns where `confidence < 0.1` AND total uses > 3 (evidence-based archival).
+2. Archive raw tool-call patterns (`name LIKE 'claude-code: Bash %'` etc.) with `confidence < 0.15` and zero feedback (garbage cleanup).
 
 **`getPromotionCandidates()`** -- Find patterns eligible for cloud promotion: `confidence > 0.8`, total uses > 10, `status = 'active'`, `source = 'distilled'`.
 
