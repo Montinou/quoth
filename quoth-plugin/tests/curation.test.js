@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { isGenericName, distinctivenessScore, buildCommonTokens, passesQualityGate, backfillDistinctiveness, findNearDuplicates, cosineSim } from '../daemon/lib/curation.js'
+import { isGenericName, distinctivenessScore, buildCommonTokens, passesQualityGate, backfillDistinctiveness, findNearDuplicates, cosineSim, retirePoorPatterns } from '../daemon/lib/curation.js'
 import { createDb } from '../daemon/db.js'
 import fs from 'fs'
 
@@ -93,6 +93,23 @@ describe('findNearDuplicates', () => {
     expect(dups[0].keep).toBe('a')  // higher confidence wins
     expect(dups[0].archive).toBe('b')
     fs.unlinkSync(tmpDup)
+  })
+})
+
+describe('retirePoorPatterns', () => {
+  const tmpRet = `/tmp/quoth-retire-${Date.now()}.db`
+  it('retires patterns with low CI upper after many attempts', () => {
+    const db = createDb(tmpRet)
+    db.prepare("INSERT INTO patterns (id, name, condition, action, alpha, beta, confidence, status, namespace) VALUES ('p1','bad pattern very long name','c','act',1,100,0.01,'active','test')").run()
+    db.prepare("INSERT INTO patterns (id, name, condition, action, alpha, beta, confidence, status, namespace) VALUES ('p2','good pattern very long name','c','act',50,5,0.91,'active','test')").run()
+    const n = retirePoorPatterns(db, { ciUpperThreshold: 0.2, stalenessDays: 365, minAttempts: 20 })
+    expect(n).toBe(1)
+    const r1 = db.prepare("SELECT status, retired_reason FROM patterns WHERE id='p1'").get()
+    const r2 = db.prepare("SELECT status FROM patterns WHERE id='p2'").get()
+    expect(r1.status).toBe('archived')
+    expect(r1.retired_reason).toBe('low-ci-upper')
+    expect(r2.status).toBe('active')
+    fs.unlinkSync(tmpRet)
   })
 })
 

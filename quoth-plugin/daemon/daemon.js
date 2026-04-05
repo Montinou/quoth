@@ -507,6 +507,25 @@ async function runNightlyPipeline() {
     } catch (err) { log('error', 'Nightly Phase F (judge) failed', { error: err.message }) }
   }
 
+  // Phase G: V2 curation (quality gates, dedup, retirement) — flagged + weekly gate
+  if (require('./lib/flags.js').isSubFlag('curation')) {
+    try {
+      const { backfillDistinctiveness, findNearDuplicates, enqueueDedupPairs, retirePoorPatterns } = require('./lib/curation.js')
+      const n = backfillDistinctiveness(db)
+      log('info', 'Distinctiveness recomputed', { patterns: n })
+      // Weekly: dedup + retirement (Sunday UTC)
+      if (new Date().getUTCDay() === 0) {
+        const dups = findNearDuplicates(db, 0.92)
+        if (dups.length > 0) {
+          const enq = enqueueDedupPairs(db, dups)
+          log('info', 'Dedup pairs enqueued', { pairs: enq })
+        }
+        const retired = retirePoorPatterns(db)
+        log('info', 'Weekly retirement', { retired })
+      }
+    } catch (err) { log('error', 'Nightly Phase G (curation) failed', { error: err.message }) }
+  }
+
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
 }
 

@@ -132,7 +132,41 @@ function enqueueDedupPairs(db, pairs) {
   return enqueued
 }
 
+/**
+ * Retire patterns with poor performance or staleness.
+ * Uses Beta credible interval upper bound from judge.js.
+ */
+function retirePoorPatterns(db, opts = {}) {
+  const { ciUpperThreshold = 0.4, stalenessDays = 90, minAttempts = 20 } = opts
+  const { betaCredibleInterval } = require('./judge.js')
+  const rows = db.prepare(`
+    SELECT id, alpha, beta, last_matched_at, created_at FROM patterns
+    WHERE status='active' AND retired_at IS NULL
+  `).all()
+  const now = Date.now()
+  const staleCutoff = stalenessDays * 24 * 60 * 60 * 1000
+  let retired = 0
+  const tx = db.transaction(() => {
+    for (const p of rows) {
+      const attempts = Math.round(Math.max(0, (p.alpha - 1)) + Math.max(0, (p.beta - 1)))
+      const { upper } = betaCredibleInterval(p.alpha, p.beta)
+      let reason = null
+      if (attempts >= minAttempts && upper < ciUpperThreshold) reason = 'low-ci-upper'
+      else if ((now - (p.last_matched_at || p.created_at || now)) > staleCutoff) reason = `stale-${stalenessDays}d`
+      if (reason) {
+        db.prepare(`
+          UPDATE patterns SET status='archived', retired_at=?, retired_reason=? WHERE id=?
+        `).run(now, reason, p.id)
+        retired++
+      }
+    }
+  })
+  tx()
+  return retired
+}
+
 module.exports = {
   GENERIC_PATTERNS, isGenericName, distinctivenessScore, buildCommonTokens,
   passesQualityGate, backfillDistinctiveness, findNearDuplicates, enqueueDedupPairs, cosineSim,
+  retirePoorPatterns,
 }
