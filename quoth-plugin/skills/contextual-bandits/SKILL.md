@@ -56,6 +56,36 @@ function sampleBeta(α, β) {
 }
 ```
 
+## Exploration (10% random slot)
+
+**Why:** without exploration, the system converges on whatever was initially popular. Exploration creates clean counterfactual data for unbiased SNIPS updates.
+
+**Mechanism:** with probability ε=0.10, replace one of the K=3 ranked slots with a uniformly random candidate from the pool (excluding already-selected).
+
+```
+IF random() < ε:
+  slot = random(0, K-1)
+  replacement = uniform_random_from(pool - selected)
+  selected[slot] = replacement        # mark is_exploration=true
+  propensity = ε / |available|
+```
+
+**Why this matters for SNIPS:** without exploration, the probability of a random item being picked approaches 0, making SNIPS weights (1/θ) unbounded. Exploration guarantees `θ_i ≥ ε / pool_size`, capping SNIPS weights at `pool_size / ε` ≈ 100-1000.
+
+## Pitfalls of exploration
+- **Too high rate (ε > 0.2)** — user experience suffers from irrelevant injections
+- **Too low rate (ε < 0.02)** — counterfactual data too sparse for reliable SNIPS
+- **Forgetting to mark exploration** — propensity miscomputed → SNIPS biased
+- **Drawing from wrong pool** — must exclude already-selected to avoid duplicates
+
+## Propensity logging
+At injection time, persist per-slot:
+```sql
+INSERT INTO injection_log (session_id, pattern_id, cluster_id, rank, propensity, is_exploration, query_text, injected_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, now)
+```
+Critical for offline SNIPS evaluation — DO NOT drop this log.
+
 ## Papers
 - Hong, Riquelme, Oh, Kveton. *Hierarchical Bayesian Bandits*, 2022
 - Agrawal & Goyal. *Thompson Sampling for Contextual Bandits*, ICML 2013
