@@ -175,7 +175,7 @@ const handlers = {
     console.log(output.join('\n'))
   },
 
-  'session-restore': () => {
+  'session-restore': async () => {
     const intel = getIntelligence()
     const db = getDb()
 
@@ -237,13 +237,13 @@ const handlers = {
       }
     } catch {}
 
-    // Context-aware semantic injection via Thompson + trigram
+    // Context-aware semantic injection
     if (db) {
       try {
         const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-        const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
         const { recordExposure } = require('../daemon/lib/scoring.js')
         const { createSessionMemory } = require('./session-memory.js')
+        const { isSubFlag } = require('../daemon/lib/flags.js')
 
         // Load last session's context snapshot for query
         let queryText = ''
@@ -256,25 +256,69 @@ const handlers = {
           ].filter(Boolean).join(' ')
         } catch {}
 
-        const patterns = rankByThompsonAndTrigram(db, project, queryText, 3, {
-          minConfidence: 0.3,
-          excludeRecentMinutes: 5,
-        })
+        let patterns
+        const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+
+        if (isSubFlag('injection')) {
+          // V2 path: Hierarchical Thompson + exploration + propensity logging
+          const { hierarchicalSelect } = require('../daemon/lib/bandit-v2.js')
+          const { replaceWithExploration, EXPLORATION_RATE } = require('../daemon/lib/propensity.js')
+
+          // Query embedding from last-context (or null → cosine weight will be 0.5 default)
+          let queryEmbedding = null
+          try {
+            const { generateEmbedding } = require('../daemon/lib/embed.js')
+            if (queryText && generateEmbedding) queryEmbedding = await generateEmbedding(queryText)
+          } catch {}
+
+          const candidates = queryEmbedding
+            ? (db.searchBySimilarity(queryEmbedding, 20, []) || [])
+            : db.getProjectPatterns(project, 20)
+
+          const clusterMap = new Map()
+          for (const c of candidates) {
+            if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
+              const stats = db.getClusterStats(c.cluster_id)
+              if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
+            }
+          }
+
+          let selected = hierarchicalSelect(candidates, clusterMap, 3, queryEmbedding)
+          if (isSubFlag('exploration')) selected = replaceWithExploration(selected, candidates, EXPLORATION_RATE)
+
+          for (const s of selected) {
+            db.logInjection({
+              session_id: sessionId, namespace: project, pattern_id: s.id,
+              cluster_id: s.cluster_id, rank: s.rank, propensity: s.propensity,
+              is_exploration: !!s.is_exploration, query_text: queryText,
+            })
+          }
+          patterns = selected
+        } else {
+          // V1 path: Thompson + trigram
+          const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+          patterns = rankByThompsonAndTrigram(db, project, queryText, 3, {
+            minConfidence: 0.3,
+            excludeRecentMinutes: 5,
+          })
+        }
 
         if (patterns.length > 0) {
           recordExposure(db, patterns.map(p => p.id))
 
           // Track injection in session memory for feedback loop
-          const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
           const sm = createSessionMemory({
             dir: path.join(QUOTH_HOME, 'intelligence'),
             sessionId, project,
           })
           sm.recordInjection(patterns.map(p => p.id))
 
-          const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
+          const version = isSubFlag('injection') ? 'v2' : 'v1'
+          const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}" (${version}):`]
           for (const p of patterns) {
-            lines.push(`- [${p.confidence.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
+            const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
+            const tag = p.is_exploration ? ' [exp]' : ''
+            lines.push(`- [${conf.toFixed(2)}${tag}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
           }
           console.log(lines.join('\n'))
         }
