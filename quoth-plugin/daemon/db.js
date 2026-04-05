@@ -238,9 +238,9 @@ function createDb(dbPath) {
   db.upsertPattern = function(p) {
     db.prepare(`
       INSERT INTO patterns (id, name, pattern_type, condition, action, description,
-        confidence, tags, source, status, embedding)
+        confidence, tags, source, status, embedding, namespace)
       VALUES (@id, @name, @pattern_type, @condition, @action, @description,
-        @confidence, @tags, @source, @status, @embedding)
+        @confidence, @tags, @source, @status, @embedding, @namespace)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         condition = excluded.condition,
@@ -250,6 +250,7 @@ function createDb(dbPath) {
         tags = excluded.tags,
         source = excluded.source,
         embedding = COALESCE(excluded.embedding, patterns.embedding),
+        namespace = excluded.namespace,
         updated_at = strftime('%s','now') * 1000
     `).run({
       id: p.id,
@@ -262,7 +263,8 @@ function createDb(dbPath) {
       tags: JSON.stringify(p.tags || []),
       source: p.source || 'distilled',
       status: p.status || 'active',
-      embedding: p.embedding || null
+      embedding: p.embedding || null,
+      namespace: p.namespace || 'default'
     })
 
     if (p.embedding && hnswHealthy) {
