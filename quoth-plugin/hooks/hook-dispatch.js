@@ -511,9 +511,9 @@ const handlers = {
     const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
 
-    const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
     const { recordExposure } = require('../daemon/lib/scoring.js')
     const { createSessionMemory } = require('./session-memory.js')
+    const { isSubFlag } = require('../daemon/lib/flags.js')
 
     const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
     const sm = createSessionMemory({
@@ -525,10 +525,49 @@ const handlers = {
     const taskText = hookInput.prompt || hookInput.description || ''
     const queryText = sm.getQueryText([taskText, agentType].filter(Boolean).join(' '))
 
-    const scored = rankByThompsonAndTrigram(db, project, queryText, 5, {
-      minConfidence: 0.3,
-      excludeRecentMinutes: 2,
-    })
+    let scored
+    if (isSubFlag('injection')) {
+      // V2 path: Hierarchical Thompson + exploration
+      const { hierarchicalSelect } = require('../daemon/lib/bandit-v2.js')
+      const { replaceWithExploration, EXPLORATION_RATE } = require('../daemon/lib/propensity.js')
+
+      let queryEmbedding = null
+      try {
+        const { generateEmbedding } = require('../daemon/lib/embed.js')
+        if (queryText && generateEmbedding) queryEmbedding = await generateEmbedding(queryText)
+      } catch {}
+
+      const candidates = queryEmbedding
+        ? (db.searchBySimilarity(queryEmbedding, 20, []) || [])
+        : db.getProjectPatterns(project, 20)
+
+      const clusterMap = new Map()
+      for (const c of candidates) {
+        if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
+          const stats = db.getClusterStats(c.cluster_id)
+          if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
+        }
+      }
+
+      let selected = hierarchicalSelect(candidates, clusterMap, 5, queryEmbedding)
+      if (isSubFlag('exploration')) selected = replaceWithExploration(selected, candidates, EXPLORATION_RATE)
+
+      for (const s of selected) {
+        db.logInjection({
+          session_id: sessionId, namespace: project, pattern_id: s.id,
+          cluster_id: s.cluster_id, rank: s.rank, propensity: s.propensity,
+          is_exploration: !!s.is_exploration, query_text: queryText,
+        })
+      }
+      scored = selected
+    } else {
+      // V1 path
+      const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+      scored = rankByThompsonAndTrigram(db, project, queryText, 5, {
+        minConfidence: 0.3,
+        excludeRecentMinutes: 2,
+      })
+    }
 
     if (scored.length === 0) return
 
@@ -536,12 +575,15 @@ const handlers = {
     sm.recordInjection(scored.map(p => p.id))
 
     // Output as additionalContext for the subagent
-    const context = scored.map(p =>
-      `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
-    ).join('\n')
+    const context = scored.map(p => {
+      const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
+      const tag = p.is_exploration ? ' [exp]' : ''
+      return `- [${conf.toFixed(2)}${tag}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
+    }).join('\n')
 
+    const version = isSubFlag('injection') ? 'v2' : 'v1'
     const output = {
-      additionalContext: `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
+      additionalContext: `[Quoth ${version}] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
     }
     // Claude Code reads JSON from stdout for SubagentStart hooks
     console.log(JSON.stringify(output))
