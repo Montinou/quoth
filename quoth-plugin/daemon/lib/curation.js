@@ -19,7 +19,8 @@ const GENERIC_PATTERNS = [
 ]
 
 function isGenericName(name) {
-  if (!name || name.length < 25) return true
+  // Length is checked separately by passesQualityGate; this only tests name pattern.
+  if (!name) return true
   return GENERIC_PATTERNS.some(re => re.test(name))
 }
 

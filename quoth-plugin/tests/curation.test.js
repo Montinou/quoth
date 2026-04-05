@@ -16,10 +16,15 @@ describe('isGenericName', () => {
     expect(isGenericName('Use Drizzle ANY() syntax for Postgres UUID arrays')).toBe(false)
     expect(isGenericName('Implement SNIPS estimator with weight clipping at 10x')).toBe(false)
   })
-  it('flags short names', () => {
-    expect(isGenericName('short')).toBe(true)
+  it('flags null/empty names', () => {
     expect(isGenericName('')).toBe(true)
     expect(isGenericName(null)).toBe(true)
+  })
+  it('does NOT check length (that is passesQualityGate\'s job)', () => {
+    // A short name that is NOT a generic pattern should pass the isGenericName check
+    expect(isGenericName('specific DB query')).toBe(false)
+    // Length is caught by passesQualityGate instead
+    expect(passesQualityGate({ name: 'specific DB query' }).reasons).toContain('name-too-short')
   })
 })
 

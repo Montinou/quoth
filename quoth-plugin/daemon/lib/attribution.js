@@ -39,8 +39,11 @@ function extractSessionSignals(events) {
     let m
     while ((m = FILE_RE.exec(task)) !== null) files.add(m[1])
     if (e.tool === 'Bash') {
-      const first = (task.split(/\s+/).find(w => w !== 'Bash' && w) || '').replace(/[^\w-]/g, '')
-      if (first) commands.add(first)
+      // Extract the base command name, handling paths like /usr/bin/npm → "npm"
+      const token = task.split(/\s+/).find(w => w && w !== 'Bash') || ''
+      const withoutPath = token.split('/').pop() || ''
+      const cleaned = withoutPath.replace(/[^\w.-]/g, '')
+      if (cleaned) commands.add(cleaned)
     }
   }
   return { tools: [...tools], files: [...files], commands: [...commands] }

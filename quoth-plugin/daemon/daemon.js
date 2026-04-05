@@ -236,6 +236,10 @@ async function processEntry({ entry, filePath, line }) {
     }
 
     const distilled = await distill(entry)
+    if (!distilled) {
+      log('warn', 'Distill failed — skipping trajectory entry', { agent: entry.agent, task: (entry.task || '').slice(0, 60) })
+      return
+    }
     const similarTags = distilled.tags.length > 0 ? distilled.tags : []
     const similarPatterns = distilled.embedding
       ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
@@ -602,8 +606,17 @@ async function runJudgeBatch() {
       continue
     }
     const { prompt, positionMap } = buildPairwisePrompt(item.trajectory_summary || '', a, b)
-    const raw = await callJudge(prompt)
+    let raw
+    try {
+      raw = await callJudge(prompt)
+    } catch (e) {
+      log('error', 'Judge LLM call failed', { itemId: item.id, error: e.message })
+      db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
+      failed++
+      continue
+    }
     if (!raw) {
+      log('warn', 'Judge returned empty response', { itemId: item.id })
       db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
       failed++
       continue

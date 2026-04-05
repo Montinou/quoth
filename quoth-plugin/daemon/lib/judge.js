@@ -97,47 +97,22 @@ function parseJudgeVerdict(raw, positionMap) {
 }
 
 /**
- * Call LLM judge for pairwise verdict.
- * Backend selection via QUOTH_JUDGE_MODEL env var:
- *   - "gateway" (default if AI_GATEWAY_API_KEY set): via Vercel AI Gateway (~2-3s/call)
- *     model defaults to google/gemini-2.5-flash-lite, overridable with QUOTH_LLM_MODEL
- *   - "haiku": Haiku 4.5 via `claude -p` CLI (~15s/call)
- * Returns raw answer string or null on error/timeout.
+ * Call LLM judge for pairwise verdict via Vercel AI Gateway.
+ * Default model: google/gemini-2.5-flash-lite (overridable with QUOTH_LLM_MODEL).
+ *
+ * No fallbacks: if the gateway call fails, this throws. Callers must handle
+ * the failure explicitly instead of silently degrading to a heuristic verdict.
+ *
+ * @throws Error when AI_GATEWAY_API_KEY is unset or the gateway call fails.
  */
-async function callJudge(prompt, timeoutMs = 45000) {
-  const explicit = (process.env.QUOTH_JUDGE_MODEL || '').toLowerCase()
-  const hasGateway = !!process.env.AI_GATEWAY_API_KEY
-  const useGateway = explicit === 'gateway' || explicit === 'kimi' ||
-    (explicit !== 'haiku' && hasGateway)
-
-  if (useGateway) {
-    try {
-      const { callLLM } = require('./llm.js')
-      const out = await callLLM(prompt, 10)
-      return out ? out.trim() : null
-    } catch (e) {
-      if (explicit === 'gateway' || explicit === 'kimi') return null  // explicit → no fallback
-      // Fall through to Haiku
-    }
+async function callJudge(prompt) {
+  if (!process.env.AI_GATEWAY_API_KEY) {
+    throw new Error('AI_GATEWAY_API_KEY is not set — judge cannot run')
   }
-
-  // Haiku via Claude CLI
-  const { spawn } = require('child_process')
-  return new Promise((resolve) => {
-    const child = spawn('claude', ['-p', '--model', 'haiku', '--disable-slash-commands'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    let stdout = '', done = false
-    const timer = setTimeout(() => { if (!done) { child.kill('SIGTERM'); resolve(null) } }, timeoutMs)
-    child.stdout.on('data', d => { stdout += d.toString() })
-    child.on('exit', code => {
-      done = true; clearTimeout(timer)
-      if (code === 0 && stdout) resolve(stdout.trim())
-      else resolve(null)
-    })
-    child.on('error', () => { done = true; clearTimeout(timer); resolve(null) })
-    child.stdin.write(prompt); child.stdin.end()
-  })
+  const { callLLM } = require('./llm.js')
+  const out = await callLLM(prompt, 10)
+  if (!out) throw new Error('LLM returned empty response')
+  return out.trim()
 }
 
 module.exports = {

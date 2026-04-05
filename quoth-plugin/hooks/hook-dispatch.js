@@ -269,7 +269,9 @@ const handlers = {
           try {
             const { generateEmbedding } = require('../daemon/lib/embed.js')
             if (queryText && generateEmbedding) queryEmbedding = await generateEmbedding(queryText)
-          } catch {}
+          } catch (e) {
+            console.error('[quoth-v2 session-restore] embedding failed:', e.message)
+          }
 
           const candidates = queryEmbedding
             ? (db.searchBySimilarity(queryEmbedding, 20, []) || [])
@@ -433,12 +435,19 @@ const handlers = {
             const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
             const events = []
             for (const line of lines) {
-              try { const e = JSON.parse(line); if (e.session === sessionId && e.event === 'tool_use') events.push(e) } catch {}
+              try {
+                const e = JSON.parse(line)
+                if (e.session === sessionId && e.event === 'tool_use') events.push(e)
+              } catch (e) {
+                console.error('[quoth-v2 session-end] malformed trajectory line:', e.message)
+              }
             }
             const { sessionOutcomeReward } = require('../daemon/lib/attribution.js')
             reward = sessionOutcomeReward(events)
           }
-        } catch {}
+        } catch (e) {
+          console.error('[quoth-v2 session-end] trajectory read failed:', e.message)
+        }
         for (const pid of injectedIds) {
           const wasUsed = state.injectedPatterns[pid]?.used
           // Used patterns get reward=1.0 (strong signal); unused get session outcome
@@ -459,7 +468,9 @@ const handlers = {
 
       // Clean up session memory file
       sm.clear()
-    } catch {}
+    } catch (e) {
+      console.error('[quoth session-end] feedback loop failed:', e.message)
+    }
   },
 
   'post-edit': (hookInput) => {
@@ -521,7 +532,9 @@ const handlers = {
           }
         }
       }
-    } catch {}
+    } catch (e) {
+      console.error('[quoth post-task] feedback loop failed:', e.message)
+    }
 
     console.log('[OK] Task completed')
   },

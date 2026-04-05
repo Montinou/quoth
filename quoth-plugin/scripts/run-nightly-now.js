@@ -134,9 +134,17 @@ async function runJudgeBatch() {
     }
     const { prompt, positionMap } = buildPairwisePrompt(item.trajectory_summary || '', a, b)
     process.stdout.write(`    judging ${a.id.slice(0,8)} vs ${b.id.slice(0,8)}... `)
-    const raw = await callJudge(prompt)
+    let raw
+    try {
+      raw = await callJudge(prompt)
+    } catch (e) {
+      console.log(`FAIL (${e.message})`)
+      db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
+      failed++
+      continue
+    }
     if (!raw) {
-      console.log('FAIL')
+      console.log('FAIL (empty response)')
       db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
       failed++
       continue

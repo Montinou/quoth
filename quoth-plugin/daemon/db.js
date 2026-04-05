@@ -159,13 +159,22 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
   // V2 runtime migrations: hierarchical Thompson + curation columns
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN cluster_id INTEGER DEFAULT NULL").run() } catch {}
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN cluster_rank_score REAL DEFAULT 0.5").run() } catch {}
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN effective_exposures REAL DEFAULT 0").run() } catch {}
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN distinctiveness REAL DEFAULT NULL").run() } catch {}
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN retired_at INTEGER DEFAULT NULL").run() } catch {}
-  try { db.prepare("ALTER TABLE patterns ADD COLUMN retired_reason TEXT DEFAULT NULL").run() } catch {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_cluster ON patterns(cluster_id)") } catch {}
+  // Helper: swallow "duplicate column" errors only (idempotency); log everything else.
+  function v2Migrate(label, fn) {
+    try { fn() } catch (e) {
+      if (!/duplicate column|already exists/i.test(e.message)) {
+        console.error(`[db v2 migration] ${label} failed:`, e.message)
+        throw e
+      }
+    }
+  }
+  v2Migrate('add cluster_id', () => db.prepare("ALTER TABLE patterns ADD COLUMN cluster_id INTEGER DEFAULT NULL").run())
+  v2Migrate('add cluster_rank_score', () => db.prepare("ALTER TABLE patterns ADD COLUMN cluster_rank_score REAL DEFAULT 0.5").run())
+  v2Migrate('add effective_exposures', () => db.prepare("ALTER TABLE patterns ADD COLUMN effective_exposures REAL DEFAULT 0").run())
+  v2Migrate('add distinctiveness', () => db.prepare("ALTER TABLE patterns ADD COLUMN distinctiveness REAL DEFAULT NULL").run())
+  v2Migrate('add retired_at', () => db.prepare("ALTER TABLE patterns ADD COLUMN retired_at INTEGER DEFAULT NULL").run())
+  v2Migrate('add retired_reason', () => db.prepare("ALTER TABLE patterns ADD COLUMN retired_reason TEXT DEFAULT NULL").run())
+  v2Migrate('create idx_patterns_cluster', () => db.exec("CREATE INDEX IF NOT EXISTS idx_patterns_cluster ON patterns(cluster_id)"))
 
   // V2 auxiliary tables
   try {
@@ -182,7 +191,7 @@ function createDb(dbPath) {
       );
       CREATE INDEX IF NOT EXISTS idx_cluster_stats_ns ON cluster_stats(namespace);
     `)
-  } catch {}
+  } catch (e) { console.error('[db v2] table create failed:', e.message); throw e }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS injection_log (
@@ -203,7 +212,7 @@ function createDb(dbPath) {
       CREATE INDEX IF NOT EXISTS idx_injection_log_pattern ON injection_log(pattern_id);
       CREATE INDEX IF NOT EXISTS idx_injection_log_pending ON injection_log(outcome_at) WHERE outcome_at IS NULL;
     `)
-  } catch {}
+  } catch (e) { console.error('[db v2] table create failed:', e.message); throw e }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS judge_queue (
@@ -221,7 +230,7 @@ function createDb(dbPath) {
       );
       CREATE INDEX IF NOT EXISTS idx_judge_queue_status ON judge_queue(status, priority DESC);
     `)
-  } catch {}
+  } catch (e) { console.error('[db v2] judge_queue create failed:', e.message); throw e }
 
   // One-time backfill for existing patterns without trigrams
   try {
