@@ -155,7 +155,23 @@ async function runJudgeBatch() {
       UPDATE judge_queue SET status='judged', verdict=?, judged_at=strftime('%s','now')*1000, cost_cents=0.03
       WHERE id=?
     `).run(verdict, item.id)
-    if (verdict === item.pattern_a_id) {
+
+    const isDedup = item.session_id === 'dedup'
+    if (isDedup && (verdict === item.pattern_a_id || verdict === item.pattern_b_id)) {
+      const winnerId = verdict
+      const loserId = winnerId === item.pattern_a_id ? item.pattern_b_id : item.pattern_a_id
+      const winner = db.prepare("SELECT alpha, beta, success_count, failure_count, exposure_count FROM patterns WHERE id=? AND status='active'").get(winnerId)
+      const loser = db.prepare("SELECT alpha, beta, success_count, failure_count, exposure_count FROM patterns WHERE id=? AND status='active'").get(loserId)
+      if (winner && loser) {
+        const tx = db.transaction(() => {
+          db.prepare(`UPDATE patterns SET alpha=?+alpha-1, beta=?+beta-1, success_count=success_count+?, failure_count=failure_count+?, exposure_count=exposure_count+?, updated_at=strftime('%s','now')*1000 WHERE id=?`)
+            .run(loser.alpha, loser.beta, loser.success_count||0, loser.failure_count||0, loser.exposure_count||0, winnerId)
+          db.prepare(`UPDATE patterns SET status='archived', retired_at=strftime('%s','now')*1000, retired_reason='deduped-merged', updated_at=strftime('%s','now')*1000 WHERE id=?`)
+            .run(loserId)
+        })
+        tx()
+      }
+    } else if (verdict === item.pattern_a_id) {
       db.prepare('UPDATE patterns SET alpha = alpha + 0.5 WHERE id=?').run(item.pattern_a_id)
       db.prepare('UPDATE patterns SET beta = beta + 0.5 WHERE id=?').run(item.pattern_b_id)
     } else if (verdict === item.pattern_b_id) {
