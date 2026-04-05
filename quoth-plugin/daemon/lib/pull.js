@@ -41,7 +41,12 @@ async function syncFromCloud(db, log) {
 
   let totalNew = 0
   for (const ns of namespaces) {
-    const { patterns, error } = await pullProjectPatterns(ns, 0, apiKey, process.env.QUOTH_API_URL)
+    // Incremental sync: only fetch patterns updated after our newest local one.
+    const row = db.prepare(
+      "SELECT MAX(updated_at) as m FROM patterns WHERE namespace = ?"
+    ).get(ns)
+    const since = (row && row.m) ? row.m : 0
+    const { patterns, error } = await pullProjectPatterns(ns, since, apiKey, process.env.QUOTH_API_URL)
     if (error) { log('warn', `Cloud pull failed for ${ns}`, { error }); continue }
 
     for (const p of patterns) {

@@ -50,13 +50,16 @@ function rankByThompson(db, namespace, limit, opts = {}) {
   } = opts
 
   const cutoff = Date.now() - excludeRecentMinutes * 60 * 1000
+  // RANDOM() avoids biasing Thompson sampling toward already-proven patterns;
+  // Thompson sampling itself should handle exploration vs exploitation via the
+  // Beta distribution variance of each candidate.
   const rows = db.prepare(`
     SELECT * FROM patterns
     WHERE status = 'active'
       AND (namespace = ? OR namespace = 'global')
       AND confidence >= ?
       AND (last_exposed_at IS NULL OR last_exposed_at < ?)
-    ORDER BY confidence DESC
+    ORDER BY RANDOM()
     LIMIT ?
   `).all(namespace, minConfidence, cutoff, candidatePoolSize)
 

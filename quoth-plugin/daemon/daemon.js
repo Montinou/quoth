@@ -12,7 +12,9 @@ for (const envFile of ['.env.local', '.env']) {
   try {
     const content = fs.readFileSync(envPath, 'utf8')
     for (const line of content.split('\n')) {
-      const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/)
+      // Strip inline comments ( # comment) but preserve # inside values
+      const stripped = line.replace(/\s+#.*$/, '')
+      const match = stripped.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/)
       if (match && !process.env[match[1]]) {
         process.env[match[1]] = match[2].replace(/^["']|["']$/g, '').trim()
       }
