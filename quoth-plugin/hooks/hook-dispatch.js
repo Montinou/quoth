@@ -225,14 +225,41 @@ const handlers = {
       }
     } catch {}
 
-    // Inject only high-confidence patterns as lightweight project context.
-    // The agent can use quoth_search_patterns for on-demand semantic search.
+    // Context-aware semantic injection via Thompson + trigram
     if (db) {
       try {
         const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-        const patterns = db.getProjectPatterns(project, 3)
-          .filter(p => (p.confidence || 0) >= 0.6)
+        const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+        const { recordExposure } = require('../daemon/lib/scoring.js')
+        const { createSessionMemory } = require('./session-memory.js')
+
+        // Load last session's context snapshot for query
+        let queryText = ''
+        try {
+          const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
+          const ctx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'))
+          queryText = [
+            ...(ctx.recentPrompts || []).slice(-2),
+            (ctx.topTopics || []).slice(0, 5).join(' '),
+          ].filter(Boolean).join(' ')
+        } catch {}
+
+        const patterns = rankByThompsonAndTrigram(db, project, queryText, 3, {
+          minConfidence: 0.3,
+          excludeRecentMinutes: 5,
+        })
+
         if (patterns.length > 0) {
+          recordExposure(db, patterns.map(p => p.id))
+
+          // Track injection in session memory for feedback loop
+          const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+          const sm = createSessionMemory({
+            dir: path.join(QUOTH_HOME, 'intelligence'),
+            sessionId, project,
+          })
+          sm.recordInjection(patterns.map(p => p.id))
+
           const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
           for (const p of patterns) {
             lines.push(`- [${p.confidence.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
