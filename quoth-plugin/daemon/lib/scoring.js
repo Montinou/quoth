@@ -45,4 +45,37 @@ function conversionRate(db, id) {
   return (row.success_count || 0) / row.exposure_count
 }
 
-module.exports = { recordExposure, applySoftNegative, conversionRate, SOFT_NEGATIVE_BETA_DELTA }
+const MAX_HISTORY = 20
+
+function recordQuality(db, id, score) {
+  const row = db.prepare('SELECT quality_history FROM patterns WHERE id = ?').get(id)
+  if (!row) return
+  let history = []
+  try { history = JSON.parse(row.quality_history || '[]') } catch {}
+  history.push({ score, at: Date.now() })
+  if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY)
+  db.prepare('UPDATE patterns SET quality_history = ? WHERE id = ?')
+    .run(JSON.stringify(history), id)
+}
+
+function getTrend(db, id) {
+  const row = db.prepare('SELECT quality_history FROM patterns WHERE id = ?').get(id)
+  if (!row) return { trend: 'unknown', delta: 0 }
+  let history = []
+  try { history = JSON.parse(row.quality_history || '[]') } catch {}
+  if (history.length < 4) return { trend: 'unknown', delta: 0 }
+  const half = Math.floor(history.length / 2)
+  const older = history.slice(0, half).reduce((a, b) => a + b.score, 0) / half
+  const newer = history.slice(half).reduce((a, b) => a + b.score, 0) / (history.length - half)
+  const delta = newer - older
+  return {
+    trend: delta > 0.05 ? 'improving' : delta < -0.05 ? 'declining' : 'stable',
+    delta,
+  }
+}
+
+module.exports = {
+  recordExposure, applySoftNegative, conversionRate,
+  recordQuality, getTrend,
+  SOFT_NEGATIVE_BETA_DELTA, MAX_HISTORY,
+}

@@ -155,6 +155,7 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN ignored_count INTEGER DEFAULT 0").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN embedding_text TEXT").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
   // --- HNSW index state ---
   const hnsw = new HnswIndex(1536)

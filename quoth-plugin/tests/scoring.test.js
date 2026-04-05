@@ -42,3 +42,28 @@ describe('exposure tracking', () => {
     expect(rate).toBeLessThanOrEqual(1)
   })
 })
+
+describe('quality history', () => {
+  beforeEach(() => {
+    // db and p1 already set up by outer beforeEach
+  })
+
+  it('recordQuality bounds history to last 20 entries', () => {
+    const { recordQuality } = require('../daemon/lib/scoring.js')
+    for (let i = 0; i < 30; i++) recordQuality(db, 'p1', 0.5 + i * 0.01)
+    const row = db.prepare('SELECT quality_history FROM patterns WHERE id=?').get('p1')
+    const history = JSON.parse(row.quality_history)
+    expect(history.length).toBe(20)
+    // Last entry should be latest score
+    expect(history[19].score).toBeCloseTo(0.79, 2)
+  })
+
+  it('getTrend detects improvement', () => {
+    const { recordQuality, getTrend } = require('../daemon/lib/scoring.js')
+    for (let i = 0; i < 10; i++) recordQuality(db, 'p1', 0.3)
+    for (let i = 0; i < 10; i++) recordQuality(db, 'p1', 0.8)
+    const trend = getTrend(db, 'p1')
+    expect(trend.trend).toBe('improving')
+    expect(trend.delta).toBeGreaterThan(0.3)
+  })
+})
