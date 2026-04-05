@@ -443,6 +443,36 @@ function startCloudPullTimer() {
   }, 6 * 60 * 60 * 1000)
 }
 
+// --- V2 mini-pipeline every 4 hours (clusters + SNIPS + small judge batch) ---
+// Complements the nightly 3am run by draining the judge queue more frequently.
+// Only runs when at least one v2 flag is on.
+let v2MiniTimer = null
+function startV2MiniTimer() {
+  v2MiniTimer = setInterval(async () => {
+    const flags = require('./lib/flags.js')
+    if (!flags.isSubFlag('injection') && !flags.isSubFlag('judge')) return
+    try {
+      log('info', 'V2 mini-pipeline start')
+      if (flags.isSubFlag('injection')) {
+        await rebuildClusters()
+        await updateClusterPosteriors()
+      }
+      if (flags.isSubFlag('judge')) {
+        // Small batch: 10 pairs per 4h = 60/day (vs 50/day at nightly)
+        const origLimit = process.env.QUOTH_JUDGE_DAILY_LIMIT
+        process.env.QUOTH_JUDGE_DAILY_LIMIT = '10'
+        await enqueueJudgePairs()
+        await runJudgeBatch()
+        if (origLimit != null) process.env.QUOTH_JUDGE_DAILY_LIMIT = origLimit
+        else delete process.env.QUOTH_JUDGE_DAILY_LIMIT
+      }
+      log('info', 'V2 mini-pipeline done')
+    } catch (err) {
+      log('error', 'V2 mini-pipeline failed', { error: err.message })
+    }
+  }, 4 * 60 * 60 * 1000)
+}
+
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
 function scheduleNightlyPipeline() {
   const now = new Date()
@@ -862,6 +892,7 @@ function clearTimers() {
   if (deepConsolidateTimer) clearTimeout(deepConsolidateTimer)
   if (hnswSaveTimer) clearInterval(hnswSaveTimer)
   if (cloudPullTimer) clearInterval(cloudPullTimer)
+  if (v2MiniTimer) clearInterval(v2MiniTimer)
   if (agentCleanupTimer) clearInterval(agentCleanupTimer)
   if (staleSessionTimer) clearInterval(staleSessionTimer)
 }
@@ -1028,6 +1059,7 @@ watchTrajectories()
 startDecayTimer()
 startHnswSaveTimer()
 startCloudPullTimer()
+startV2MiniTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()
