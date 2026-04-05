@@ -505,7 +505,7 @@ const handlers = {
 
   'stats': () => {
     const intel = getIntelligence()
-    const result = intel.getStats()
+    const result = intel.getStats(getDb())
     console.log(JSON.stringify(result, null, 2))
   },
 }
