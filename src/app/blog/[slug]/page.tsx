@@ -7,6 +7,7 @@ import { getPostBySlug, getAllPosts, getRelatedPosts } from '@/lib/content/blog'
 import { MDXContent } from '@/components/mdx';
 import { Navbar } from '@/components/quoth/Navbar';
 import { Footer } from '@/components/quoth/Footer';
+import { ArticleSchema } from '@/components/SchemaMarkup';
 import { Calendar, Clock, ArrowLeft } from 'lucide-react';
 export const revalidate = 3600;
 
@@ -26,8 +27,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!post) return { title: 'Post Not Found' };
 
   return {
-    title: `${post.title} | Quoth Blog`,
+    title: post.title,
     description: post.description,
+    alternates: { canonical: `https://quoth.triqual.dev/blog/${slug}` },
     openGraph: {
       title: post.title,
       description: post.description,
@@ -64,6 +66,14 @@ export default async function BlogPostPage({ params }: Props) {
   return (
     <div className="min-h-screen bg-obsidian">
       <Navbar />
+      <ArticleSchema
+        title={post.title}
+        description={post.description}
+        datePublished={post.date}
+        author={post.author}
+        url={`https://quoth.triqual.dev/blog/${slug}`}
+        image={post.image}
+      />
 
       <main className="pt-24 pb-16 px-4 sm:px-6">
         <article className="max-w-3xl mx-auto">

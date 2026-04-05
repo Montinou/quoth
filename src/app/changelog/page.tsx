@@ -9,8 +9,9 @@ import { Rss } from 'lucide-react';
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: 'Changelog | Quoth',
+  title: 'Changelog',
   description: 'Track the evolution of Quoth - new features, improvements, and fixes',
+  alternates: { canonical: 'https://quoth.triqual.dev/changelog' },
 };
 
 export default async function ChangelogPage() {

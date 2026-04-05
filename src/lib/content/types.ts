@@ -43,3 +43,48 @@ export interface DocSection {
   slug: string;
   pages: Pick<DocPage, 'title' | 'slug' | 'order'>[];
 }
+
+export interface ComparisonPage {
+  title: string;
+  description: string;
+  slug: string;
+  competitor: string;
+  competitorUrl?: string;
+  date: string;
+  features: {
+    name: string;
+    quoth: string;
+    competitor: string;
+  }[];
+  pricing: {
+    quoth: string;
+    competitor: string;
+  };
+  verdict: string;
+  content: string;
+  draft?: boolean;
+}
+
+export interface IntegrationPage {
+  title: string;
+  description: string;
+  slug: string;
+  client: string;
+  clientUrl?: string;
+  icon?: string;
+  date: string;
+  supported: boolean;
+  features: string[];
+  content: string;
+  draft?: boolean;
+}
+
+export interface GlossaryTerm {
+  term: string;
+  definition: string;
+  slug: string;
+  category: string;
+  relatedTerms?: string[];
+  content: string;
+  draft?: boolean;
+}

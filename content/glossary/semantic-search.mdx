@@ -1,0 +1,28 @@
+---
+term: "Semantic Search"
+definition: "Semantic search is an information retrieval technique that understands the meaning and intent behind a query, rather than matching exact keywords. It uses vector embeddings to find content that is conceptually related to the search query, even when different words are used. This enables searching by meaning — 'how to test APIs' would match content about 'endpoint validation strategies.'"
+slug: "semantic-search"
+category: "techniques"
+relatedTerms: ["vector-embeddings", "rag", "ai-memory"]
+---
+
+## Semantic Search vs Keyword Search
+
+| Aspect | Keyword Search | Semantic Search |
+|--------|---------------|----------------|
+| Matching | Exact words | Meaning/concepts |
+| "test API" finds | Pages containing "test" AND "API" | Content about API testing, endpoint validation, integration tests |
+| Synonyms | Misses them | Handles naturally |
+| Typos | Fails | Often still works |
+| Speed | Very fast | Fast (with HNSW) |
+
+## How Quoth Uses Semantic Search
+
+When you call `quoth_search_index` or `quoth_search_patterns`, Quoth:
+
+1. Converts your query into a vector embedding
+2. Searches the HNSW index for nearest neighbors (cosine similarity)
+3. Returns results ranked by relevance score
+4. Optionally filters by project, tags, or confidence threshold
+
+This means you can search your knowledge base by describing what you need in natural language, without knowing the exact terminology used in your documentation.

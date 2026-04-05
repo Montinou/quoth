@@ -1,0 +1,28 @@
+---
+term: "Vector Embeddings"
+definition: "Vector embeddings are numerical representations of text (or other data) in a high-dimensional space where semantically similar content is positioned close together. They enable AI systems to perform semantic search — finding content by meaning rather than exact keyword matches — by converting text into fixed-length arrays of numbers that capture semantic relationships."
+slug: "vector-embeddings"
+category: "techniques"
+relatedTerms: ["semantic-search", "rag", "ai-memory"]
+---
+
+## How Embeddings Work
+
+An embedding model converts text into a vector (array of numbers). For example, a 512-dimensional embedding converts "how to write unit tests" into an array of 512 floating-point numbers. Similar texts produce similar vectors, enabling mathematical comparison.
+
+## Common Embedding Models (2026)
+
+| Model | Dimensions | Best For |
+|-------|-----------|----------|
+| Jina v3 | 512-1024d | Code + text (multilingual) |
+| Voyage 4 Lite | 1024d | Code-focused |
+| OpenAI text-embedding-3-small | 1536d | General purpose |
+| Cohere embed-v4 | 1024d | Multilingual |
+
+## Embeddings in Quoth
+
+Quoth uses two embedding systems:
+- **Cloud (SaaS)**: Jina v3 at 512 dimensions for semantic search across the shared knowledge base
+- **Local (Plugin)**: Voyage 4 Lite at 1024 dimensions for pattern matching in the self-learning pipeline
+
+The local HNSW index (M=16, cosine distance) enables O(log n) approximate nearest-neighbor search, making pattern lookups fast even with thousands of entries.

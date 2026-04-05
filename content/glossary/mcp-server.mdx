@@ -1,0 +1,22 @@
+---
+term: "MCP Server"
+definition: "An MCP server is a program that exposes tools, resources, and prompts to AI assistants through the Model Context Protocol. MCP servers act as bridges between AI models and external systems — databases, APIs, file systems, or knowledge bases — allowing AI to interact with them through a standardized interface."
+slug: "mcp-server"
+category: "protocols"
+relatedTerms: ["model-context-protocol", "ai-memory"]
+---
+
+## How MCP Servers Work
+
+An MCP server registers a set of tools (functions the AI can call), resources (data the AI can read), and prompts (templates the AI can use). When an AI client connects, it discovers these capabilities and can invoke them during conversations.
+
+## Examples of MCP Servers
+
+- **Quoth** — Knowledge management, agent coordination, and self-learning (28 tools)
+- **File system servers** — Read and write files on the local machine
+- **Database servers** — Query and modify databases
+- **API wrappers** — Expose REST APIs as MCP tools
+
+## Building vs Using MCP Servers
+
+Most developers use existing MCP servers. Building one requires implementing the MCP protocol specification — handling tool registration, JSON-RPC communication, and proper error handling. Quoth provides a pre-built MCP server that you can deploy in minutes.

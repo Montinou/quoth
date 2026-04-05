@@ -1,0 +1,28 @@
+---
+term: "AI Memory"
+definition: "AI memory refers to mechanisms that give AI assistants persistent knowledge across sessions. Unlike the ephemeral context window that resets with each conversation, AI memory stores learned patterns, preferences, and facts that persist between interactions, enabling AI systems to improve and personalize over time."
+slug: "ai-memory"
+category: "concepts"
+relatedTerms: ["vector-embeddings", "rag", "semantic-search", "model-context-protocol"]
+---
+
+## The Problem AI Memory Solves
+
+By default, AI assistants have no memory between sessions. Every conversation starts fresh — the AI doesn't remember what you worked on yesterday, what patterns your codebase follows, or what approaches worked before. This leads to:
+
+- Repeated explanations of project context
+- Inconsistent code suggestions across sessions
+- No learning from past successes or failures
+
+## Types of AI Memory
+
+| Type | How It Works | Example |
+|------|-------------|---------|
+| **Explicit memory** | User manually saves facts | "Remember that we use Vitest" |
+| **Conversational memory** | Stores chat history | Previous messages in context |
+| **Semantic memory** | Vector-indexed knowledge base | Searchable documentation |
+| **Procedural memory** | Learned patterns from behavior | "This approach worked 80% of the time" |
+
+## How Quoth Implements AI Memory
+
+Quoth combines semantic and procedural memory. The local plugin captures development trajectories, processes them through a JUDGE → DISTILL → CONSOLIDATE pipeline, and stores confidence-scored patterns in a SQLite database with HNSW vector index. High-confidence patterns are automatically injected into future sessions, creating a self-improving development environment.

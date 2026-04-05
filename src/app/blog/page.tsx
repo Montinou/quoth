@@ -9,8 +9,9 @@ import { Calendar, Clock, ArrowRight } from 'lucide-react';
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: 'Blog | Quoth',
+  title: 'Blog',
   description: 'Announcements, tutorials, and thoughts on AI-native documentation',
+  alternates: { canonical: 'https://quoth.triqual.dev/blog' },
 };
 
 function formatDate(dateStr: string): string {

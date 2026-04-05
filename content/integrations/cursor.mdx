@@ -1,0 +1,38 @@
+---
+title: "How to Use Quoth with Cursor"
+description: "Setup guide for connecting Quoth MCP server to Cursor IDE. Access your shared knowledge base and AI memory from Cursor."
+client: "Cursor"
+clientUrl: "https://cursor.com"
+date: "2026-04-05"
+supported: true
+features:
+  - "Semantic search"
+  - "Document retrieval"
+  - "Knowledge base access"
+  - "OAuth authentication"
+---
+
+## Setup
+
+Cursor supports MCP servers natively. Add Quoth via Cursor settings:
+
+1. Open Cursor Settings → MCP Servers
+2. Add a new server:
+   - **Name**: `quoth`
+   - **URL**: `https://quoth.triqual.dev/api/mcp`
+   - **Transport**: HTTP
+3. Authenticate when prompted via browser OAuth
+
+## Usage
+
+Once connected, you can ask Cursor's AI to use Quoth tools directly:
+
+- "Search my Quoth knowledge base for testing patterns"
+- "Read the authentication documentation from Quoth"
+- "Propose an update to the API reference"
+
+## Notes
+
+Cursor's MCP support may vary by version. Quoth works with any MCP-compatible client that supports HTTP transport and OAuth 2.0 authentication.
+
+For the full self-learning experience with hooks and trajectory capture, use the [Claude Code integration](/integrations/claude-code).

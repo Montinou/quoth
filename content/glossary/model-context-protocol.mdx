@@ -1,0 +1,23 @@
+---
+term: "Model Context Protocol (MCP)"
+definition: "Model Context Protocol (MCP) is an open standard created by Anthropic that enables AI assistants to connect with external data sources and tools through a unified interface. It provides a standardized way for AI models to access context, execute tools, and interact with services without custom integrations for each provider."
+slug: "model-context-protocol"
+category: "protocols"
+relatedTerms: ["mcp-server", "ai-memory", "semantic-search"]
+---
+
+## How MCP Works
+
+MCP follows a client-server architecture where AI applications (clients) connect to data sources and tools (servers) through a standardized protocol. The protocol supports three main transport mechanisms:
+
+1. **stdio** — Local communication via standard input/output (used by Claude Code)
+2. **HTTP with SSE** — Remote communication over HTTP with Server-Sent Events
+3. **Streamable HTTP** — Simplified HTTP transport for stateless operations
+
+## MCP in the Quoth Ecosystem
+
+Quoth operates as an MCP server that exposes 28 tools for knowledge management, agent coordination, and self-learning. When connected to an MCP client like Claude Code, these tools become available as native capabilities that the AI can invoke during development sessions.
+
+## Why MCP Matters
+
+Before MCP, every AI tool integration required custom code. With MCP, a single server implementation works across Claude Code, Claude Desktop, Cursor, Windsurf, and any other compatible client. This standardization is what makes Quoth's approach to persistent AI memory portable across environments.

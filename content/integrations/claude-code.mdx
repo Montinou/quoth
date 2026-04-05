@@ -1,0 +1,72 @@
+---
+title: "How to Use Quoth with Claude Code"
+description: "Complete setup guide for Quoth MCP server with Claude Code. Plugin installation, OAuth authentication, and session hooks for persistent AI memory."
+client: "Claude Code"
+clientUrl: "https://claude.ai/code"
+date: "2026-04-05"
+supported: true
+features:
+  - "Semantic search (28 MCP tools)"
+  - "Session hooks (auto-capture)"
+  - "Self-learning daemon"
+  - "Agent-to-agent messaging"
+  - "Pattern injection at session start"
+  - "Task routing"
+  - "Skill extraction"
+  - "OAuth authentication"
+---
+
+## Quick Start
+
+The fastest way to get Quoth running with Claude Code is the plugin install:
+
+```bash
+# Add the marketplace (one time)
+/plugin marketplace add Montinou/quoth-mcp
+
+# Install the plugin
+/plugin install quoth@quoth-marketplace
+```
+
+This installs the full Quoth plugin: MCP server, 9 session hooks, skills, and the learning daemon. Two commands, full integration.
+
+## Alternative: MCP-Only Install
+
+If you prefer manual control without hooks:
+
+```bash
+# Add Quoth as an MCP server with OAuth
+claude mcp add --transport http quoth https://quoth.triqual.dev/api/mcp
+
+# Authenticate via browser
+/mcp → select quoth → Authenticate
+```
+
+## What Happens After Install
+
+Once installed, Quoth integrates into your Claude Code workflow automatically:
+
+1. **Session Start** — Quoth injects your top 3 high-confidence patterns (≥ 0.6) relevant to the current project
+2. **During Work** — Every tool call (Write, Edit, Bash, Agent) is captured to a trajectory file
+3. **Task Routing** — When you submit a prompt, Quoth classifies it and suggests the optimal agent type
+4. **Session End** — The intelligence graph consolidates, PageRank recomputes, and patterns are updated
+
+## MCP Tools Available
+
+With Claude Code, you get access to all 28 Quoth MCP tools:
+
+- **Knowledge**: `search_index`, `read_doc`, `propose_update`, `guidelines`, `read_chunks`, `list_templates`, `get_template`
+- **Agents**: `agent_register`, `agent_update`, `agent_remove`, `agent_list`, `agent_message`, `agent_inbox`
+- **Tasks**: `task_create`, `task_update`
+- **Accounts**: `list_accounts`, `switch_account`
+
+## Troubleshooting
+
+**MCP server not connecting?**
+```bash
+claude mcp list  # Verify quoth is listed
+claude mcp logs quoth  # Check for errors
+```
+
+**Hooks not firing?**
+Check `~/.claude/settings.json` for hook declarations. Run `bash quoth-plugin/scripts/setup.sh` to re-install.

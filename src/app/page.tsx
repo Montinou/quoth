@@ -77,14 +77,14 @@ const Hero = () => (
         <span className="text-white">The Memories.</span>
       </h1>
 
-      {/* Subtitle */}
+      {/* Subtitle — AI-extractable definition block */}
       <p
         className="animate-fade-in-scale font-light text-base sm:text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-12 leading-relaxed"
         style={{ animationDelay: "0.3s" }}
       >
-        Shared knowledge base + Agent-to-Agent Bus.
+        Quoth is a multi-agent knowledge platform that gives Claude persistent memory across sessions. It provides a shared knowledge base with semantic vector search, self-learning from development trajectories, and agent-to-agent communication across instances.
         <span className="block mt-2 text-gray-500">
-          The first MCP server that lets your agents talk to each other across instances.
+          28 MCP tools. Local-first. Open source.
         </span>
       </p>
 
@@ -416,7 +416,7 @@ const Stats = () => (
     <div className="max-w-5xl mx-auto relative z-10">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
         {[
-          { value: "19", label: "MCP Tools" },
+          { value: "28", label: "MCP Tools" },
           { value: "v3.0", label: "A2A Bus" },
           { value: "512d", label: "Jina Embeddings" },
           { value: "∞", label: "Cross-Instance" },

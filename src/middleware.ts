@@ -42,6 +42,9 @@ const isPublicRoute = createRouteMatcher([
   '/docs(.*)',
   '/blog(.*)',
   '/changelog(.*)',
+  '/compare(.*)',
+  '/integrations(.*)',
+  '/glossary(.*)',
   '/terms(.*)',
   '/onboarding(.*)',
   // Sign-in / sign-up (Clerk hosted components)
@@ -116,6 +119,6 @@ export const config = {
      * - favicon.ico
      * - Static assets (images, etc.)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sitemap\\.xml|robots\\.txt|manifest\\.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };

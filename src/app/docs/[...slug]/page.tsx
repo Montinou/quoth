@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { getDocBySlug, getDocsSidebar, getAdjacentDocs } from '@/lib/content/docs';
 import { MDXContent } from '@/components/mdx';
 import { TableOfContents } from '@/components/docs/TableOfContents';
+import { BreadcrumbSchema } from '@/components/SchemaMarkup';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 export const revalidate = 3600;
 
@@ -27,8 +28,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!doc) return { title: 'Page Not Found' };
 
   return {
-    title: `${doc.title} | Quoth Docs`,
+    title: doc.title,
     description: doc.description,
+    alternates: { canonical: `https://quoth.triqual.dev/docs/${slug.join('/')}` },
   };
 }
 
@@ -41,8 +43,19 @@ export default async function DocPage({ params }: Props) {
 
   const { prev, next } = await getAdjacentDocs(slug);
 
+  const base = 'https://quoth.triqual.dev';
+  const breadcrumbItems = [
+    { name: 'Home', url: base },
+    { name: 'Docs', url: `${base}/docs` },
+    ...slug.map((part, i) => ({
+      name: part.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      url: `${base}/docs/${slug.slice(0, i + 1).join('/')}`,
+    })),
+  ];
+
   return (
     <div className="flex gap-8">
+      <BreadcrumbSchema items={breadcrumbItems} />
       {/* Main Content */}
       <article className="flex-1 min-w-0 max-w-3xl">
         {/* Breadcrumbs */}

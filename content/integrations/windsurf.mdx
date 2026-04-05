@@ -1,0 +1,35 @@
+---
+title: "How to Use Quoth with Windsurf"
+description: "Setup guide for connecting Quoth MCP server to Windsurf (Codeium). Access persistent AI memory and shared knowledge in Windsurf."
+client: "Windsurf"
+clientUrl: "https://windsurf.com"
+date: "2026-04-05"
+supported: true
+features:
+  - "Semantic search"
+  - "Document retrieval"
+  - "Knowledge base access"
+  - "OAuth authentication"
+---
+
+## Setup
+
+Windsurf supports MCP servers. Add Quoth through the MCP configuration:
+
+1. Open Windsurf Settings → MCP
+2. Add Quoth as an HTTP MCP server:
+   - **URL**: `https://quoth.triqual.dev/api/mcp`
+3. Complete OAuth authentication in browser
+
+## Available Features
+
+Through the MCP connection, Windsurf can access:
+
+- Semantic search across your documentation
+- Full document retrieval
+- Documentation proposals
+- Context-relevant guidelines
+
+## Limitations
+
+Like other IDE-based MCP clients, Windsurf does not support Claude Code hooks. This means no automatic trajectory capture or self-learning. For the full experience, combine Windsurf with the [Claude Code plugin](/integrations/claude-code) in your workflow.

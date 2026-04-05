@@ -1,0 +1,60 @@
+---
+title: "Quoth vs Mem0: AI Memory for Developers"
+description: "Compare Quoth and Mem0 for persistent AI memory. Feature comparison, pricing, and use cases for MCP-based knowledge management."
+competitor: "Mem0"
+competitorUrl: "https://mem0.ai"
+date: "2026-04-05"
+features:
+  - name: "MCP Protocol Support"
+    quoth: "Yes"
+    competitor: "No"
+  - name: "Persistent Memory"
+    quoth: "Yes"
+    competitor: "Yes"
+  - name: "Vector Search"
+    quoth: "Jina v3 (512d)"
+    competitor: "OpenAI embeddings"
+  - name: "Agent-to-Agent Communication"
+    quoth: "Yes (A2A Bus)"
+    competitor: "No"
+  - name: "Self-Learning from Trajectories"
+    quoth: "Yes (Bayesian)"
+    competitor: "No"
+  - name: "Local-First Storage"
+    quoth: "SQLite + HNSW"
+    competitor: "Cloud only"
+  - name: "Multi-Agent Coordination"
+    quoth: "28 MCP tools"
+    competitor: "REST API"
+  - name: "Pattern Intelligence"
+    quoth: "PageRank + Bayesian scoring"
+    competitor: "Simple retrieval"
+  - name: "Open Source"
+    quoth: "Yes"
+    competitor: "Partially"
+  - name: "Claude Code Integration"
+    quoth: "Native (hooks + MCP)"
+    competitor: "Manual"
+pricing:
+  quoth: "Free / $29/mo Pro"
+  competitor: "Free / $99/mo Pro"
+verdict: "Choose Quoth if you work primarily with Claude Code and want local-first AI memory with self-learning capabilities and agent coordination. Choose Mem0 if you need a general-purpose memory layer across multiple LLM providers and prefer a cloud-managed solution."
+---
+
+## When to Choose Quoth
+
+Quoth is purpose-built for the MCP ecosystem. If you use Claude Code, Claude Desktop, or any MCP-compatible client, Quoth gives you native integration with zero configuration overhead. Key differentiators:
+
+- **Self-learning pipeline**: Quoth automatically learns from your coding sessions. The daemon processes trajectories through JUDGE → DISTILL → CONSOLIDATE, building a pattern library specific to your workflow.
+- **Agent-to-Agent Bus**: If you run multiple AI agents across machines (AWS, Mac, WSL2), Quoth's A2A communication lets them share knowledge and coordinate tasks with HMAC-SHA256 signed messages.
+- **Local-first architecture**: Your patterns and memory live in SQLite on your machine. No data leaves your environment unless you explicitly promote patterns to the cloud.
+
+## When to Choose Mem0
+
+Mem0 is a good choice if you need memory across multiple LLM providers (OpenAI, Anthropic, Google) and want a managed cloud service. It provides a simpler API-first approach without the MCP protocol dependency.
+
+## Key Differences
+
+The fundamental architectural difference is that Quoth operates as an MCP server with hooks that integrate directly into your development workflow, while Mem0 operates as a REST API that you call explicitly. This means Quoth can capture context automatically (via session hooks), while Mem0 requires manual memory management.
+
+Quoth's Bayesian confidence scoring and PageRank-based intelligence graph provide a more sophisticated approach to pattern quality than simple vector retrieval, ensuring that only high-confidence patterns influence your development sessions.

@@ -124,3 +124,125 @@ export function BreadcrumbSchema({ items }: { items: BreadcrumbItem[] }) {
     />
   );
 }
+
+interface ArticleSchemaProps {
+  title: string;
+  description: string;
+  datePublished: string;
+  author: string;
+  url: string;
+  image?: string;
+}
+
+export function ArticleSchema({ title, description, datePublished, author, url, image }: ArticleSchemaProps) {
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: title,
+    description,
+    datePublished,
+    dateModified: datePublished,
+    author: { '@type': 'Person', name: author },
+    publisher: { '@type': 'Organization', name: 'Quoth Labs', url: 'https://quoth.triqual.dev' },
+    url,
+    ...(image && { image }),
+  };
+
+  return (
+    <Script
+      id="article-schema"
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+}
+
+interface ComparisonSchemaProps {
+  title: string;
+  description: string;
+  items: string[];
+  url: string;
+}
+
+export function ComparisonSchema({ title, description, items, url }: ComparisonSchemaProps) {
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: title,
+    description,
+    url,
+    itemListElement: items.map((item, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: item,
+    })),
+  };
+
+  return (
+    <Script
+      id="comparison-schema"
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+}
+
+interface DefinedTermSchemaProps {
+  term: string;
+  definition: string;
+  url: string;
+}
+
+export function DefinedTermSchema({ term, definition, url }: DefinedTermSchemaProps) {
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'DefinedTerm',
+    name: term,
+    description: definition,
+    url,
+    inDefinedTermSet: {
+      '@type': 'DefinedTermSet',
+      name: 'Quoth AI & MCP Glossary',
+      url: 'https://quoth.triqual.dev/glossary',
+    },
+  };
+
+  return (
+    <Script
+      id="defined-term-schema"
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+}
+
+interface HowToSchemaProps {
+  name: string;
+  description: string;
+  steps: { name: string; text: string }[];
+  url: string;
+}
+
+export function HowToSchema({ name, description, steps, url }: HowToSchemaProps) {
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    name,
+    description,
+    url,
+    step: steps.map((step, index) => ({
+      '@type': 'HowToStep',
+      position: index + 1,
+      name: step.name,
+      text: step.text,
+    })),
+  };
+
+  return (
+    <Script
+      id="howto-schema"
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+}

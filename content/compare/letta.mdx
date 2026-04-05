@@ -1,0 +1,48 @@
+---
+title: "Quoth vs Letta (MemGPT): Stateful AI Agent Memory"
+description: "Compare Quoth and Letta (formerly MemGPT) for stateful AI agent memory management. Architecture, features, and best use cases."
+competitor: "Letta"
+competitorUrl: "https://letta.com"
+date: "2026-04-05"
+features:
+  - name: "MCP Protocol Support"
+    quoth: "Yes (22 tools)"
+    competitor: "No"
+  - name: "Memory Management"
+    quoth: "Bayesian scoring + HNSW"
+    competitor: "Virtual context + tiered memory"
+  - name: "Agent-to-Agent Bus"
+    quoth: "Yes"
+    competitor: "Multi-agent orchestration"
+  - name: "Self-Learning"
+    quoth: "Trajectory → Pattern pipeline"
+    competitor: "Self-editing memory"
+  - name: "Local-First"
+    quoth: "Yes"
+    competitor: "Yes (self-hosted)"
+  - name: "Claude Code Integration"
+    quoth: "Native hooks"
+    competitor: "No"
+  - name: "Knowledge Promotion"
+    quoth: "Local → Cloud pipeline"
+    competitor: "No"
+  - name: "Open Source"
+    quoth: "Yes"
+    competitor: "Yes"
+pricing:
+  quoth: "Free / $29/mo Pro"
+  competitor: "Open source / Cloud pricing varies"
+verdict: "Choose Quoth if you're building with Claude Code and want automatic learning from your development workflow. Choose Letta if you need virtual context management for autonomous agents that self-edit their own memory."
+---
+
+## Different Approaches to Memory
+
+Letta (formerly MemGPT) pioneered the concept of virtual context management — treating an LLM's context window like an operating system manages virtual memory, with paging between core memory and archival storage.
+
+Quoth takes a different approach: instead of managing context windows, it builds a persistent knowledge graph from your actual development sessions. The daemon watches your trajectories, judges effectiveness, distills patterns, and consolidates them into a searchable library.
+
+## When Each Shines
+
+**Letta** is ideal for building autonomous agents that need to manage their own long-term state — think personal assistants, research agents, or any application where the agent needs to decide what to remember and what to forget.
+
+**Quoth** is ideal for development workflows where you want your coding environment to get smarter over time. It integrates at the tool level (MCP hooks), learns from what works and what doesn't (Bayesian scoring), and shares knowledge across agent instances (A2A bus).

@@ -1,0 +1,26 @@
+---
+term: "Knowledge Base"
+definition: "In the context of AI development, a knowledge base is a structured collection of documents, patterns, and rules that AI agents can search and reference during their work. Unlike general training data, a knowledge base contains curated, project-specific information — architecture decisions, coding patterns, API documentation — that keeps AI responses accurate and consistent with your codebase."
+slug: "knowledge-base"
+category: "concepts"
+relatedTerms: ["ai-memory", "rag", "semantic-search"]
+---
+
+## Knowledge Bases for AI Agents
+
+Traditional knowledge bases store human-readable documentation. AI-native knowledge bases add:
+
+- **Vector embeddings** for semantic search
+- **Structured metadata** (tags, categories, confidence scores)
+- **Versioning** to track how knowledge evolves
+- **Access control** to scope what each agent can see
+
+## Quoth's Knowledge Base Architecture
+
+Quoth provides two levels of knowledge management:
+
+**Cloud (SaaS):** Shared knowledge base on Neon Postgres with pgvector. Supports multi-project, multi-organization access with role-based permissions. Documents are chunked and embedded for semantic search.
+
+**Local (Plugin):** SQLite database with HNSW index storing learned patterns from development sessions. Patterns include confidence scores (Bayesian Beta distribution), usage counts, and source attribution.
+
+The two levels sync through the promotion pipeline: high-confidence local patterns (>0.8 confidence, >10 uses) are automatically promoted to the cloud knowledge base for sharing across your team.

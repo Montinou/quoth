@@ -7,8 +7,9 @@ import { BookOpen, Zap, Code, BarChart, ArrowRight } from 'lucide-react';
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: 'Documentation | Quoth',
+  title: 'Documentation',
   description: 'Learn how to use Quoth - the documentation layer for AI-native development',
+  alternates: { canonical: 'https://quoth.triqual.dev/docs' },
 };
 
 const sectionIcons: Record<string, typeof BookOpen> = {

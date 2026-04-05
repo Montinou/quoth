@@ -17,9 +17,13 @@ interface FooterProps {
 
 const defaultLinks: FooterLink[] = [
   { href: "/docs", label: "Docs" },
+  { href: "/integrations", label: "Integrations" },
+  { href: "/compare", label: "Compare" },
   { href: "/blog", label: "Blog" },
   { href: "/changelog", label: "Changelog" },
   { href: "/pricing", label: "Pricing" },
+  { href: "/glossary", label: "Glossary" },
+  { href: "/guide", label: "Guide" },
 ];
 
 const ecosystemLinks: FooterLink[] = [

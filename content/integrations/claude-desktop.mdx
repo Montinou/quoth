@@ -1,0 +1,50 @@
+---
+title: "How to Use Quoth with Claude Desktop"
+description: "Setup guide for Quoth MCP server with Claude Desktop. Configure MCP, authenticate via OAuth, and access your shared knowledge base."
+client: "Claude Desktop"
+clientUrl: "https://claude.ai/download"
+date: "2026-04-05"
+supported: true
+features:
+  - "Semantic search"
+  - "Document retrieval"
+  - "Knowledge base access"
+  - "OAuth authentication"
+  - "Proposal submission"
+---
+
+## Setup
+
+Add Quoth to your Claude Desktop configuration:
+
+```json
+// claude_desktop_config.json
+{
+  "mcpServers": {
+    "quoth": {
+      "url": "https://quoth.triqual.dev/api/mcp"
+    }
+  }
+}
+```
+
+On first use, Claude Desktop will open your browser for OAuth authentication.
+
+## Available Tools
+
+Claude Desktop supports all Quoth MCP tools via the standard protocol. The most commonly used tools in desktop:
+
+- `quoth_search_index` — Search your knowledge base by topic
+- `quoth_read_doc` — Read full document content
+- `quoth_propose_update` — Submit documentation updates
+- `quoth_guidelines` — Get context-relevant guidelines
+
+## Limitations vs Claude Code
+
+Claude Desktop does not support hooks, so you won't get:
+- Automatic trajectory capture
+- Session start pattern injection
+- Self-learning daemon
+- Task routing
+
+For the full self-learning experience, use the [Claude Code integration](/integrations/claude-code).

@@ -1,0 +1,27 @@
+---
+term: "RAG (Retrieval-Augmented Generation)"
+definition: "Retrieval-Augmented Generation (RAG) is a technique that enhances AI responses by retrieving relevant information from an external knowledge base before generating an answer. Instead of relying solely on training data, RAG systems search a curated dataset, inject the most relevant documents into the prompt context, and generate responses grounded in factual, up-to-date information."
+slug: "rag"
+category: "techniques"
+relatedTerms: ["vector-embeddings", "semantic-search", "ai-memory"]
+---
+
+## How RAG Works
+
+1. **Query** — User asks a question or provides a task
+2. **Retrieve** — System searches a knowledge base for relevant documents using vector similarity
+3. **Augment** — Retrieved documents are added to the AI's prompt context
+4. **Generate** — AI generates a response grounded in the retrieved information
+
+## RAG vs Fine-Tuning
+
+| Approach | Best For | Tradeoff |
+|----------|----------|----------|
+| **RAG** | Dynamic knowledge, frequent updates | Requires retrieval infrastructure |
+| **Fine-tuning** | Behavioral changes, style | Expensive, static knowledge |
+
+RAG is generally preferred for knowledge management because it allows real-time updates without retraining the model.
+
+## RAG in Quoth
+
+Quoth uses RAG principles in its semantic search: when you query `quoth_search_index`, it converts your query into a vector embedding, searches the HNSW index for similar patterns, and returns the most relevant matches. These patterns can then be injected into AI context for grounded responses.
