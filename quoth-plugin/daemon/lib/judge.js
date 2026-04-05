@@ -96,7 +96,31 @@ function parseJudgeVerdict(raw, positionMap) {
   return 'UNPARSEABLE'
 }
 
+/**
+ * Call Haiku via Claude CLI for pairwise verdict.
+ * Returns raw answer string (or null on error/timeout).
+ */
+async function callJudge(prompt, timeoutMs = 30000) {
+  const { spawn } = require('child_process')
+  return new Promise((resolve) => {
+    const child = spawn('claude', ['--model', 'haiku', '--max-tokens', '20'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stdout = '', stderr = '', done = false
+    const timer = setTimeout(() => { if (!done) { child.kill('SIGTERM'); resolve(null) } }, timeoutMs)
+    child.stdout.on('data', d => { stdout += d.toString() })
+    child.stderr.on('data', d => { stderr += d.toString() })
+    child.on('exit', code => {
+      done = true; clearTimeout(timer)
+      if (code === 0 && stdout) resolve(stdout.trim())
+      else resolve(null)
+    })
+    child.on('error', () => { done = true; clearTimeout(timer); resolve(null) })
+    child.stdin.write(prompt); child.stdin.end()
+  })
+}
+
 module.exports = {
   betaCredibleInterval, betaCredibleWidth, selectUncertainPairs,
-  buildPairwisePrompt, parseJudgeVerdict,
+  buildPairwisePrompt, parseJudgeVerdict, callJudge,
 }

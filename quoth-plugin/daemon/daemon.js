@@ -499,7 +499,73 @@ async function runNightlyPipeline() {
     catch (err) { log('error', 'Nightly Phase E (posteriors) failed', { error: err.message }) }
   }
 
+  // Phase F: V2 LLM-as-Judge pairwise (feature-flagged)
+  if (require('./lib/flags.js').isSubFlag('judge')) {
+    try {
+      await enqueueJudgePairs()
+      await runJudgeBatch()
+    } catch (err) { log('error', 'Nightly Phase F (judge) failed', { error: err.message }) }
+  }
+
   log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
+}
+
+async function enqueueJudgePairs() {
+  const { selectUncertainPairs } = require('./lib/judge.js')
+  const clusters = db.prepare("SELECT cluster_id, alpha, beta, namespace FROM cluster_stats").all()
+  const pairs = selectUncertainPairs(clusters, { maxPairs: 20, widthThreshold: 0.3 })
+  let enqueued = 0
+  for (const p of pairs) {
+    const patA = db.prepare("SELECT id FROM patterns WHERE cluster_id=? AND status='active' ORDER BY confidence DESC LIMIT 1").get(p.a.cluster_id)
+    const patB = db.prepare("SELECT id FROM patterns WHERE cluster_id=? AND status='active' ORDER BY confidence DESC LIMIT 1").get(p.b.cluster_id)
+    if (!patA || !patB) continue
+    db.prepare(`
+      INSERT INTO judge_queue (session_id, pattern_a_id, pattern_b_id, trajectory_summary, priority)
+      VALUES ('v2-cluster-uncertainty', ?, ?, ?, ?)
+    `).run(patA.id, patB.id, `Cluster uncertainty: c${p.a.cluster_id} vs c${p.b.cluster_id}`, 0.7)
+    enqueued++
+  }
+  if (enqueued > 0) log('info', 'Judge pairs enqueued', { enqueued })
+}
+
+async function runJudgeBatch() {
+  const { buildPairwisePrompt, callJudge, parseJudgeVerdict } = require('./lib/judge.js')
+  const maxBatch = parseInt(process.env.QUOTH_JUDGE_DAILY_LIMIT || '50', 10)
+  const pending = db.prepare(`
+    SELECT id, session_id, pattern_a_id, pattern_b_id, trajectory_summary
+    FROM judge_queue WHERE status='pending' ORDER BY priority DESC LIMIT ?
+  `).all(maxBatch)
+  let judged = 0, failed = 0
+  for (const item of pending) {
+    const a = db.getPattern(item.pattern_a_id)
+    const b = db.getPattern(item.pattern_b_id)
+    if (!a || !b) {
+      db.prepare("UPDATE judge_queue SET status='skipped' WHERE id=?").run(item.id)
+      continue
+    }
+    const { prompt, positionMap } = buildPairwisePrompt(item.trajectory_summary || '', a, b)
+    const raw = await callJudge(prompt)
+    if (!raw) {
+      db.prepare("UPDATE judge_queue SET status='failed' WHERE id=?").run(item.id)
+      failed++
+      continue
+    }
+    const verdict = parseJudgeVerdict(raw, positionMap)
+    db.prepare(`
+      UPDATE judge_queue SET status='judged', verdict=?, judged_at=strftime('%s','now')*1000, cost_cents=0.03
+      WHERE id=?
+    `).run(verdict, item.id)
+    // Small posterior updates based on verdict
+    if (verdict === item.pattern_a_id) {
+      db.prepare('UPDATE patterns SET alpha = alpha + 0.5 WHERE id=?').run(item.pattern_a_id)
+      db.prepare('UPDATE patterns SET beta = beta + 0.5 WHERE id=?').run(item.pattern_b_id)
+    } else if (verdict === item.pattern_b_id) {
+      db.prepare('UPDATE patterns SET alpha = alpha + 0.5 WHERE id=?').run(item.pattern_b_id)
+      db.prepare('UPDATE patterns SET beta = beta + 0.5 WHERE id=?').run(item.pattern_a_id)
+    }
+    judged++
+  }
+  log('info', 'Judge batch complete', { judged, failed, skipped: pending.length - judged - failed })
 }
 
 async function updateClusterPosteriors() {
