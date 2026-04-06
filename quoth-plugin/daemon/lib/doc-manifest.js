@@ -119,12 +119,13 @@ function scanDocs(projectRoot, stateDir) {
       }
     }
 
-    // Update manifest entry
+    // Update manifest entry — preserve stored sourceHashes (only recordUpdate may overwrite)
+    // This prevents a failed doc update from masking staleness on retry.
     manifest.docs[docFile] = {
       version,
       updatedAt: stored.updatedAt || Date.now(),
       sourceFiles: uniqueSources,
-      sourceHashes: currentHashes,
+      sourceHashes: storedHashes,
       hash,
     }
 
@@ -150,8 +151,10 @@ function scanDocs(projectRoot, stateDir) {
 
 /**
  * Record a doc update in the manifest.
+ * Also snapshots current sourceHashes so future scans won't re-detect the same changes.
+ * @param {string} projectRoot - Project root (to re-hash source files)
  */
-function recordUpdate(stateDir, docFile, newVersion) {
+function recordUpdate(stateDir, docFile, newVersion, projectRoot) {
   const manifestPath = path.join(stateDir, MANIFEST_FILE)
   let manifest = { docs: {}, recentUpdates: [] }
   try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) } catch {}
@@ -159,6 +162,32 @@ function recordUpdate(stateDir, docFile, newVersion) {
   if (manifest.docs[docFile]) {
     manifest.docs[docFile].version = newVersion
     manifest.docs[docFile].updatedAt = Date.now()
+
+    // Snapshot current source hashes — marks these changes as "seen"
+    if (projectRoot) {
+      const freshHashes = {}
+      for (const src of (manifest.docs[docFile].sourceFiles || [])) {
+        const candidates = [
+          path.join(projectRoot, src),
+          path.join(projectRoot, 'quoth-plugin', src),
+          path.join(projectRoot, src.replace(/^quoth-plugin\//, '')),
+        ]
+        for (const candidate of candidates) {
+          try {
+            freshHashes[src] = contentHash(fs.readFileSync(candidate, 'utf8'))
+            break
+          } catch {}
+        }
+      }
+      manifest.docs[docFile].sourceHashes = freshHashes
+    }
+
+    // Update doc content hash
+    try {
+      const docsDir = path.join(projectRoot || '', 'docs', 'project')
+      const docContent = fs.readFileSync(path.join(docsDir, docFile), 'utf8')
+      manifest.docs[docFile].hash = contentHash(docContent)
+    } catch {}
   }
 
   manifest.recentUpdates.unshift({
@@ -166,7 +195,6 @@ function recordUpdate(stateDir, docFile, newVersion) {
     version: newVersion,
     timestamp: Date.now(),
   })
-  // Keep last 50 updates
   if (manifest.recentUpdates.length > 50) manifest.recentUpdates.length = 50
 
   try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2)) } catch {}

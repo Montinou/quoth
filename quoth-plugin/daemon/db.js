@@ -256,6 +256,25 @@ function createDb(dbPath) {
     `)
   } catch (e) { console.error('[db v2] judge_queue create failed:', e.message); throw e }
 
+  // One-time repair: reset inflated beta values from old aggressive temporal decay.
+  // The previous applyHourlyDecay() added beta +0.1/hour to never-matched patterns,
+  // inflating beta to 9-13 in a few days. Reset never-exposed patterns to Beta(1,1).
+  v2Migrate('repair inflated beta from temporal decay', () => {
+    const repaired = db.prepare(`
+      UPDATE patterns
+      SET alpha = 1.0, beta = 1.0,
+          confidence = 0.5,
+          updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND exposure_count = 0
+        AND (success_count + failure_count) = 0
+        AND beta > 2.0
+    `).run()
+    if (repaired.changes > 0) {
+      console.error(`[db v2] repaired ${repaired.changes} patterns with inflated beta (reset to Beta(1,1))`)
+    }
+  })
+
   // One-time backfill for existing patterns without trigrams
   try {
     const needsTrigrams = db.prepare(`
@@ -504,60 +523,56 @@ function createDb(dbPath) {
   }
 
   db.applyHourlyDecay = function() {
-    // Gradual alpha decay — floor at 0.1 to keep valid Beta distribution
-    db.prepare(`
-      UPDATE patterns
-      SET alpha = MAX(0.1, alpha - (decay_rate * alpha * 0.01)),
-          confidence = MAX(0.05, MAX(0.1, alpha - (decay_rate * alpha * 0.01)) / (MAX(0.1, alpha - (decay_rate * alpha * 0.01)) + beta)),
-          updated_at = strftime('%s','now') * 1000
-      WHERE status = 'active'
-    `).run()
+    // Exposure-based decay: only penalize patterns with actual performance data.
+    // "No exposure = no data = no change." A Docker pattern shouldn't decay
+    // just because the user hasn't done Docker work in weeks.
+    //
+    // Tier 1 (exposure-informed): Patterns exposed ≥5 times with <10% conversion.
+    //   These had real chances and consistently failed to help. beta += 0.05/hour.
+    //
+    // Tier 2 (dominance prevention): Patterns with >20 exposures get very gentle
+    //   alpha decay to prevent old winners from dominating forever.
+    //   alpha *= 0.9995/hour ≈ -0.35%/week. Only affects high-exposure patterns.
+    //
+    // Never-exposed patterns: NO decay. Their confidence stays at creation value
+    // until they get injected and we have real signal. Cleanup of truly stale
+    // never-exposed patterns is handled by archiveWeakPatterns() instead.
 
-    // Tier 1: Never matched patterns (last_matched_at IS NULL) — aggressive decay
-    // These likely never proved useful. beta += 0.1/hour → drops to ~0.3 in a week
-    db.prepare(`
-      UPDATE patterns
-      SET beta = beta + 0.1,
-          confidence = MAX(0.05, alpha / (alpha + beta + 0.1)),
-          updated_at = strftime('%s','now') * 1000
-      WHERE status = 'active'
-        AND last_matched_at IS NULL
-        AND (success_count + failure_count) = 0
-    `).run()
-
-    // Tier 2: Matched but inactive >7 days — moderate decay
-    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000)
+    // Tier 1: Exposed but unhelpful — poor conversion rate with enough data
     db.prepare(`
       UPDATE patterns
       SET beta = beta + 0.05,
           confidence = MAX(0.05, alpha / (alpha + beta + 0.05)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
-        AND last_matched_at IS NOT NULL
-        AND last_matched_at < ?
-    `).run(sevenDaysAgo)
+        AND exposure_count >= 5
+        AND (success_count * 1.0 / MAX(exposure_count, 1)) < 0.1
+    `).run()
 
-    // Tier 3: Inactive >30 days — stronger decay regardless of prior matches
-    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000)
+    // Tier 2: High-exposure dominance prevention — very gentle alpha decay
+    // alpha *= 0.9995/hour ≈ 0.965 after 1 week (3.5% weekly reduction)
     db.prepare(`
       UPDATE patterns
-      SET beta = beta + 0.15,
-          confidence = MAX(0.05, alpha / (alpha + beta + 0.15)),
+      SET alpha = MAX(0.1, alpha * 0.9995),
+          confidence = MAX(0.05, MAX(0.1, alpha * 0.9995) / (MAX(0.1, alpha * 0.9995) + beta)),
           updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
-        AND (last_matched_at IS NULL OR last_matched_at < ?)
-    `).run(thirtyDaysAgo)
+        AND exposure_count > 20
+    `).run()
   }
 
   db.archiveWeakPatterns = function() {
-    // Archive patterns that decayed below threshold with enough observations
+    // Archive patterns with enough exposure data that proved unhelpful
+    // (≥10 exposures, <5% conversion, low confidence)
     db.prepare(`
       UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
-      WHERE confidence < 0.1
-        AND (success_count + failure_count) > 3
-        AND status = 'active'
+      WHERE status = 'active'
+        AND confidence < 0.1
+        AND exposure_count >= 10
+        AND (success_count * 1.0 / MAX(exposure_count, 1)) < 0.05
     `).run()
-    // Also archive raw-tool-call patterns that never got feedback
+
+    // Archive raw tool-call patterns that never got feedback (noise from distiller)
     db.prepare(`
       UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
@@ -566,6 +581,16 @@ function createDb(dbPath) {
         AND (name LIKE 'claude-code: Bash %' OR name LIKE 'claude-code: Write /%'
              OR name LIKE 'claude-code: Edit /%' OR name LIKE 'claude-code: Read /%')
     `).run()
+
+    // Archive patterns older than 90 days that were never exposed (truly irrelevant)
+    const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000)
+    db.prepare(`
+      UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
+      WHERE status = 'active'
+        AND exposure_count = 0
+        AND (success_count + failure_count) = 0
+        AND created_at < ?
+    `).run(ninetyDaysAgo)
   }
 
   db.getPromotionCandidates = function() {

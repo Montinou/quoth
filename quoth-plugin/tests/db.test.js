@@ -64,23 +64,45 @@ describe('db', () => {
     expect(top[0].id).toBe('high')
   })
 
-  it('applies hourly decay to all patterns', () => {
-    db.upsertPattern({ id: 'decay-p', name: 'p', pattern_type: 'code-pattern',
-      condition: 'c', action: 'a', confidence: 0.8, tags: [], source: 'test' })
-    db.prepare("UPDATE patterns SET alpha = 4, beta = 1 WHERE id = 'decay-p'").run()
+  it('does NOT decay never-exposed patterns (exposure-based, not temporal)', () => {
+    db.upsertPattern({ id: 'no-exposure', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'test' })
+    db.prepare("UPDATE patterns SET alpha = 1, beta = 1 WHERE id = 'no-exposure'").run()
     db.applyHourlyDecay()
-    const p = db.getPattern('decay-p')
-    expect(p.confidence).toBeLessThan(0.8)
-    expect(p.confidence).toBeGreaterThan(0.79)
+    const p = db.prepare("SELECT alpha, beta, confidence FROM patterns WHERE id = 'no-exposure'").get()
+    expect(p.alpha).toBe(1)
+    expect(p.beta).toBe(1)
+    expect(p.confidence).toBeCloseTo(0.5)
   })
 
-  it('floors confidence at 0.0', () => {
+  it('decays exposed patterns with poor conversion (Tier 1)', () => {
+    db.upsertPattern({ id: 'poor-conv', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.5, tags: [], source: 'test' })
+    // 10 exposures, 0 successes → 0% conversion
+    db.prepare("UPDATE patterns SET alpha = 1, beta = 1, exposure_count = 10, success_count = 0 WHERE id = 'poor-conv'").run()
+    db.applyHourlyDecay()
+    const p = db.prepare("SELECT beta, confidence FROM patterns WHERE id = 'poor-conv'").get()
+    expect(p.beta).toBeCloseTo(1.05, 5)
+    expect(p.confidence).toBeLessThan(0.5)
+  })
+
+  it('applies gentle alpha decay to high-exposure patterns (Tier 2)', () => {
+    db.upsertPattern({ id: 'dominant', name: 'p', pattern_type: 'code-pattern',
+      condition: 'c', action: 'a', confidence: 0.9, tags: [], source: 'test' })
+    db.prepare("UPDATE patterns SET alpha = 10, beta = 2, exposure_count = 25 WHERE id = 'dominant'").run()
+    db.applyHourlyDecay()
+    const p = db.prepare("SELECT alpha FROM patterns WHERE id = 'dominant'").get()
+    expect(p.alpha).toBeLessThan(10)
+    expect(p.alpha).toBeGreaterThan(9.99) // very gentle: 10 * 0.9995 = 9.995
+  })
+
+  it('floors confidence at 0.05', () => {
     db.upsertPattern({ id: 'floor-p', name: 'p', pattern_type: 'code-pattern',
-      condition: 'c', action: 'a', confidence: 0.002, tags: [], source: 'test' })
-    db.prepare("UPDATE patterns SET alpha = 1, beta = 100 WHERE id = 'floor-p'").run()
+      condition: 'c', action: 'a', confidence: 0.06, tags: [], source: 'test' })
+    db.prepare("UPDATE patterns SET alpha = 1, beta = 100, exposure_count = 10, success_count = 0 WHERE id = 'floor-p'").run()
     db.applyHourlyDecay()
     const p = db.getPattern('floor-p')
-    expect(p.confidence).toBeGreaterThanOrEqual(0.0)
+    expect(p.confidence).toBeGreaterThanOrEqual(0.05)
   })
 
   it('stores and retrieves embedding in upsertPattern', () => {
@@ -182,13 +204,14 @@ describe('db', () => {
     expect(p.confidence).toBeCloseTo(1 / 3)
   })
 
-  it('applyHourlyDecay decays alpha slowly', () => {
+  it('applyHourlyDecay only touches exposed patterns', () => {
     db.upsertPattern({ id: 'decay-bayes', name: 'b', pattern_type: 'code-pattern',
       condition: 'c', action: 'a', confidence: 0.9, tags: [], source: 'distilled' })
+    // No exposure → no decay
     db.prepare("UPDATE patterns SET alpha = 10, beta = 2 WHERE id = 'decay-bayes'").run()
     db.applyHourlyDecay()
-    const p = db.prepare("SELECT alpha FROM patterns WHERE id = 'decay-bayes'").get()
-    expect(p.alpha).toBeLessThan(10)
-    expect(p.alpha).toBeGreaterThan(9)
+    const p = db.prepare("SELECT alpha, beta FROM patterns WHERE id = 'decay-bayes'").get()
+    expect(p.alpha).toBe(10)
+    expect(p.beta).toBe(2)
   })
 })

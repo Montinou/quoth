@@ -487,6 +487,7 @@ function startV2MiniTimer() {
 }
 
 // --- Nightly pipeline at 3am: deep consolidation → doc auto-update ---
+// Also runs at startup if >24h since last execution (daemon restarts kill timers).
 function scheduleNightlyPipeline() {
   const now = new Date()
   const next3am = new Date(now)
@@ -502,11 +503,49 @@ function scheduleNightlyPipeline() {
   }, msUntil)
 
   log('info', `Nightly pipeline (consolidation + doc update) in ${Math.round(msUntil / 60000)}m`)
+
+  // Startup catch-up: if >24h since last nightly execution, run now
+  checkStartupCatchup()
+}
+
+function checkStartupCatchup() {
+  try {
+    const logPath = path.join(STATE_DIR, 'doc-update-log.jsonl')
+    let lastRunAt = 0
+    if (fs.existsSync(logPath)) {
+      const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean)
+      // Find last pipeline_start or pipeline_complete event
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const e = JSON.parse(lines[i])
+          if (e.event === 'pipeline_start' || e.event === 'pipeline_complete') {
+            lastRunAt = new Date(e.ts).getTime()
+            break
+          }
+        } catch {}
+      }
+    }
+
+    const hoursSinceLastRun = (Date.now() - lastRunAt) / (1000 * 60 * 60)
+    if (hoursSinceLastRun > 24) {
+      log('info', `Nightly pipeline overdue (${Math.round(hoursSinceLastRun)}h since last run), executing now`)
+      // Delay 10s to let daemon fully initialize
+      setTimeout(() => {
+        runNightlyPipeline().catch(err => log('error', 'Startup catch-up pipeline failed', { error: err.message }))
+      }, 10000)
+    } else {
+      log('info', `Last nightly pipeline ${Math.round(hoursSinceLastRun)}h ago, skipping startup catch-up`)
+    }
+  } catch (err) {
+    log('error', 'Startup catch-up check failed', { error: err.message })
+  }
 }
 
 async function runNightlyPipeline() {
   const start = Date.now()
   log('info', 'Nightly pipeline started')
+  const { appendExecLog } = require('./lib/doc-updater.js')
+  appendExecLog(STATE_DIR, { event: 'pipeline_start' })
 
   // Phase A: Deep consolidation (patterns)
   try {
@@ -569,7 +608,9 @@ async function runNightlyPipeline() {
     } catch (err) { log('error', 'Nightly Phase G (curation) failed', { error: err.message }) }
   }
 
-  log('info', `Nightly pipeline complete in ${Math.round((Date.now() - start) / 1000)}s`)
+  const elapsed = Math.round((Date.now() - start) / 1000)
+  appendExecLog(STATE_DIR, { event: 'pipeline_complete', elapsed_s: elapsed })
+  log('info', `Nightly pipeline complete in ${elapsed}s`)
 }
 
 async function enqueueJudgePairs() {
@@ -957,49 +998,57 @@ function clearTimers() {
 
 // --- Doc auto-update (called as Phase B of nightly pipeline) ---
 async function runDocUpdate() {
+  const { appendExecLog } = require('./lib/doc-updater.js')
   log('info', 'Starting doc auto-update scan')
-  try {
-    // Check if docs/project/ exists in this project
-    const docsDir = path.join(PROJECT_ROOT, 'docs', 'project')
-    if (!fs.existsSync(docsDir)) {
-      log('debug', 'No docs/project/ found, skipping doc update')
-      return
-    }
+  appendExecLog(STATE_DIR, { event: 'doc_scan_start' })
 
-    // Scan for stale docs using content hashes
-    const { staleDocs } = scanDocs(PROJECT_ROOT, STATE_DIR)
-
-    if (staleDocs.length === 0) {
-      log('info', 'All docs up to date')
-      return
-    }
-
-    log('info', `Found ${staleDocs.length} stale doc(s)`, {
-      docs: staleDocs.map(d => `${d.doc} (${d.changedFiles.length} changes)`)
-    })
-
-    // Update each stale doc (sequential to avoid overwhelming the LLM)
-    const updates = []
-    for (const staleInfo of staleDocs) {
-      const result = await updateDoc(PROJECT_ROOT, STATE_DIR, staleInfo, log)
-      if (result) updates.push(result)
-    }
-
-    // Re-scan to update all content hashes in manifest after updates
-    scanDocs(PROJECT_ROOT, STATE_DIR)
-
-    // Git commit + push
-    if (updates.length > 0) {
-      commitAndPush(PROJECT_ROOT, updates, log)
-    }
-
-    log('info', 'Doc auto-update complete', {
-      scanned: staleDocs.length,
-      updated: updates.length
-    })
-  } catch (err) {
-    log('error', 'Doc auto-update failed', { error: err.message })
+  // Check if docs/project/ exists in this project
+  const docsDir = path.join(PROJECT_ROOT, 'docs', 'project')
+  if (!fs.existsSync(docsDir)) {
+    log('debug', 'No docs/project/ found, skipping doc update')
+    appendExecLog(STATE_DIR, { event: 'doc_scan_skip', reason: 'no docs/project/ dir' })
+    return
   }
+
+  // Scan for stale docs using content hashes
+  const { staleDocs } = scanDocs(PROJECT_ROOT, STATE_DIR)
+
+  if (staleDocs.length === 0) {
+    log('info', 'All docs up to date')
+    appendExecLog(STATE_DIR, { event: 'doc_scan_complete', stale: 0 })
+    return
+  }
+
+  log('info', `Found ${staleDocs.length} stale doc(s)`, {
+    docs: staleDocs.map(d => `${d.doc} (${d.changedFiles.length} changes)`)
+  })
+  appendExecLog(STATE_DIR, {
+    event: 'doc_scan_complete', stale: staleDocs.length,
+    docs: staleDocs.map(d => d.doc),
+  })
+
+  // Update each stale doc sequentially (claude -p calls are heavy)
+  const updates = []
+  const failures = []
+  for (const staleInfo of staleDocs) {
+    const result = await updateDoc(PROJECT_ROOT, STATE_DIR, staleInfo, log)
+    if (result) updates.push(result)
+    else failures.push(staleInfo.doc)
+  }
+
+  // Git commit + push (sourceHashes already updated by recordUpdate per doc)
+  if (updates.length > 0) {
+    commitAndPush(PROJECT_ROOT, updates, log)
+  }
+
+  appendExecLog(STATE_DIR, {
+    event: 'doc_update_batch_complete',
+    scanned: staleDocs.length, updated: updates.length, failed: failures.length,
+    failures: failures.length > 0 ? failures : undefined,
+  })
+  log('info', 'Doc auto-update complete', {
+    scanned: staleDocs.length, updated: updates.length, failed: failures.length,
+  })
 }
 
 // --- Stale agent cleanup every 5 minutes ---

@@ -1,37 +1,29 @@
 'use strict'
 
 /**
- * Doc Auto-Updater — reads a stale doc + changed source files, uses LLM to generate
- * an incremental update, bumps version, writes back.
+ * Doc Auto-Updater — reads a stale doc + changed source files, uses `claude -p`
+ * (Sonnet 4.6) to generate an incremental update, bumps version, writes back.
+ *
+ * Execution log: ~/.quoth/intelligence/doc-update-log.jsonl
+ * No LLM fallbacks — if claude CLI fails, the error is reported as-is.
  */
 
 const fs = require('fs')
 const path = require('path')
-const { callLLM } = require('./llm.js')
+const { execSync } = require('child_process')
 const { bumpPatch, VERSION_RE, recordUpdate } = require('./doc-manifest.js')
 
-const UPDATE_PROMPT = `You are updating a technical documentation file. Some source files it references have changed.
+const LOG_FILE = 'doc-update-log.jsonl'
 
-CURRENT DOC:
-{{current_doc}}
-
-CHANGED SOURCE FILES (new content):
-{{changed_sources}}
-
-INSTRUCTIONS:
-- Update ONLY the sections affected by the source file changes
-- Keep all other content exactly as-is
-- Update version number: {{old_version}} → {{new_version}}
-- Update the "Last updated" date to {{today}}
-- Preserve the exact markdown formatting, headers, tables
-- Do NOT add commentary or explanation — return only the updated document
-- If changes are minimal (e.g. a variable renamed), make minimal edits
-- If a new function/feature was added, add a new section or table row
-
-Return the COMPLETE updated document (not just the diff).`
+function appendExecLog(stateDir, entry) {
+  try {
+    const logPath = path.join(stateDir, LOG_FILE)
+    fs.appendFileSync(logPath, JSON.stringify({ ...entry, ts: new Date().toISOString() }) + '\n')
+  } catch {}
+}
 
 /**
- * Update a single stale doc.
+ * Update a single stale doc using `claude -p` with Sonnet 4.6.
  * @param {string} projectRoot - Project root dir
  * @param {string} stateDir - ~/.quoth/intelligence/
  * @param {Object} staleInfo - { doc, version, changedFiles }
@@ -42,29 +34,28 @@ async function updateDoc(projectRoot, stateDir, staleInfo, log) {
   const docsDir = path.join(projectRoot, 'docs', 'project')
   const docPath = path.join(docsDir, staleInfo.doc)
 
-  let currentDoc
-  try { currentDoc = fs.readFileSync(docPath, 'utf8') } catch { return null }
+  if (!fs.existsSync(docPath)) {
+    const err = `Doc file not found: ${docPath}`
+    appendExecLog(stateDir, { event: 'update_failed', doc: staleInfo.doc, error: err })
+    log('error', err)
+    return null
+  }
 
-  // Read changed source files
-  const changedSources = []
-  for (const src of staleInfo.changedFiles.slice(0, 5)) { // Max 5 files to keep prompt size reasonable
-    const candidates = [
+  // Resolve source file paths so claude knows where to read them
+  const resolvedFiles = []
+  for (const src of staleInfo.changedFiles) {
+    for (const candidate of [
       path.join(projectRoot, src),
       path.join(projectRoot, 'quoth-plugin', src),
       path.join(projectRoot, src.replace(/^quoth-plugin\//, '')),
-    ]
-    for (const candidate of candidates) {
-      try {
-        const content = fs.readFileSync(candidate, 'utf8')
-        // Truncate large files to keep prompt manageable
-        changedSources.push(`--- ${src} ---\n${content.slice(0, 3000)}`)
-        break
-      } catch {}
+    ]) {
+      if (fs.existsSync(candidate)) { resolvedFiles.push(candidate); break }
     }
   }
 
-  if (changedSources.length === 0) {
-    log('debug', 'No readable changed sources for doc', { doc: staleInfo.doc })
+  if (resolvedFiles.length === 0) {
+    appendExecLog(stateDir, { event: 'update_skipped', doc: staleInfo.doc, reason: 'no source files found' })
+    log('debug', 'No source files found', { doc: staleInfo.doc })
     return null
   }
 
@@ -72,38 +63,58 @@ async function updateDoc(projectRoot, stateDir, staleInfo, log) {
   const newVersion = bumpPatch(oldVersion)
   const today = new Date().toISOString().slice(0, 10)
 
-  const prompt = UPDATE_PROMPT
-    .replace('{{current_doc}}', currentDoc.slice(0, 6000)) // Truncate very long docs
-    .replace('{{changed_sources}}', changedSources.join('\n\n'))
-    .replace('{{old_version}}', oldVersion)
-    .replace('{{new_version}}', newVersion)
-    .replace('{{today}}', today)
+  const prompt = [
+    `Update the documentation file: ${docPath}`,
+    `These source files changed since the doc was last updated:`,
+    resolvedFiles.map(f => `  - ${f}`).join('\n'),
+    '',
+    `Read the doc and each source file. Edit the doc to reflect the current source code.`,
+    `Version: ${oldVersion} → ${newVersion}. Date: ${today}.`,
+    `Make targeted edits only. Do not rewrite unchanged sections.`,
+  ].join('\n')
 
   try {
-    // Use Kimi K2.5 via Moonshot API for doc generation (same as all daemon LLM calls)
-    let updatedDoc = await callLLM(prompt, 4000)
-    // Strip markdown code block wrappers if present
-    updatedDoc = updatedDoc.replace(/^```(?:markdown|md)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+    // Use claude CLI with Sonnet 4.6 and full tool access to edit directly
+    execSync(
+      'claude -p --model claude-sonnet-4-6 --dangerously-skip-permissions',
+      {
+        input: prompt,
+        encoding: 'utf8',
+        timeout: 600000, // 10 min per doc
+        maxBuffer: 2 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: projectRoot,
+      }
+    )
 
-    if (updatedDoc.length < 100) throw new Error('Updated doc too short')
-
-    // Validate: ensure the output looks like a markdown doc
-    if (!updatedDoc.includes('#')) throw new Error('Updated doc has no headers')
-
-    // Write back
-    fs.writeFileSync(docPath, updatedDoc + '\n')
+    // Verify the doc was actually modified
+    const updatedContent = fs.readFileSync(docPath, 'utf8')
+    if (!updatedContent.includes('#')) {
+      throw new Error('Doc file has no markdown headers after edit')
+    }
 
     // Record in manifest
-    recordUpdate(stateDir, staleInfo.doc, newVersion)
+    recordUpdate(stateDir, staleInfo.doc, newVersion, projectRoot)
+
+    appendExecLog(stateDir, {
+      event: 'update_success', doc: staleInfo.doc,
+      oldVersion, newVersion,
+      changedFiles: staleInfo.changedFiles,
+    })
 
     log('info', 'Doc auto-updated', {
       doc: staleInfo.doc,
       version: `${oldVersion} → ${newVersion}`,
-      changedFiles: staleInfo.changedFiles.length
+      changedFiles: staleInfo.changedFiles.length,
     })
 
     return { doc: staleInfo.doc, oldVersion, newVersion }
   } catch (err) {
+    appendExecLog(stateDir, {
+      event: 'update_failed', doc: staleInfo.doc, error: err.message,
+      changedFiles: staleInfo.changedFiles,
+      stderr: err.stderr ? err.stderr.toString().slice(0, 500) : undefined,
+    })
     log('error', 'Doc auto-update failed', { doc: staleInfo.doc, error: err.message })
     return null
   }
@@ -139,4 +150,4 @@ function commitAndPush(projectRoot, updates, log) {
   }
 }
 
-module.exports = { updateDoc, commitAndPush }
+module.exports = { updateDoc, commitAndPush, appendExecLog }

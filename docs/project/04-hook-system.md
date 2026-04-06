@@ -1,4 +1,4 @@
-# Hook System
+# Hook System <!-- v1.0.1 | 2026-04-06 -->
 
 Quoth's hook system integrates with Claude Code's lifecycle events to provide intelligence routing, trajectory capture, pattern injection, and command safety checks. All hooks are declared in `hooks/hooks.json` and execute via two entry points: the unified dispatcher (`hook-dispatch.js`) and the standalone trajectory capture script (`trajectory-capture.js`).
 
@@ -249,21 +249,23 @@ Routes the user's prompt to an optimal agent type and displays relevant intellig
 **Execution flow:**
 
 1. **Persist prompt history:** Save the user's prompt (truncated to 500 chars) to `~/.quoth/intelligence/prompt-history.json` as a rolling buffer of the last 5 prompts. The buffer resets when the session ID changes. This allows `trajectory-capture.js` to include nearby user intents with each tool call.
-2. Call `intelligence.getContext(prompt, 5)` to search the intelligence graph for entries matching the prompt. Uses trigram-based Jaccard similarity weighted with PageRank scores. No API calls involved.
-3. Filter results to entries with `score >= 0.1`.
-4. Display up to 3 relevant patterns with their score, summary, rank, and access count:
+2. **Record in session memory:** Call `createSessionMemory()` (from `./session-memory.js`) and invoke `sm.recordPrompt(prompt)` for context-aware injection in later hooks.
+3. **Inject prompt-relevant patterns:** If a DB is available and the prompt is ≥ 5 chars, call `rankByThompsonAndTrigram(db, project, prompt, 5, { minConfidence: 0.3, excludeRecentMinutes: 2 })` from `../daemon/lib/injection.js`. Record exposure via `recordExposure(db, ids)` and track the injection in session memory. Display up to 5 results:
    ```
-   [INTELLIGENCE] Relevant patterns for this task:
-     * (0.42) Auth must not hard-fail on missing JWT claims [rank #1, 3x accessed]
-     * (0.28) Drizzle arrays use {id1,id2} format [rank #2, 7x accessed]
+   [Quoth] Patterns for this prompt:
+   - [0.48] Update documentation with version and last updated timestamp: Update documentation...
+   - [0.50] Use 'ls -la' to inspect directory contents: Use 'ls -la' to inspect...
    ```
-5. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
-6. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
-7. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
+4. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
+5. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
+6. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
 
-**Output format:**
+**Output format** (pattern injection printed first, then routing table):
 
 ```
+[Quoth] Patterns for this prompt:
+- [0.48] Some pattern: Pattern action here...
+
 [INFO] Routing task: implement user authentication...
 
 Routing Method
@@ -307,16 +309,21 @@ Initializes the intelligence graph, injects project context files, and injects h
    - Computes PageRank (damping factor 0.85, max 30 iterations, convergence threshold 1e-6).
    - Caches graph state to `graph-state.json` and ranked entries to `ranked-context.json`.
    - Cache TTL: 60 seconds. Returns early on cache hit.
-2. **Inject project context** (v3.2.0 addition): Resolves the current project name and searches three locations in order:
+2. **Inject project context**: Resolves the current project name and searches three locations in order:
    - **Plugin-bundled context** (`quoth-plugin/context/{project}.md`): Project-specific context files shipped with the plugin. If found, its contents are printed to stdout (injected into session context). Marks `contextInjected = true` and stops searching plugin-bundled files.
    - **Fallback summary** (`quoth-plugin/context/project-summary.md`): Only used if no project-specific file was found AND the current project is `quoth` itself. Prevents the generic summary from being injected in non-quoth sessions.
    - **Project-local context** (`{CLAUDE_PROJECT_DIR}/.quoth-context.md`): Checked independently — injected in addition to the above if it exists. Allows project-local overrides without modifying the plugin.
-3. Load project patterns from SQLite filtered to `confidence >= 0.6`, max 3 results.
-4. Output pattern summaries:
+3. **Report doc auto-updates:** Read `~/.quoth/intelligence/doc-manifest.json`. Filter `recentUpdates` entries newer than `manifest.lastReportedAt`. Print unseen updates (up to 5 shown, remainder counted) and update `lastReportedAt` to prevent re-reporting on the next session.
+4. **Inject patterns (dual V1/V2 path):** Load last session's context snapshot from `last-context-{project}.json` to build a `queryText` from recent prompts and top topics.
+   - **V1 path** (default): `rankByThompsonAndTrigram(db, project, queryText, 7, { minConfidence: 0.3, excludeRecentMinutes: 5 })` from `../daemon/lib/injection.js`.
+   - **V2 path** (when `isSubFlag('injection')` is set): generate a query embedding, run `hierarchicalSelect(candidates, clusterMap, 7, queryEmbedding)` from `../daemon/lib/bandit-v2.js`, then optionally replace some results with exploration candidates via `replaceWithExploration` (propensity.js). Log each injection to `injection_log` via `db.logInjection()`.
+   - Record exposures via `recordExposure(db, ids)` and track in session memory.
+5. Output pattern summaries with version tag and optional `[exp]` marker for exploration patterns:
    ```
-   [Quoth] 2 patterns loaded for project "quoth":
+   [Quoth] 3 patterns loaded for project "quoth" (v1):
    - [0.85] auth-resilience: Use DB fallback for optional JWT claims
    - [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres ANY()
+   - [0.61 [exp]] some-pattern: Exploration candidate
    ```
 
 **Context injection lookup order:**
@@ -328,6 +335,13 @@ Initializes the intelligence graph, injects project context files, and injects h
 | 3 | `{CLAUDE_PROJECT_DIR}/.quoth-context.md` | Always checked, injected in addition to above |
 
 The context files are printed as plain markdown to stdout. Claude Code injects stdout from `SessionStart` hooks into the session's system context, making the content available at the start of every conversation without occupying tool call budget.
+
+**Pattern injection path selection:**
+
+| Flag | Path | Source |
+|------|------|--------|
+| `isSubFlag('injection')` = false | V1: Thompson + trigram | `daemon/lib/injection.js` |
+| `isSubFlag('injection')` = true | V2: Hierarchical Thompson + exploration | `daemon/lib/bandit-v2.js` + `daemon/lib/propensity.js` |
 
 ### `session-end` (SessionEnd / PreCompact)
 
@@ -359,13 +373,18 @@ Consolidates the intelligence graph, writes a session summary to the trajectory 
      "success_rate": 0.955,
      "user_intents": ["fix the auth bug", "update the docs"],
      "llm_reasonings": ["Check git status", "Run tests after edit"],
-     "outcome": "success",
+     "outcome": "partial",
      "source": "session-end",
      "timestamp": 1712345678000
    }
    ```
-   The `user_intents` field collects unique prompts from `user_intent` fields across tool entries. The `llm_reasonings` field collects unique reasoning snippets (last 10, deduped).
+   The `user_intents` field collects unique prompts from `user_intent` fields across tool entries. The `llm_reasonings` field collects unique reasoning snippets (last 10, deduped). `outcome` is `"success"` (zero failures), `"partial"` (successes > failures), or `"failure"` (failures ≥ successes).
 4. **Signal daemon:** Read `~/.quoth/daemon.pid` and send `SIGUSR1` to trigger immediate processing of the session summary via batch distill.
+5. **Feedback loop + context snapshot:**
+   - **V2 path** (`isSubFlag('injection')`): Compute session-level reward via `sessionOutcomeReward(events)` from `../daemon/lib/attribution.js`. For each injected pattern, call `db.updateInjectionOutcome(sessionId, pid, reward)`. Patterns that were explicitly used (`wasUsed`) receive `reward=1.0`; others receive the session-level reward.
+   - **V1 path**: Collect stale (un-used) injections from session memory via `sm.getStaleInjections(0)`. Apply soft-negative via `applySoftNegative(db, stale)` from `../daemon/lib/scoring.js`.
+   - Write context snapshot to `~/.quoth/intelligence/last-context-{project}.json` for the next `session-restore` to use as `queryText`.
+   - Clear session memory file via `sm.clear()`.
 
 This hook fires on both `SessionEnd` (normal session close, Ctrl+C) and `PreCompact` (context compression). PreCompact is the more frequent trigger — it acts as a natural "checkpoint" so batch distill processes manageable chunks rather than waiting for sessions that may last hours.
 
@@ -402,7 +421,11 @@ Applies positive Bayesian feedback to patterns that were matched during the suba
 2. For each boosted ID with a `pat-` prefix (indicating a SQLite pattern):
    - Strip the `pat-` prefix to get the real pattern ID.
    - Call `db.applyBayesianUpdate(patternId, 'success')` to increment the alpha parameter and recalculate Bayesian confidence in the SQLite database.
-3. Output: `[OK] Task completed`
+3. **Session memory feedback:** Find recently-injected patterns not yet marked as used (within last 5 min) via `sm._state().injectedPatterns`. For each:
+   - Call `sm.markPatternUsed(id)`.
+   - **V2 path** (`isSubFlag('injection')`): `db.updateInjectionOutcome(sessionId, id, 1.0)` — strong reward signal recorded in `injection_log` for nightly SNIPS aggregation.
+   - **V1 path**: `db.applyBayesianUpdate(id, 'success')` on the pattern directly.
+4. Output: `[OK] Task completed`
 
 ### `pre-bash` (PreToolUse: Bash)
 
@@ -432,27 +455,16 @@ Injects domain-relevant patterns from the SQLite database into the subagent's co
 
 1. Load the SQLite database. If unavailable, return silently.
 2. Resolve the project name from `CLAUDE_PROJECT_DIR`.
-3. Load up to 10 project patterns from SQLite via `db.getProjectPatterns(project, 10)`.
-4. If no patterns, return silently.
-5. Score each pattern for relevance to the subagent's domain using a keyword map:
-
-   | Agent Type | Domain Keywords |
-   |------------|----------------|
-   | `coder` | code, implement, write, function, module, refactor |
-   | `tester` | test, spec, coverage, assert, mock, fixture |
-   | `reviewer` | review, quality, lint, convention, style |
-   | `researcher` | search, find, explore, document, investigate |
-   | `planner` | plan, design, architect, structure, organize |
-   | `security` | security, auth, token, credential, vulnerability |
-
-   For unknown agent types, the type string is tokenized (split on `-`, `_`, spaces) and used as keywords.
-
-6. Each pattern is scored by counting how many domain keywords appear in its `name`, `condition`, `action`, and `tags` fields.
-7. Filter to patterns with `relevance > 0` or `confidence >= 0.7`. Sort by relevance (descending), then confidence (descending). Take top 5.
-8. Output JSON with `additionalContext` field for Claude Code to inject:
+3. Build a `queryText` from the subagent's task description (`hookInput.prompt || hookInput.description`) and agent type, enriched with session context via `sm.getQueryText()`.
+4. Select patterns using the dual V1/V2 path (up to 5):
+   - **V1 path** (default): `rankByThompsonAndTrigram(db, project, queryText, 5, { minConfidence: 0.3, excludeRecentMinutes: 2 })`.
+   - **V2 path** (`isSubFlag('injection')`): Generate a query embedding, run `hierarchicalSelect(candidates, clusterMap, 5, queryEmbedding)`, optionally apply exploration via `replaceWithExploration`. Log each injection to `injection_log`.
+5. If no patterns, return silently.
+6. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
+7. Output JSON with `additionalContext` field for Claude Code to inject. Version tag (`v1`/`v2`) and optional `[exp]` marker are included:
    ```json
    {
-     "additionalContext": "[Quoth] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
+     "additionalContext": "[Quoth v1] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
    }
    ```
 

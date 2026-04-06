@@ -112,9 +112,9 @@ const handlers = {
     } catch {}
 
     // Record prompt in session memory for context-aware injection
+    const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+    const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
     try {
-      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
-      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
       const { createSessionMemory } = require('./session-memory.js')
       const sm = createSessionMemory({
         dir: path.join(QUOTH_HOME, 'intelligence'),
@@ -123,21 +123,39 @@ const handlers = {
       sm.recordPrompt(prompt)
     } catch {}
 
-    const intel = getIntelligence()
-    // Get intelligence context — lightweight graph lookup, no API calls
-    const ctx = intel.getContext(prompt, 5)
-    const hasRelevant = ctx && ctx.entries && ctx.entries.some(e => e.score >= 0.1)
-    if (hasRelevant) {
-      const top = ctx.entries.filter(e => e.score >= 0.1).slice(0, 3)
-      const lines = ['[INTELLIGENCE] Relevant patterns for this task:']
-      for (let i = 0; i < top.length; i++) {
-        const e = top[i]
-        lines.push(`  * (${e.score.toFixed(2)}) ${e.summary} [rank #${i + 1}, ${e.accessCount}x accessed]`)
-      }
-      console.log(lines.join('\n'))
+    // Inject prompt-relevant patterns (trigram-matched against current prompt)
+    const db = getDb()
+    if (db && prompt && prompt.trim().length >= 5) {
+      try {
+        const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
+        const { recordExposure } = require('../daemon/lib/scoring.js')
+        const { createSessionMemory } = require('./session-memory.js')
+
+        const patterns = rankByThompsonAndTrigram(db, project, prompt, 5, {
+          minConfidence: 0.3,
+          excludeRecentMinutes: 2,
+        })
+
+        if (patterns.length > 0) {
+          recordExposure(db, patterns.map(p => p.id))
+          const sm = createSessionMemory({
+            dir: path.join(QUOTH_HOME, 'intelligence'),
+            sessionId, project,
+          })
+          sm.recordInjection(patterns.map(p => p.id))
+
+          const lines = ['[Quoth] Patterns for this prompt:']
+          for (const p of patterns) {
+            const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
+            lines.push(`- [${conf.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`)
+          }
+          console.log(lines.join('\n'))
+        }
+      } catch {}
     }
 
     // Route the task
+    const intel = getIntelligence()
     const result = intel.routeTask(prompt)
     const { getAlternatives } = require(path.join(QUOTH_PLUGIN, 'mcp', 'lib', 'routing'))
     const alternatives = getAlternatives(result.agent)
@@ -285,7 +303,7 @@ const handlers = {
             }
           }
 
-          let selected = hierarchicalSelect(candidates, clusterMap, 3, queryEmbedding)
+          let selected = hierarchicalSelect(candidates, clusterMap, 7, queryEmbedding)
           if (isSubFlag('exploration')) selected = replaceWithExploration(selected, candidates, EXPLORATION_RATE)
 
           for (const s of selected) {
@@ -299,7 +317,7 @@ const handlers = {
         } else {
           // V1 path: Thompson + trigram
           const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
-          patterns = rankByThompsonAndTrigram(db, project, queryText, 3, {
+          patterns = rankByThompsonAndTrigram(db, project, queryText, 7, {
             minConfidence: 0.3,
             excludeRecentMinutes: 5,
           })
