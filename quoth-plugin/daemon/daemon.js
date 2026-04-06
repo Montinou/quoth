@@ -1027,19 +1027,46 @@ async function runDocUpdate() {
     docs: staleDocs.map(d => d.doc),
   })
 
-  // Update each stale doc sequentially (claude -p calls are heavy)
-  const updates = []
-  const failures = []
-  for (const staleInfo of staleDocs) {
-    const result = await updateDoc(PROJECT_ROOT, STATE_DIR, staleInfo, log)
-    if (result) updates.push(result)
-    else failures.push(staleInfo.doc)
-  }
-
-  // Git commit + push (sourceHashes already updated by recordUpdate per doc)
-  if (updates.length > 0) {
-    commitAndPush(PROJECT_ROOT, updates, log)
-  }
+  // Spawn doc update as a separate process so claude -p doesn't kill the daemon.
+  // Concurrency of 3 to balance speed vs resource usage.
+  const { spawn } = require('child_process')
+  const script = `
+    const path = require('path'), os = require('os'), fs = require('fs')
+    const { scanDocs } = require('./quoth-plugin/daemon/lib/doc-manifest.js')
+    const { updateDoc, commitAndPush, appendExecLog } = require('./quoth-plugin/daemon/lib/doc-updater.js')
+    const P = ${JSON.stringify(PROJECT_ROOT)}, S = ${JSON.stringify(STATE_DIR)}
+    const CONCURRENCY = 3
+    const log = (l, m, d) => console.error(JSON.stringify({ ts: new Date().toISOString(), level: l, msg: m, data: d }))
+    async function run() {
+      const { staleDocs } = scanDocs(P, S)
+      const updates = [], failures = []
+      for (let i = 0; i < staleDocs.length; i += CONCURRENCY) {
+        const batch = staleDocs.slice(i, i + CONCURRENCY)
+        log('info', 'Batch ' + (Math.floor(i/CONCURRENCY)+1), { docs: batch.map(d => d.doc) })
+        const results = await Promise.allSettled(batch.map(s => updateDoc(P, S, s, log)))
+        for (let j = 0; j < results.length; j++) {
+          const r = results[j]
+          if (r.status === 'fulfilled' && r.value) updates.push(r.value)
+          else failures.push(batch[j].doc)
+        }
+      }
+      if (updates.length > 0) commitAndPush(P, updates, log)
+      appendExecLog(S, { event: 'doc_update_batch_complete', updated: updates.length, failed: failures.length, failures: failures.length > 0 ? failures : undefined })
+      log('info', 'Done', { updated: updates.length, failed: failures.length })
+    }
+    run().catch(e => { console.error('Fatal:', e.message); process.exit(1) })
+  `
+  const child = spawn('node', ['-e', script], {
+    cwd: PROJECT_ROOT,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    detached: true,
+  })
+  child.stderr.on('data', (d) => {
+    try { const e = JSON.parse(d.toString().trim()); log(e.level, `[doc-update] ${e.msg}`, e.data) }
+    catch { log('debug', `[doc-update] ${d.toString().trim()}`) }
+  })
+  child.unref() // Don't wait for it — daemon continues running
+  log('info', 'Doc update spawned as separate process', { pid: child.pid, docs: staleDocs.length })
 
   appendExecLog(STATE_DIR, {
     event: 'doc_update_batch_complete',
