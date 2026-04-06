@@ -1,5 +1,7 @@
 # Cloud Sync & Promotion
 
+*Version: 1.0.1 — Last updated: 2026-04-06*
+
 Documentation of the pattern promotion and cloud synchronization system that bridges the local SQLite-based learning daemon with the Quoth cloud platform (quoth.triqual.dev).
 
 ## Overview
@@ -26,14 +28,12 @@ Patterns eligible for cloud promotion must meet ALL of the following criteria (e
 | Status | `active` | `patterns.status` |
 | Source | `distilled` | `patterns.source` |
 
-```sql
+sql
 SELECT * FROM patterns
 WHERE confidence > 0.8
   AND (success_count + failure_count) > 10
   AND status = 'active'
   AND source = 'distilled'
-```
-
 ### Nightly Promotion (3am Daily)
 
 The daemon schedules deep consolidation at 3am local time via `scheduleDeepConsolidate()`. This is a multi-phase process:
@@ -43,6 +43,14 @@ The daemon schedules deep consolidation at 3am local time via `scheduleDeepConso
 2. Sends them to an LLM (via `daemon/lib/llm.js`) asking for merge/archive recommendations
 3. Applies merges (Bayesian success update on keep target, archive the duplicate)
 4. Archives low-value patterns
+
+LLM calls route through the **Vercel AI Gateway** (`ai-gateway.vercel.sh`) using `google/gemini-2.5-flash-lite` by default (fast, cheap, JSON mode). Override via `QUOTH_LLM_MODEL` env var. Moonshot (Kimi K2.5 direct) is a legacy fallback used only when `MOONSHOT_API_KEY` is set but `AI_GATEWAY_API_KEY` is not.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AI_GATEWAY_API_KEY` | Yes (primary) | (none) | Vercel AI Gateway key (`vck_*`) |
+| `QUOTH_LLM_MODEL` | No | `google/gemini-2.5-flash-lite` | Override LLM model (any gateway-supported model) |
+| `MOONSHOT_API_KEY` | No | (none) | Legacy fallback — Kimi K2.5 direct (only used if no gateway key) |
 
 **Phase 2: Cloud Promotion**
 1. Calls `db.getPromotionCandidates()` to get eligible patterns
@@ -135,7 +143,7 @@ The `buildContent(pattern)` function generates markdown for the `content` field:
 
 **Tags:** tag1, tag2
 
-**Source:** Distilled from local learning daemon -- promoted 2026-04-04
+**Source:** Distilled from local learning daemon — promoted 2026-04-04
 ```
 
 Tags are parsed from JSON if stored as a string. The date is the current date at promotion time.
@@ -166,55 +174,31 @@ This enables:
 
 ## Global Namespace Promotion
 
-Separate from cloud promotion. During deep consolidation, patterns that meet broad applicability criteria are promoted to the `global` namespace in local SQLite:
+Separate from cloud promotion. During deep consolidation, patterns that meet broad applicability criteria are promoted to the local `global` namespace so they are accessible to all projects.
 
 ### Eligibility Criteria
 
-```sql
-SELECT * FROM patterns
-WHERE status = 'active'
-  AND namespace != 'global'
-  AND confidence > 0.8
-  AND (success_count + failure_count) > 10
-  AND applicability = 'broad'
-```
+| Criterion | Threshold |
+|-----------|-----------|
+| Confidence | > 0.8 |
+| Total uses | > 10 |
+| Applicability | `broad` |
+| Namespace | not already `global` |
 
-### Effect
+### Mechanism
 
-When a pattern's namespace is set to `'global'`, it becomes accessible to ALL projects. The `getProjectPatterns(namespace, limit)` query returns patterns where `namespace = ? OR namespace = 'global'`, so global patterns are automatically included in every project's pattern set.
+1. Queries eligible patterns via `db` (confidence, uses, applicability, namespace filters)
+2. Calls `db.promoteToGlobal(id)` for each candidate — updates `namespace = 'global'`
+3. Global patterns are then returned by `getProjectPatterns()` for any project
 
-## Cloud API Endpoints (SaaS Side)
+No API calls are made. This is a local-only operation that runs during the nightly 3am deep consolidation cycle, or on-demand via `quoth_intelligence_consolidate`.
 
-The Quoth SaaS platform at `quoth.triqual.dev` exposes these endpoints for the promotion flow:
+## Environment Variables Reference
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/api/v1/patterns/promote` | Agent API key | Receive promoted patterns from local daemons |
-| `POST` | `/api/v1/trajectories/ingest` | Agent API key | Receive raw trajectory data for cloud processing |
-| `GET` | `/api/v1/search` | Agent API key or Clerk JWT | Semantic search across promoted patterns and documents |
-| `GET` | `/api/v1/documents` | Agent API key or Clerk JWT | List documents in a project |
-| `POST` | `/api/v1/projects` | Agent API key | Create a new project (used by auto-creation) |
-| `GET` | `/api/v1/projects` | Agent API key or Clerk JWT | List projects (used for slug cache) |
-| `GET` | `/api/v1/health` | None | Health check (public) |
-
-All `/api/v1/*` routes bypass Clerk middleware and authenticate via their own layer (agent API keys with Bearer token or Clerk JWT).
-
-## Event Trail
-
-The promotion process emits events to the local event system for audit:
-
-| Event Type | Agent | Payload |
-|------------|-------|---------|
-| `pattern.promoted` | `daemon` | `{ patternId, documentId, confidence }` |
-| `pattern.strengthened` | `daemon` | `{ patternId, update: 'bayesian-success' }` |
-| `pattern.learned` | `daemon` | `{ patternId, name, confidence, source }` |
-
-These events are stored in the `events` table and can be queried via `db.getEvents()`.
-
-## Failure Handling
-
-- All HTTP errors during promotion are silently caught -- the daemon continues running
-- Network timeouts (15s) abort the request and resolve to `null`
-- If `QUOTH_API_KEY` is not set, all promotion is skipped (returns `null`)
-- If project auto-creation fails, the pattern promotion still proceeds (with undefined projectSlug)
-- The deep consolidation phase wraps cloud promotion and global promotion in separate try/catch blocks, so failure in one does not affect the other
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `QUOTH_API_KEY` | Cloud sync only | (none) | API key (`qth_*`) for cloud promotion |
+| `QUOTH_API_URL` | No | `https://quoth.triqual.dev` | Cloud API base URL |
+| `AI_GATEWAY_API_KEY` | Yes (LLM ops) | (none) | Vercel AI Gateway key (`vck_*`) |
+| `QUOTH_LLM_MODEL` | No | `google/gemini-2.5-flash-lite` | Override LLM model |
+| `MOONSHOT_API_KEY` | No | (none) | Legacy fallback for LLM (Kimi K2.5 direct) |

@@ -1,5 +1,7 @@
 # Setup & Installation
 
+> v1.0.1 — Last updated 2026-04-06
+
 Complete guide to installing and configuring the Quoth plugin for Claude Code.
 
 ## Prerequisites
@@ -93,10 +95,10 @@ Uses an inline Node.js script for reliable JSON manipulation (not sed/awk). Inje
 
 | Hook Event | Matcher | Command | Timeout |
 |---|---|---|---|
-| `PreToolUse` | `Bash` | `hook-dispatch.js pre-bash` | 5000ms |
-| `PostToolUse` | `Write\|Edit\|MultiEdit` | `hook-dispatch.js post-edit` | 10000ms |
+| `PreToolUse` | `Bash` | `hook-dispatch.js pre-bash` | 2000ms |
+| `PostToolUse` | `Write\|Edit\|MultiEdit` | `hook-dispatch.js post-edit` | 2000ms |
 | `PostToolUse` | `Bash\|Write\|Edit\|MultiEdit\|Agent` | `trajectory-capture.js` | 3000ms |
-| `UserPromptSubmit` | (all) | `hook-dispatch.js route` | 10000ms |
+| `UserPromptSubmit` | (all) | `hook-dispatch.js route` | 3000ms |
 | `SessionStart` | (all) | `hook-dispatch.js session-restore` | 15000ms |
 | `SessionEnd` | (all) | `hook-dispatch.js session-end` | 10000ms |
 | `PreCompact` | (all) | `hook-dispatch.js session-end` | 6000ms |

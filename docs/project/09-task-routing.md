@@ -1,6 +1,10 @@
+You need to grant write permission to edit that file. Here's the complete updated document with all five changes applied — ready to paste once you approve:
+
 # Task Routing
 
 Quoth's task routing system classifies incoming tasks by keyword matching and recommends the optimal agent type for execution. It is a lightweight, zero-latency classifier that runs entirely in-process with no API calls or model inference.
+
+<!-- v1.0.1 — Last updated: 2026-04-06 -->
 
 Source files:
 - `quoth-plugin/mcp/lib/routing.js` -- agent definitions, pattern matching, alternative selection
@@ -45,15 +49,15 @@ Implemented in `routing.js: routeTask(task)`.
 | Priority | Pattern (keywords) | Routes To | Example Matches |
 |----------|--------------------|-----------|-----------------|
 | 1 | fix, bug, debug, broken, crash, hotfix, patch | `coder` | "fix the broken auth", "debug the crash" |
-| 2 | refactor, rename, extract, reorganize, cleanup, simplify | `coder` | "refactor the database layer", "cleanup imports" |
-| 3 | test, spec, coverage, unit test, assert, mock, jest, vitest | `tester` | "write tests for the API", "check coverage" |
+| 2 | refactor, rename, extract, reorganize, cleanup, clean up, simplify | `coder` | "refactor the database layer", "cleanup imports" |
+| 3 | test, spec, coverage, unit test, integration test, assert, mock, fixture, jest, vitest | `tester` | "write tests for the API", "check coverage" |
 | 4 | review, audit, security check, lint, inspect, validate | `reviewer` | "review this PR", "security audit" |
 | 5 | research, explore, investigate, look up, summarize, documentation | `researcher` | "research best practices", "investigate the issue" |
 | 6 | design, architect, blueprint, diagram, schema, model | `architect` | "design the database schema" |
-| 7 | configure, setup, install, environment, settings | `devops` | "configure env vars", "setup the project" |
+| 7 | config, configure, setup, install, env, environment, settings | `devops` | "configure env vars", "setup the project", "env config" |
 | 8 | deploy, docker, ci/cd, pipeline, infrastructure, vercel, nginx, systemd, cron | `devops` | "deploy to production", "fix the CI pipeline" |
-| 9 | implement, create, build, add, develop, scaffold, generate, write code | `coder` | "implement user auth", "create a new endpoint" |
-| 10 | api, endpoint, backend, database, migration, postgres, sqlite, prisma, drizzle | `backend-dev` | "database migration", "new API endpoint" |
+| 9 | implement, create, build, add, develop, scaffold, generate, write code, programá | `coder` | "implement user auth", "create a new endpoint" |
+| 10 | api, endpoint, backend, database, migration, postgres, sqlite, prisma, drizzle, query | `backend-dev` | "database migration", "new API endpoint" |
 | 11 | ui, frontend, component, react, css, style, layout, responsive, tailwind, shadcn | `frontend-dev` | "update the UI", "fix CSS" |
 
 **Spanish patterns (Argentine voseo, no `\b` boundaries due to accented chars):**
@@ -87,8 +91,6 @@ Word boundary behavior:
 When no pattern matches, the function returns:
 ```javascript
 { agent: 'coder', confidence: 0.5, reason: 'Default routing - no specific pattern matched' }
-```
-
 Tasks that typically fall through to default routing include:
 - Vague descriptions without action verbs: "what time is it", "how does this work"
 - Domain-specific jargon not covered by the keyword patterns
@@ -251,3 +253,12 @@ The following limitations from v3.2.0 have been addressed:
 | `getAlternatives(primaryAgent)` | Function | Returns array of 2 alternatives |
 | `AGENT_CAPABILITIES` | Object | Map of agent name to capability tags |
 | `TASK_PATTERNS` | Array | Array of `[RegExp, agentType]` tuples, tested in order |
+```
+
+**Summary of changes (5 total):**
+- Row 2: added `clean up`
+- Row 3: added `integration test`, `fixture`
+- Row 7: expanded to `config, configure` and `env, environment` (short forms now also match)
+- Row 9: added `programá` (moved from Spanish-only into the English regex)
+- Row 10: added `query`
+- Added `<!-- v1.0.1 — Last updated: 2026-04-06 -->` comment under the title

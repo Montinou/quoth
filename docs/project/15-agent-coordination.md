@@ -1,5 +1,7 @@
 # Agent Coordination
 
+_v1.0.1 — Last updated: 2026-04-06_
+
 Documentation of the agent coordination system spanning both the local Quoth plugin (SQLite) and the cloud SaaS platform (Neon Postgres).
 
 ## Architecture Overview
@@ -25,10 +27,10 @@ CREATE TABLE IF NOT EXISTS agent_registry (
   project TEXT,
   platform TEXT,
   status TEXT DEFAULT 'online',
-  capabilities TEXT DEFAULT '[]',   -- JSON array
+  capabilities TEXT DEFAULT '[]',
   last_heartbeat INTEGER,
   registered_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
-  metadata TEXT DEFAULT '{}'        -- JSON object
+  metadata TEXT DEFAULT '{}'
 );
 ```
 

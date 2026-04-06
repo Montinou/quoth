@@ -1,3 +1,7 @@
+Write permission was denied. Per the instructions, here is the complete updated document:
+
+---
+
 # Confidence Scoring
 
 Quoth uses Bayesian confidence scoring based on the Beta distribution to track the reliability of learned patterns over time. Each pattern accumulates evidence (successes and failures) that updates its posterior probability, with temporal decay ensuring stale patterns naturally lose prominence.
@@ -13,13 +17,18 @@ Each pattern in the `patterns` SQLite table has the following scoring columns:
 
 | Column | Type | Default | Description |
 |--------|------|---------|-------------|
-| `alpha` | REAL | 1 | Success parameter of the Beta distribution |
-| `beta` | REAL | 1 | Failure parameter of the Beta distribution |
+| `alpha` | REAL | 1 | Success parameter of the Beta distribution *(runtime migration)* |
+| `beta` | REAL | 1 | Failure parameter of the Beta distribution *(runtime migration)* |
 | `confidence` | REAL | 0.5 | Point estimate: `alpha / (alpha + beta)` |
 | `success_count` | INTEGER | 0 | Total successes recorded |
 | `failure_count` | INTEGER | 0 | Total failures recorded |
-| `decay_rate` | REAL | 0.005 | Controls hourly alpha decay speed |
+| `exposure_count` | INTEGER | 0 | Number of times injected into agent context *(runtime migration)* |
+| `last_exposed_at` | INTEGER | NULL | Unix timestamp (ms) of last injection *(runtime migration)* |
+| `ignored_count` | INTEGER | 0 | Injections where pattern was shown but not acted upon *(runtime migration)* |
+| `decay_rate` | REAL | 0.005 | Reserved; not currently used by `applyHourlyDecay()` |
 | `last_matched_at` | INTEGER | NULL | Unix timestamp (ms) of last match/use |
+
+Note: `alpha` and `beta` are not in the base `CREATE TABLE` schema -- they are added to existing databases via `ALTER TABLE` runtime migrations in `createDb()`. New databases created from scratch also receive them via migration immediately after table creation.
 
 ### Initial State
 
@@ -35,7 +44,7 @@ Implemented in `db.js: applyBayesianUpdate(id, outcome)`.
 
 ### On Success
 
-```sql
+sql
 UPDATE patterns SET
   alpha = alpha + 1,
   success_count = success_count + 1,
@@ -43,8 +52,6 @@ UPDATE patterns SET
   last_matched_at = NOW(),
   updated_at = NOW()
 WHERE id = ?
-```
-
 The confidence formula `(alpha + 1.0) / (alpha + 1.0 + beta)` computes the posterior mean after incrementing alpha. Note that SQLite evaluates this using the pre-update value of alpha, so `alpha + 1.0` in the formula represents the new alpha value.
 
 ### On Failure
@@ -134,83 +141,42 @@ This marks patterns as "recently used" which protects them from inactivity decay
 
 Implemented in `db.js: applyHourlyDecay()`. Called every hour by the daemon's timer.
 
-### Alpha Decay (all active patterns)
+The decay model is **exposure-based**: only patterns with actual performance data are penalized. "No exposure = no data = no change." A pattern for a tool the user hasn't used recently should not decay simply due to the passage of time.
+
+### Tier 1 -- Exposure-informed poor conversion
 
 ```sql
-UPDATE patterns SET
-  alpha = MAX(0.1, alpha - (decay_rate * alpha * 0.01)),
-  confidence = MAX(0.05, recalculated),
-  updated_at = NOW()
+UPDATE patterns
+SET beta = beta + 0.05,
+    confidence = MAX(0.05, alpha / (alpha + beta + 0.05)),
+    updated_at = NOW()
 WHERE status = 'active'
+  AND exposure_count >= 5
+  AND (success_count * 1.0 / MAX(exposure_count, 1)) < 0.1
 ```
 
-- Applied to ALL active patterns, regardless of activity.
-- The decay is proportional to the current alpha value: `decay_rate * alpha * 0.01`.
-- With the default `decay_rate=0.005`, this removes `0.005 * alpha * 0.01 = 0.00005 * alpha` per hour.
-- Floor at `alpha=0.1` (not 1.0). This allows confidence to drop below the initial 0.5 because `0.1 / (0.1 + beta)` can be very small when beta is large.
-- Confidence floor at 0.05 (never reaches absolute zero).
-- Effect: patterns that are not being reinforced will gradually lose alpha, causing confidence to drift downward.
+- Applies to patterns that have been injected into context at least 5 times but have a conversion rate below 10%.
+- These patterns had real opportunities to help and consistently failed to. Beta grows at 0.05/hour.
+- Never-exposed patterns (`exposure_count = 0`) are **not affected**.
 
-### Tiered Inactivity Penalties
+### Tier 2 -- High-exposure dominance prevention
 
-Three tiers of increasing severity replace the previous single inactivity penalty:
-
-**Tier 1 — Never matched (aggressive):**
 ```sql
-UPDATE patterns SET
-  beta = beta + 0.1,
-  confidence = MAX(0.05, alpha / (alpha + beta + 0.1))
+UPDATE patterns
+SET alpha = MAX(0.1, alpha * 0.9995),
+    confidence = MAX(0.05, MAX(0.1, alpha * 0.9995) / (MAX(0.1, alpha * 0.9995) + beta)),
+    updated_at = NOW()
 WHERE status = 'active'
-  AND last_matched_at IS NULL
-  AND (success_count + failure_count) = 0
+  AND exposure_count > 20
 ```
-- Applies to patterns that have NEVER been matched or used.
-- Rate: 0.1/hour = 2.4 beta/day → confidence drops to ~0.3 within a week.
-- Purpose: Quickly penalize patterns that were distilled but never proved useful.
 
-**Tier 2 — Inactive >7 days (moderate):**
-```sql
-UPDATE patterns SET
-  beta = beta + 0.05,
-  confidence = MAX(0.05, alpha / (alpha + beta + 0.05))
-WHERE status = 'active'
-  AND last_matched_at IS NOT NULL
-  AND last_matched_at < ?  -- 7 days ago
-```
-- Applies to patterns that WERE matched at some point but haven't been used recently.
-- Rate: 0.05/hour = 1.2 beta/day → ~8.4 beta per week.
-- Purpose: Moderate erosion for once-useful patterns that may have become stale.
+- Applies only to patterns injected more than 20 times.
+- Very gentle multiplicative alpha decay: `alpha *= 0.9995/hour` ≈ -3.5% per week.
+- Prevents old high-confidence winners from dominating the injection pool indefinitely.
 
-**Tier 3 — Inactive >30 days (strong):**
-```sql
-UPDATE patterns SET
-  beta = beta + 0.15,
-  confidence = MAX(0.05, alpha / (alpha + beta + 0.15))
-WHERE status = 'active'
-  AND (last_matched_at IS NULL OR last_matched_at < ?)  -- 30 days ago
-```
-- Applies to ALL patterns inactive for more than 30 days, regardless of history.
-- Rate: 0.15/hour = 3.6 beta/day → rapid confidence erosion.
-- Purpose: Aggressively prune long-abandoned patterns. Note: this stacks with Tier 1 or Tier 2 for those patterns.
+### Never-Exposed Patterns
 
-### Decay Interaction
-
-All decay mechanisms run in the same `applyHourlyDecay()` call. For a never-matched pattern:
-
-1. Alpha decreases by `0.00005 * alpha` (small)
-2. Beta increases by 0.1 (Tier 1, significant)
-3. After 30 days, additionally beta increases by 0.15 (Tier 3, stacking)
-
-A pattern at alpha=1, beta=1 (never matched, default state):
-- After 1 day: beta ~ 1 + 2.4 = 3.4, confidence ~ 1/(1+3.4) ~ 0.23
-- After 1 week: beta ~ 1 + 16.8 = 17.8, confidence ~ 1/(1+17.8) ~ 0.05
-- Triggers archival quickly, preventing garbage accumulation.
-
-A well-established pattern at alpha=8, beta=2 that stops being used:
-- After 7 days idle: Tier 2 kicks in, beta grows by ~8.4/week
-- After 2 weeks: beta ~ 2 + 8.4 = 10.4, confidence ~ 8/(8+10.4) ~ 0.43
-- After 30 days: Tier 3 stacks, accelerating decay further.
-- Patterns with strong evidence take longer to die, as expected.
+Never-exposed patterns (`exposure_count = 0`) receive **no decay** from `applyHourlyDecay()`. Their confidence remains at the initial value (typically 0.5) until they are injected and real signal accumulates. Cleanup of truly stale never-exposed patterns is handled by `archiveWeakPatterns()` instead.
 
 ## Archival
 
@@ -218,18 +184,19 @@ Implemented in `db.js: archiveWeakPatterns()`. Called hourly by the daemon along
 
 ### Criteria
 
-Two archival rules run in `archiveWeakPatterns()`:
+Three archival rules run in `archiveWeakPatterns()`:
 
-**Rule 1 — Low confidence with evidence:**
+**Rule 1 -- Low confidence with sufficient exposure data:**
 ```sql
 UPDATE patterns SET status = 'archived'
-WHERE confidence < 0.1
-  AND (success_count + failure_count) > 3
-  AND status = 'active'
+WHERE status = 'active'
+  AND confidence < 0.1
+  AND exposure_count >= 10
+  AND (success_count * 1.0 / MAX(exposure_count, 1)) < 0.05
 ```
-Archives patterns that have been tried multiple times and found unreliable. The threshold of 3 total uses (reduced from 5) allows faster cleanup while still protecting untested patterns.
+Archives patterns with at least 10 exposures and under 5% conversion rate that have low confidence. Requires real exposure data before archiving -- untested patterns are not eligible.
 
-**Rule 2 — Raw tool-call garbage with no feedback:**
+**Rule 2 -- Raw tool-call garbage with no feedback:**
 ```sql
 UPDATE patterns SET status = 'archived'
 WHERE status = 'active'
@@ -240,9 +207,19 @@ WHERE status = 'active'
 ```
 Archives patterns created by the old distiller fallback that produced raw tool calls as names. These patterns have no reuse value and were never validated by feedback.
 
+**Rule 3 -- Never-exposed patterns older than 90 days:**
+```sql
+UPDATE patterns SET status = 'archived'
+WHERE status = 'active'
+  AND exposure_count = 0
+  AND (success_count + failure_count) = 0
+  AND created_at < ?  -- 90 days ago
+```
+Archives patterns that were distilled but never injected into any agent context in 90 days. These are considered irrelevant to the user's actual workflow.
+
 ### Purpose
 
-Archival removes patterns that are either unreliable (Rule 1) or structurally useless (Rule 2).
+Archival removes patterns that are either unreliable (Rule 1), structurally useless (Rule 2), or chronically ignored (Rule 3).
 
 Archived patterns:
 - Are excluded from `getTopPatterns` queries (which filter `WHERE status = 'active'`)
@@ -289,22 +266,24 @@ When promoted, the daemon:
 ## Confidence Lifecycle Example
 
 ```
-Event                       alpha  beta  confidence  Notes
----                         -----  ----  ----------  -----
-Pattern created             1.0    1.0   0.500       Uniform prior
-Success #1                  2.0    1.0   0.667       Quick rise
-Success #2                  3.0    1.0   0.750
-Success #3                  4.0    1.0   0.800       Nearing promotion threshold
-Failure #1                  4.0    2.0   0.667       Significant drop
-Success #4                  5.0    2.0   0.714
-Success #5                  6.0    2.0   0.750
-Success #6                  7.0    2.0   0.778
-Success #7                  8.0    2.0   0.800
-Success #8                  9.0    2.0   0.818       Promotion candidate (>0.8, >10 uses)
-7 days inactive             ~9.0   ~5.4  ~0.625      Beta gained ~3.36 from inactivity
-14 days inactive            ~9.0   ~8.7  ~0.508      Approaching initial uncertainty
-Continued disuse            ~9.0   >90   <0.1        Archived after confidence < 0.1
+Event                         alpha  beta  confidence  Notes
+---                           -----  ----  ----------  -----
+Pattern created               1.0    1.0   0.500       Uniform prior
+Success #1                    2.0    1.0   0.667       Quick rise
+Success #2                    3.0    1.0   0.750
+Success #3                    4.0    1.0   0.800       Nearing promotion threshold
+Failure #1                    4.0    2.0   0.667       Significant drop
+Success #4                    5.0    2.0   0.714
+Success #5                    6.0    2.0   0.750
+Success #6                    7.0    2.0   0.778
+Success #7                    8.0    2.0   0.800
+Success #8                    9.0    2.0   0.818       Promotion candidate (>0.8, >10 uses)
+High-exposure dominance       ~8.9   2.0   ~0.816      Tier 2: alpha *= 0.9995/hr (>20 exposures)
+Poor conversion begins        ~8.9   2.5   ~0.781      Tier 1: beta += 0.05/hr (≥5 exp, <10% conv)
+Never exposed (90 days)       1.0    1.0   0.500       No decay; archived by Rule 3 at day 90
 ```
+
+Note: Unlike previous versions, patterns are not penalized by `applyHourlyDecay()` based solely on time since last use. Decay only occurs when there is real exposure data (injections) indicating poor performance.
 
 ## Intelligence Graph Confidence (Separate System)
 
@@ -316,11 +295,11 @@ The intelligence graph in `handlers/intelligence.js` maintains its own confidenc
 |--------|----------------|------------------------|
 | Storage | `patterns` table: `alpha`, `beta`, `confidence` | `graph-state.json` nodes, `ranked-context.json` entries |
 | Update model | Beta distribution posterior mean | Direct additive: +0.05 / -0.02 |
-| Decay | Hourly alpha decay + inactivity beta increment | 0.005/day for unaccessed nodes > 24h old |
-| Floor | alpha >= 0.1, confidence >= 0.0 | confidence >= 0.0 (clamped), node confidence >= 0.05 |
+| Decay | Exposure-based: Tier 1 (poor conversion) + Tier 2 (dominance prevention) | 0.005/day for unaccessed nodes > 24h old |
+| Floor | alpha >= 0.1, confidence >= 0.05 | confidence >= 0.0 (clamped), node confidence >= 0.05 |
 | Scope | Pattern entries only | All entries (memory, patterns, insights) |
 | Feedback trigger | `quoth_log_outcome`, `post-task` hook, daemon CONSOLIDATE | `quoth_intelligence_feedback`, `post-task` hook |
-| Archival | Yes, when confidence < 0.1 and uses > 5 | No archival mechanism |
+| Archival | Yes, when exposure ≥10 with <5% conversion, or never exposed after 90 days | No archival mechanism |
 
 ### Bridge: post-task Hook
 
@@ -349,11 +328,19 @@ This is a simple linear decay (0.005 per day), much gentler than the Bayesian ho
 | `applyBayesianUpdate('success')` | SQLite | Up | alpha += 1, confidence recalculated |
 | `applyBayesianUpdate('failure')` | SQLite | Down | beta += 1, confidence recalculated |
 | `applyConfidenceDelta(id, delta)` | SQLite | Up/Down | confidence += delta (bypasses Bayesian) |
-| `applyHourlyDecay` alpha | SQLite | Down | alpha -= decay_rate * alpha * 0.01 |
-| `applyHourlyDecay` Tier 1 | SQLite | Down | beta += 0.1 (never matched, no feedback) |
-| `applyHourlyDecay` Tier 2 | SQLite | Down | beta += 0.05 (matched but inactive >7 days) |
-| `applyHourlyDecay` Tier 3 | SQLite | Down | beta += 0.15 (inactive >30 days, stacking) |
+| `applyHourlyDecay` Tier 1 | SQLite | Down | beta += 0.05/hr (exposure_count ≥5, conversion <10%) |
+| `applyHourlyDecay` Tier 2 | SQLite | Down | alpha *= 0.9995/hr (exposure_count >20) |
 | `applyFeedback(true)` | JSON graph | Up | +0.05 to matched entries |
 | `applyFeedback(false)` | JSON graph | Down | -0.02 to matched entries |
 | `consolidateGraph` decay | JSON graph | Down | -0.005/day for unaccessed nodes |
 | Search match | SQLite | Neutral | Updates `last_matched_at` only |
+
+---
+
+The key changes from the source files:
+
+1. **Column table**: Added `exposure_count`, `last_exposed_at`, `ignored_count`; noted `alpha`/`beta` are runtime-migrated; `decay_rate` is now reserved/unused.
+2. **Hourly Decay**: Completely rewritten — old time-based tiers (never-matched, >7 days, >30 days) replaced with exposure-based tiers (poor conversion rate, high-exposure dominance prevention). Never-exposed patterns no longer decay.
+3. **Archival**: Rule 1 now uses `exposure_count >= 10` + conversion rate threshold; new Rule 3 archives never-exposed patterns older than 90 days.
+4. **Lifecycle example**: Updated to reflect new decay model.
+5. **Summary table**: Removed old 3 decay tiers, added 2 new exposure-based tiers.
