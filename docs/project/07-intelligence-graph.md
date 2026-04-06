@@ -1,5 +1,7 @@
 # Intelligence Graph
 
+<!-- version: 1.0.1 | last updated: 2026-04-06 -->
+
 The intelligence graph is Quoth's in-session knowledge retrieval system. It builds a weighted, directed graph from memory files and pattern entries, computes PageRank over the graph, and uses trigram-based text matching to surface relevant context at query time. All state is persisted as JSON files in `~/.quoth/intelligence/`.
 
 Source files:
@@ -58,6 +60,15 @@ Fetches the top 50 patterns from SQLite via `db.getTopPatterns(50, [])` (ordered
 
 This means the store persists across sessions and only re-bootstraps when cleared or on first run.
 
+### Graph Cache
+
+After loading the store, `initGraph` checks `graph-state.json` for a valid cache before rebuilding:
+
+- If `graphState.nodeCount === store.length` (same number of entries) **and** the state was updated within the last 60 seconds, the graph is not rebuilt.
+- Returns `{ nodes, edges, message: 'Graph cache hit' }` immediately.
+
+This prevents redundant rebuilds during the same session when the hook fires multiple times.
+
 ### Node Structure
 
 Each entry in the store is converted to a graph node:
@@ -88,7 +99,7 @@ Entries that originated from the same source file (`metadata.sourceFile`) are li
 
 **Similarity edges** (weight: Jaccard score)
 
-Within each category (namespace/type grouping), all pairs of entries are compared using trigram Jaccard similarity on their content/summary text. Pairs with similarity above 0.3 are linked:
+Within each category (`entry.category || entry.namespace || 'default'`), all pairs of entries are compared using trigram Jaccard similarity on their content/summary text. Pairs with similarity above 0.3 are linked:
 
 ```javascript
 { sourceId: group[i].id, targetId: group[j].id, type: 'similar', weight: sim }
@@ -111,7 +122,7 @@ All text processing functions are in `graph.js`.
 2. Replace all non-alphanumeric characters (except hyphens) with spaces: `/[^a-z0-9\s-]/g`
 3. Split on whitespace
 4. Filter out words shorter than 3 characters
-5. Filter out stop words (75 common English words)
+5. Filter out stop words (79 common English words)
 
 The stop word list includes articles, prepositions, conjunctions, pronouns, auxiliaries, and common determiners. Notable inclusions: `just`, `because`, `very`, `only`, `same`, `other`.
 
@@ -190,7 +201,7 @@ Snapshots enable trend analysis (the `getStats` function computes deltas between
 
 ## Context Retrieval
 
-`getContext(prompt, topK)` is the primary query interface. Called by the `route` hook and the `quoth_intelligence_context` MCP tool.
+`getContext(prompt, topK)` is the primary query interface. Called by the `route` hook and the `quoth_intelligence_context` MCP tool. Also called internally by `quoth_route_task` to enrich routing results with `relevantPatterns`.
 
 ### Algorithm
 

@@ -1,5 +1,7 @@
 # Local Database (SQLite)
 
+**Version:** 1.0.1 | **Last updated:** 2026-04-06
+
 The Quoth plugin maintains a local SQLite database for pattern storage, trajectory tracking, agent coordination, and event sourcing. All data is stored on the user's machine at `~/.quoth/memory.db`.
 
 ## Database Location and Configuration
@@ -33,7 +35,7 @@ Primary storage for learned and distilled patterns, scored using Bayesian confid
 | `success_count` | INTEGER | 0 | Total recorded successes |
 | `failure_count` | INTEGER | 0 | Total recorded failures |
 | `decay_rate` | REAL | 0.005 | Hourly decay rate applied to alpha |
-| `embedding` | TEXT | NULL | JSON-serialized float array (1024-dim voyage-4-lite vector) |
+| `embedding` | TEXT | NULL | JSON-serialized float array (1536-dim text-embedding-3-small vector) |
 | `version` | INTEGER | 1 | Schema version for forward compatibility |
 | `tags` | TEXT | `'[]'` | JSON array of tag strings |
 | `source` | TEXT | `'distilled'` | Origin: `distilled`, `exolar-seeded`, `healer-learned`, `attributed`, `skill-derived` |
@@ -228,7 +230,7 @@ The database instance manages an in-memory `HnswIndex` (from `daemon/lib/hnsw.js
 
 ## Cosine Similarity
 
-The `cosineSimilarity(a, b)` function is implemented inline in `db.js` for the linear scan fallback path:
+The `cosineSimilarity(a, b)` and `cosineDistance(a, b)` functions are defined in `daemon/lib/hnsw.js` and used throughout both the HNSW index and the linear scan fallback path:
 
 ```javascript
 function cosineSimilarity(a, b) {
@@ -241,9 +243,13 @@ function cosineSimilarity(a, b) {
   const mag = Math.sqrt(magA) * Math.sqrt(magB)
   return mag === 0 ? 0 : dot / mag
 }
+
+function cosineDistance(a, b) {
+  return 1 - cosineSimilarity(a, b)
+}
 ```
 
-Division-by-zero is guarded: returns 0 if either vector has zero magnitude.
+Division-by-zero is guarded: returns 0 if either vector has zero magnitude. `cosineDistance` is used internally by the HNSW index for neighbor comparisons.
 
 ## Runtime Migrations
 

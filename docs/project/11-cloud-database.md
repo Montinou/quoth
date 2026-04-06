@@ -1,5 +1,7 @@
 # Cloud Database (Neon Postgres)
 
+> Version: 1.0.1 | Last updated: 2026-04-06
+
 The Quoth SaaS platform uses Neon Postgres (serverless) as its cloud database, with Drizzle ORM for schema management and query building. The schema spans 6 Postgres schemas with 26 tables total, supporting multi-tenant organizations, agent coordination, document RAG, search analytics, and inter-agent communication.
 
 ## Overview
@@ -10,6 +12,29 @@ The Quoth SaaS platform uses Neon Postgres (serverless) as its cloud database, w
 - **Schema Definition:** `src/db/schema.ts`
 - **Connection Management:** `src/db/connection.ts`
 - **Schemas:** `public`, `agents`, `docs`, `search`, `analytics`, `comms`
+
+## Connection Management (`src/db/connection.ts`)
+
+Three connection factory functions; all use singleton pattern (one instance per runtime).
+
+| Function | Connection Type | When to Use |
+|----------|----------------|-------------|
+| `getDb()` | Pooled (`DATABASE_URL`) | Default — all non-session queries |
+| `getUnpooledDb()` | Direct (`DATABASE_URL_UNPOOLED`) | Migrations, `SET LOCAL` session vars, advisory locks |
+| `getSecureDb(orgId, userId?)` | Unpooled + RLS | All authenticated API routes |
+
+### `getSecureDb(orgId, userId?)`
+
+Sets `app.org_id` (and optionally `app.user_id`) as session-local config vars before returning the connection. These vars drive Row-Level Security policies on all schemas.
+
+```ts
+// Authenticated API route usage
+const db = await getSecureDb(orgId, clerkUserId);
+```
+
+Cron/webhook routes that run as table owner should use `getDb()` directly — the table owner bypasses RLS.
+
+A convenience alias `db` re-exports `getDb` for backwards compatibility.
 
 ## Schema: public (5 tables)
 

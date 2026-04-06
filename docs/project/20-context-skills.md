@@ -2,6 +2,8 @@
 
 Two subsystems added in v3.2.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
+**Version:** 1.0.1 | **Last updated:** 2026-04-06
+
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart
 - `quoth-plugin/hooks/hook-dispatch.js` — session-restore handler (context injection logic)
@@ -68,7 +70,12 @@ To add a context file for a new project (e.g., `sales-companion`):
 2. Write a compact architecture summary (under 100 lines is ideal)
 3. Re-run `bash quoth-plugin/scripts/setup.sh` is not required — the file is read at session start
 
-The project name is resolved from `git remote get-url origin` in `CLAUDE_PROJECT_DIR`. The resolution extracts the repository name from the URL (e.g., `Montinou/sales-companion.git` → `sales-companion`).
+The project name is resolved via `resolveProjectName()` in `hook-dispatch.js`, which tries the following in order:
+
+1. **Git remote origin** — runs `git remote get-url origin` in `CLAUDE_PROJECT_DIR` and extracts the repository name from the URL (e.g., `Montinou/sales-companion.git` → `sales-companion`). Result is lowercased.
+2. **OpenClaw workspace path** — if the directory matches `/.openclaw/workspaces/{name}/repo/`, uses `{name}`.
+3. **Parent dirname** — if the directory basename is `repo` or `src`, uses the parent directory name.
+4. **Directory basename** — fallback to the current directory name.
 
 ---
 

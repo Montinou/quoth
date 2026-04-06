@@ -27,7 +27,7 @@ matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gi
 | `/api/auth/(.*)`, `/api/oauth/(.*)` | OAuth flows |
 | `/.well-known/(.*)` | OAuth discovery |
 | `/`, `/landing`, `/manifesto`, `/protocol`, `/guide`, `/pricing` | Marketing pages |
-| `/docs`, `/blog`, `/changelog`, `/terms`, `/onboarding` | Public content |
+| `/docs`, `/blog`, `/changelog`, `/compare`, `/integrations`, `/glossary`, `/terms`, `/onboarding` | Public content |
 | `/sign-in`, `/sign-up` | Clerk auth components |
 | `/auth/(.*)` | Auth flow pages |
 
