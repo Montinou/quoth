@@ -225,7 +225,7 @@ The `.claude-plugin/plugin.json` manifest defines the plugin for the Claude Code
 {
   "name": "quoth",
   "version": "3.2.0",
-  "description": "Universal self-learning and agent coordination for Claude Code.",
+  "description": "Universal self-learning and agent coordination for Claude Code. Captures trajectories, learns patterns, shares knowledge across projects.",
   "mcpServers": {
     "quoth-learning": {
       "command": "node",
