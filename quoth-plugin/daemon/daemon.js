@@ -929,19 +929,20 @@ If nothing needs action, write: NONE`
       log('error', 'Rebalancing failed', { error: err.message })
     }
 
-    // Phase 2.6: Capacity pruning (when > 1000 patterns)
+    // Phase 2.6: Capacity pruning (when > 600 patterns)
+    // Lower cap keeps injection signal-to-noise high (top 3-7 from 600 >> top 3-7 from 1000)
     try {
       const candidates = db.prepare(`
         SELECT id, success_count, failure_count
         FROM patterns WHERE status = 'active'
       `).all()
-      if (candidates.length > 1000) {
+      if (candidates.length > 600) {
         const scored = candidates.map(p => {
           const total = p.success_count + p.failure_count
           const rate = total > 0 ? p.success_count / total : 0
           return { id: p.id, score: rate * Math.log(1 + total) }
         }).sort((a, b) => a.score - b.score)
-        const toArchive = scored.slice(0, candidates.length - 900).map(p => p.id)
+        const toArchive = scored.slice(0, candidates.length - 500).map(p => p.id)
         const stmt = db.prepare("UPDATE patterns SET status='archived' WHERE id=?")
         const tx = db.transaction((ids) => { for (const id of ids) stmt.run(id) })
         tx(toArchive)

@@ -615,15 +615,17 @@ function createDb(dbPath) {
              OR name LIKE 'claude-code: Edit /%' OR name LIKE 'claude-code: Read /%')
     `).run()
 
-    // Archive patterns older than 90 days that were never exposed (truly irrelevant)
-    const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000)
+    // Archive patterns older than 30 days that were never exposed (truly irrelevant).
+    // 90 days was too generous — if a pattern wasn't injected in 30 days of active
+    // use, it's too niche or poorly worded. Keeps the DB lean.
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000)
     db.prepare(`
       UPDATE patterns SET status = 'archived', updated_at = strftime('%s','now') * 1000
       WHERE status = 'active'
         AND exposure_count = 0
         AND (success_count + failure_count) = 0
         AND created_at < ?
-    `).run(ninetyDaysAgo)
+    `).run(thirtyDaysAgo)
   }
 
   db.pruneYoungUnused = function() {
