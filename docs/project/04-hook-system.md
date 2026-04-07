@@ -51,6 +51,16 @@ The dispatcher avoids loading heavy modules at startup to keep hook execution fa
 
 Both are cached after first load so subsequent calls within the same hook invocation reuse the same instances.
 
+### Daemon Socket Client
+
+Three hooks (`route`, `session-restore`, `subagent-start`) delegate pattern ranking and doc-chunk retrieval to the running daemon via HTTP over a Unix socket at `~/.quoth/daemon.sock`.
+
+- **`queryDaemon(body, timeoutMs=500)`:** POSTs a JSON body to `http+unix://daemon.sock/query` and returns the parsed response. Supports `type: 'route+inject'` (routing + patterns + doc chunks in one call) and `type: 'inject'` (patterns only).
+- **`isDaemonAlive()`:** GETs `/health` with a 200ms timeout. Returns `true` if the daemon responds with HTTP 200.
+- **`ensureDaemon()`:** Checks the socket and health; if the daemon is not running, spawns `daemon/daemon.js` as a detached child process and polls for readiness (up to 5 seconds, 100ms intervals). Throws if the daemon does not start in time.
+
+The daemon handles embedding generation, HNSW search, and V1/V2 injection path selection server-side. Hook handlers no longer call `rankByThompsonAndTrigram`, `hierarchicalSelect`, or `generateEmbedding` directly.
+
 ### Environment Variables
 
 | Variable | Default | Purpose |
@@ -62,6 +72,14 @@ Both are cached after first load so subsequent calls within the same hook invoca
 | `PROMPT` | (none) | Fallback prompt source |
 | `TOOL_INPUT_command` | (none) | Fallback tool input source |
 | `TOOL_INPUT_file_path` | (none) | Fallback file path source |
+
+Derived constants (not overridable via env):
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `DB_PATH` | `$QUOTH_HOME/memory.db` | SQLite database path |
+| `STATE_DIR` | `$QUOTH_HOME/intelligence` | Intelligence state directory |
+| `SOCK_PATH` | `$QUOTH_HOME/daemon.sock` | Daemon Unix socket path |
 
 ### Error Handling
 
@@ -250,22 +268,20 @@ Routes the user's prompt to an optimal agent type and displays relevant intellig
 
 1. **Persist prompt history:** Save the user's prompt (truncated to 500 chars) to `~/.quoth/intelligence/prompt-history.json` as a rolling buffer of the last 5 prompts. The buffer resets when the session ID changes. This allows `trajectory-capture.js` to include nearby user intents with each tool call.
 2. **Record in session memory:** Call `createSessionMemory()` (from `./session-memory.js`) and invoke `sm.recordPrompt(prompt)` for context-aware injection in later hooks.
-3. **Inject prompt-relevant patterns:** If a DB is available and the prompt is ≥ 5 chars, call `rankByThompsonAndTrigram(db, project, prompt, 5, { minConfidence: 0.3, excludeRecentMinutes: 2 })` from `../daemon/lib/injection.js`. Record exposure via `recordExposure(db, ids)` and track the injection in session memory. Display up to 5 results:
+3. **Query daemon for routing + injection:** Call `ensureDaemon()`, then `queryDaemon({ type: 'route+inject', prompt, project, session_id, limit: 5 })`. The daemon performs embedding generation, HNSW search, V1/V2 injection path selection, and keyword routing in a single round-trip. The response includes `patterns`, `doc_chunks`, `agent`, `agent_confidence`, `agent_reason`, `alternatives`, `embedding_ms`, and `search_ms`.
+4. **Output pattern injection:** If `resp.patterns` is non-empty, record exposures via `recordExposure(db, ids)`, track in session memory, and print:
    ```
    [Quoth] Patterns for this prompt:
    - [0.48] Update documentation with version and last updated timestamp: Update documentation...
    - [0.50] Use 'ls -la' to inspect directory contents: Use 'ls -la' to inspect...
    ```
-4. **Inject relevant doc chunks:** If a DB is available and the prompt is ≥ 10 chars, call `generateEmbedding(prompt)` from `../daemon/lib/embed.js` to get a query vector, then call `db.searchDocChunks(promptVec, 3)` to retrieve the top 3 semantically similar documentation chunks. Chunks with `_similarity > 0.2` are printed:
+5. **Output doc chunk injection:** If `resp.doc_chunks` is non-empty, filter to `score > 0.2` and print. The doc label comes from the chunk's `title` field directly. Content is truncated to 250 chars:
    ```
    [Quoth Docs] Relevant project context:
      • [hook-system] Hook Events Reference: ## Hook Events Reference...
      • [configuration] Setup Script: ## Setup Script...
    ```
-   The doc label is derived from the chunk's `doc_file` field (`.md` extension and leading `\d+-` prefix stripped). Content is truncated to 250 chars.
-5. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
-6. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
-7. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
+6. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
 
 **Output format** (pattern injection printed first, then routing table):
 
@@ -280,9 +296,9 @@ Routes the user's prompt to an optimal agent type and displays relevant intellig
 [INFO] Routing task: implement user authentication...
 
 Routing Method
-  - Method: keyword
-  - Backend: quoth-intelligence
-  - Latency: 0.234ms
+  - Method: semantic+keyword
+  - Backend: quoth-daemon
+  - Latency: 80ms (embed: 59ms, search: 19ms)
   - Matched Pattern: implement|create|build|add|write code
 
 +------------------- Primary Recommendation -------------------+
@@ -325,16 +341,13 @@ Initializes the intelligence graph, injects project context files, and injects h
    - **Fallback summary** (`quoth-plugin/context/project-summary.md`): Only used if no project-specific file was found AND the current project is `quoth` itself. Prevents the generic summary from being injected in non-quoth sessions.
    - **Project-local context** (`{CLAUDE_PROJECT_DIR}/.quoth-context.md`): Checked independently — injected in addition to the above if it exists. Allows project-local overrides without modifying the plugin.
 3. **Report doc auto-updates:** Read `~/.quoth/intelligence/doc-manifest.json`. Filter `recentUpdates` entries newer than `manifest.lastReportedAt`. Print unseen updates (up to 5 shown, remainder counted) and update `lastReportedAt` to prevent re-reporting on the next session.
-4. **Inject patterns (dual V1/V2 path):** Load last session's context snapshot from `last-context-{project}.json` to build a `queryText` from recent prompts and top topics.
-   - **V1 path** (default): `rankByThompsonAndTrigram(db, project, queryText, 7, { minConfidence: 0.3, excludeRecentMinutes: 5 })` from `../daemon/lib/injection.js`.
-   - **V2 path** (when `isSubFlag('injection')` is set): generate a query embedding, run `hierarchicalSelect(candidates, clusterMap, 7, queryEmbedding)` from `../daemon/lib/bandit-v2.js`, then optionally replace some results with exploration candidates via `replaceWithExploration` (propensity.js). Log each injection to `injection_log` via `db.logInjection()`.
-   - Record exposures via `recordExposure(db, ids)` and track in session memory.
-5. Output pattern summaries with version tag and optional `[exp]` marker for exploration patterns:
+4. **Inject patterns via daemon:** Load last session's context snapshot from `last-context-{project}.json` to build a `queryText` from recent prompts and top topics. Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: queryText || 'session start', project, session_id, limit: 7 })`. The daemon performs V1/V2 injection path selection server-side. Record exposures via `recordExposure(db, ids)` and track in session memory.
+5. Output pattern summaries:
    ```
-   [Quoth] 3 patterns loaded for project "quoth" (v1):
+   [Quoth] 3 patterns loaded for project "quoth":
    - [0.85] auth-resilience: Use DB fallback for optional JWT claims
    - [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres ANY()
-   - [0.61 [exp]] some-pattern: Exploration candidate
+   - [0.61] some-pattern: Exploration candidate
    ```
 
 **Context injection lookup order:**
@@ -347,12 +360,7 @@ Initializes the intelligence graph, injects project context files, and injects h
 
 The context files are printed as plain markdown to stdout. Claude Code injects stdout from `SessionStart` hooks into the session's system context, making the content available at the start of every conversation without occupying tool call budget.
 
-**Pattern injection path selection:**
-
-| Flag | Path | Source |
-|------|------|--------|
-| `isSubFlag('injection')` = false | V1: Thompson + trigram | `daemon/lib/injection.js` |
-| `isSubFlag('injection')` = true | V2: Hierarchical Thompson + exploration | `daemon/lib/bandit-v2.js` + `daemon/lib/propensity.js` |
+V1/V2 injection path selection is handled entirely server-side by the daemon; the hook passes `type: 'inject'` and the daemon decides which algorithm to apply based on the `injection` feature flag.
 
 ### `session-end` (SessionEnd / PreCompact)
 
@@ -464,18 +472,15 @@ Injects domain-relevant patterns from the SQLite database into the subagent's co
 
 **Execution flow:**
 
-1. Load the SQLite database. If unavailable, return silently.
-2. Resolve the project name from `CLAUDE_PROJECT_DIR`.
-3. Build a `queryText` from the subagent's task description (`hookInput.prompt || hookInput.description`) and agent type, enriched with session context via `sm.getQueryText()`.
-4. Select patterns using the dual V1/V2 path (up to 5):
-   - **V1 path** (default): `rankByThompsonAndTrigram(db, project, queryText, 5, { minConfidence: 0.3, excludeRecentMinutes: 2 })`.
-   - **V2 path** (`isSubFlag('injection')`): Generate a query embedding, run `hierarchicalSelect(candidates, clusterMap, 5, queryEmbedding)`, optionally apply exploration via `replaceWithExploration`. Log each injection to `injection_log`.
-5. If no patterns, return silently.
-6. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
-7. Output JSON with `additionalContext` field for Claude Code to inject. Version tag (`v1`/`v2`) and optional `[exp]` marker are included:
+1. Resolve the project name from `CLAUDE_PROJECT_DIR`.
+2. Build a `queryText` from the subagent's task description (`hookInput.prompt || hookInput.description`) and agent type.
+3. Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: queryText || 'subagent task', project, session_id, limit: 5 })`. The daemon performs V1/V2 injection path selection server-side.
+4. If no patterns in `resp.patterns`, return silently.
+5. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
+6. Output JSON with `additionalContext` field for Claude Code to inject:
    ```json
    {
-     "additionalContext": "[Quoth v1] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
+     "additionalContext": "[Quoth] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
    }
    ```
 
