@@ -214,101 +214,19 @@ function detectProjectFromTask(task, fallback) {
 
 async function processEntry({ entry, filePath, line }) {
   try {
-    // Session summary entries trigger batch distill instead of individual processing
+    // Only process session_summary entries (batch distill).
+    // Individual tool_use entries are skipped — they're consumed as context
+    // by the batch distiller when the session_summary arrives.
     if (entry.event === 'session_summary') {
       await processSessionBatch(entry, filePath, line)
       return
     }
 
-    // Detect actual project from file paths in the task (corrects ~ sessions)
+    // Mark tool_use entries as processed immediately (no individual LLM calls)
     const rawProject = entry.project || 'default'
     const project = detectProjectFromTask(entry.task, rawProject)
-    if (project !== rawProject) {
-      log('debug', 'Namespace corrected', { from: rawProject, to: project, task: (entry.task || '').slice(0, 60) })
-    }
     log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome, project })
-
-    const judgment = await judge(entry)
-    if (!judgment.effective) {
-      log('debug', 'Entry judged ineffective', { reason: judgment.reason })
-      markProcessed(filePath, line)
-      return
-    }
-
-    const distilled = await distill(entry)
-    if (!distilled) {
-      log('warn', 'Distill failed — skipping trajectory entry', { agent: entry.agent, task: (entry.task || '').slice(0, 60) })
-      return
-    }
-    const similarTags = distilled.tags.length > 0 ? distilled.tags : []
-    const similarPatterns = distilled.embedding
-      ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
-      : db.getTopPatterns(3, similarTags)
-    const consolidation = await consolidate(distilled, similarPatterns)
-
-    if (consolidation.action === 'strengthen' && consolidation.targetId) {
-      db.applyBayesianUpdate(consolidation.targetId, 'success')
-      db.emitEvent('pattern.strengthened', entry.agent || 'daemon', project, {
-        patternId: consolidation.targetId,
-        update: 'bayesian-success'
-      })
-      log('info', 'Strengthened pattern', { id: consolidation.targetId })
-    } else {
-      // Pre-insert dedup: check if a near-duplicate already exists
-      const dupByName = db.findDuplicateByName(distilled.pattern)
-      const dupByEmbed = distilled.embedding
-        ? db.findDuplicateByEmbedding(distilled.embedding)
-        : null
-      const existing = dupByEmbed || dupByName
-
-      if (existing) {
-        // Strengthen existing instead of creating duplicate
-        db.applyBayesianUpdate(existing.id, 'success')
-        db.emitEvent('pattern.deduped', entry.agent || 'daemon', project, {
-          patternId: existing.id,
-          duplicateOf: distilled.pattern.slice(0, 60),
-          method: dupByEmbed ? 'embedding' : 'name'
-        })
-        log('info', 'Deduped → strengthened existing', { id: existing.id, method: dupByEmbed ? 'embedding' : 'name' })
-      } else {
-        // V2 quality gate (feature-flagged): reject generic/low-distinctiveness patterns at ingest
-        if (require('./lib/flags.js').isSubFlag('curation')) {
-          const { isGenericName } = require('./lib/curation.js')
-          const rejectedName = distilled.pattern.slice(0, 80)
-          if (isGenericName(rejectedName)) {
-            log('info', 'Rejected at quality gate (generic-name)', { name: rejectedName.slice(0, 60) })
-            return
-          }
-        }
-        db.upsertPattern({
-          id: distilled.id,
-          name: distilled.pattern.slice(0, 80),
-          pattern_type: 'code-pattern',
-          condition: entry.task || 'agent task',
-          action: distilled.pattern,
-          confidence: 0.5,
-          tags: [...distilled.tags, ...(project !== 'default' ? [`project:${project}`] : [])],
-          source: distilled.source || entry.source || 'distilled',
-          embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
-        })
-        db.emitEvent('pattern.learned', entry.agent || 'daemon', project, {
-          patternId: distilled.id,
-          name: distilled.pattern.slice(0, 80),
-          confidence: 0.5,
-          source: distilled.source || 'distilled'
-        })
-        // Set namespace based on source project
-        if (project !== 'default') {
-          db.setPatternNamespace(distilled.id, project)
-        }
-        log('info', 'New pattern', { id: distilled.id })
-      }
-    }
-
     markProcessed(filePath, line)
-
-    const candidates = db.getPromotionCandidates()
-    if (candidates.length > 0) log('info', 'Promotion candidates', { count: candidates.length })
 
   } catch (err) {
     log('error', 'processEntry failed', { error: err.message })
@@ -830,8 +748,11 @@ ARCHIVE id — reason
 
 If nothing needs action, write: NONE`
 
-    const { callLLM } = require('./lib/llm.js')
-    const raw = await callLLM(prompt, 500)
+    const { execSync } = require('child_process')
+    const raw = execSync(
+      'claude -p --model claude-haiku-4-5-20251001 --output-format text --allowedTools ""',
+      { input: prompt, encoding: 'utf8', timeout: 60000, maxBuffer: 512 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
+    )
     log('debug', 'LLM consolidation response', { response: raw.slice(0, 500) })
 
     let llmMerged = 0, llmArchived = 0

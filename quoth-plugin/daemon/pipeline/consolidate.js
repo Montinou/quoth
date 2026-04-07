@@ -1,6 +1,6 @@
 'use strict'
 
-const { callLLM } = require('../lib/llm.js')
+const { execSync } = require('child_process')
 
 const PROMPT = `You are deciding how to add a new pattern to a knowledge base.
 
@@ -23,9 +23,12 @@ async function consolidate(newPattern, existingPatterns) {
     .replace('{{existing_patterns}}', JSON.stringify(existingPatterns.slice(0, 3)))
 
   try {
-    const raw = await callLLM(prompt, 300)
+    const raw = execSync(
+      'claude -p --model claude-haiku-4-5-20251001 --output-format text --allowedTools ""',
+      { input: prompt, encoding: 'utf8', timeout: 60000, maxBuffer: 512 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
+    )
     const start = raw.indexOf('{')
-    if (start === -1) throw new Error('No JSON')
+    if (start === -1) throw new Error('No JSON in response')
     const end = raw.lastIndexOf('}')
     if (end === -1) throw new Error('No closing brace')
     const result = JSON.parse(raw.slice(start, end + 1))

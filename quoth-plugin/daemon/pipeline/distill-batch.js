@@ -1,7 +1,7 @@
 'use strict'
 
 const crypto = require('crypto')
-const { callLLM } = require('../lib/llm.js')
+const { execSync } = require('child_process')
 
 const PROMPT = `Extract 1-3 reusable patterns from this AI agent session.
 
@@ -69,9 +69,18 @@ async function distillBatch(summaryEntry, toolEntries) {
     .replace('{{actions}}', actions || 'No actions captured')
 
   try {
-    const raw = await callLLM(prompt, 400)
+    const raw = execSync(
+      'claude -p --model claude-haiku-4-5-20251001 --output-format text --allowedTools ""',
+      {
+        input: prompt,
+        encoding: 'utf8',
+        timeout: 60000,
+        maxBuffer: 512 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    )
     const start = raw.indexOf('{')
-    if (start === -1) throw new Error('No JSON')
+    if (start === -1) throw new Error('No JSON in response')
     const result = JSON.parse(raw.slice(start))
 
     if (!result.patterns || !Array.isArray(result.patterns)) return []

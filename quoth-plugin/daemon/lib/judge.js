@@ -106,12 +106,12 @@ function parseJudgeVerdict(raw, positionMap) {
  * @throws Error when AI_GATEWAY_API_KEY is unset or the gateway call fails.
  */
 async function callJudge(prompt) {
-  if (!process.env.AI_GATEWAY_API_KEY) {
-    throw new Error('AI_GATEWAY_API_KEY is not set — judge cannot run')
-  }
-  const { callLLM } = require('./llm.js')
-  const out = await callLLM(prompt, 10)
-  if (!out) throw new Error('LLM returned empty response')
+  const { execSync } = require('child_process')
+  const out = execSync(
+    'claude -p --model claude-haiku-4-5-20251001 --output-format text --allowedTools ""',
+    { input: prompt, encoding: 'utf8', timeout: 30000, maxBuffer: 256 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
+  )
+  if (!out || !out.trim()) throw new Error('claude -p returned empty response')
   return out.trim()
 }
 
