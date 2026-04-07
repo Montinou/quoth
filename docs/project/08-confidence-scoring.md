@@ -111,13 +111,19 @@ const fiveMinAgo = Date.now() - 5 * 60 * 1000
 const recentUnused = Object.entries(injections)
   .filter(([, v]) => !v.used && v.at > fiveMinAgo)
   .map(([id]) => id)
+const v2 = isSubFlag('injection')
 for (const id of recentUnused) {
   sm.markPatternUsed(id)
-  // V1: db.applyBayesianUpdate(id, 'success')
-  // V2: db.updateInjectionOutcome(sessionId, id, 1.0)
+  if (db) {
+    if (v2) {
+      db.updateInjectionOutcome(sessionId, id, 1.0)
+    } else {
+      db.applyBayesianUpdate(id, 'success')
+    }
+  }
 }
 ```
-Patterns that were injected into agent context in the last 5 minutes but not yet explicitly marked as used are treated as implicitly successful. In V1 mode this triggers a Bayesian update; in V2 (bandit) mode it records a reward of 1.0 in the `injection_log` table for nightly SNIPS aggregation.
+Patterns that were injected into agent context in the last 5 minutes but not yet explicitly marked as used are treated as implicitly successful. In V1 mode this triggers a Bayesian success update; in V2 (bandit) mode it records a reward of 1.0 in the `injection_log` table for nightly SNIPS aggregation.
 
 ### 3. SessionEnd Hook (session-level feedback)
 
@@ -231,15 +237,15 @@ WHERE status = 'active'
 ```
 Archives patterns created by the old distiller fallback that produced raw tool calls as names. These patterns have no reuse value and were never validated by feedback.
 
-**Rule 3 -- Never-exposed patterns older than 90 days:**
+**Rule 3 -- Never-exposed patterns older than 30 days:**
 ```sql
 UPDATE patterns SET status = 'archived'
 WHERE status = 'active'
   AND exposure_count = 0
   AND (success_count + failure_count) = 0
-  AND created_at < ?  -- 90 days ago
+  AND created_at < ?  -- 30 days ago
 ```
-Archives patterns that were distilled but never injected into any agent context in 90 days. These are considered irrelevant to the user's actual workflow.
+Archives patterns that were distilled but never injected into any agent context in 30 days. These are considered too niche or poorly worded to be useful. (Previously 90 days — reduced because patterns not injected in 30 days of active use are unlikely to ever be relevant.)
 
 ### Eager Pruning: `pruneYoungUnused()`
 
@@ -320,7 +326,7 @@ Success #7                    8.0    2.0   0.800
 Success #8                    9.0    2.0   0.818       Promotion candidate (>0.8, >10 uses)
 High-exposure dominance       ~8.9   2.0   ~0.816      Tier 2: alpha *= 0.9995/hr (>20 exposures)
 Poor conversion begins        ~8.9   2.5   ~0.781      Tier 1: beta += 0.05/hr (≥5 exp, <10% conv)
-Never exposed (90 days)       1.0    1.0   0.500       No decay; archived by Rule 3 at day 90
+Never exposed (30 days)       1.0    1.0   0.500       No decay; archived by Rule 3 at day 30
 ```
 
 Note: Unlike previous versions, patterns are not penalized by `applyHourlyDecay()` based solely on time since last use. Decay only occurs when there is real exposure data (injections) indicating poor performance.

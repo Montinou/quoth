@@ -316,13 +316,14 @@ Path patterns are matched against the task description to determine the actual p
 
 ### Plugin
 
-- Most hook execution is local; however, three hooks make outbound embedding API calls:
-  - `route`: calls `generateEmbedding(prompt)` for doc chunk injection (semantic context retrieval)
-  - `session-restore` (V2 injection path): calls `generateEmbedding(queryText)` for candidate ranking
-  - `subagent-start` (V2 injection path): calls `generateEmbedding(queryText)` for domain pattern selection
-  - All embedding calls are wrapped in try/catch and fail silently — hooks degrade gracefully if the API is unavailable
+- Most hook execution is local; however, three hooks communicate with the background daemon via Unix socket (`~/.quoth/daemon.sock`) for pattern injection and routing:
+  - `route`: queries daemon with `type: 'route+inject'` for task routing, pattern injection, and doc chunks
+  - `session-restore`: queries daemon with `type: 'inject'` for context-aware pattern injection using prior session context
+  - `subagent-start`: queries daemon with `type: 'inject'` for domain-relevant patterns scoped to the subagent's task
+  - If the daemon is not running, `ensureDaemon()` auto-starts it (waits up to 5s for socket readiness)
+  - All daemon queries have a 500ms timeout; hooks degrade gracefully if the daemon is unavailable
 - Daemon cloud promotion uses HTTPS with 15-second timeout
-- No listening ports -- daemon communicates via filesystem (trajectory files) and signals (SIGUSR1)
+- Daemon communicates locally via Unix socket (`~/.quoth/daemon.sock`), filesystem (trajectory files), and signals (SIGUSR1/SIGTERM)
 
 ### Cloud
 

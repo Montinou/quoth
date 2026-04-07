@@ -1,6 +1,6 @@
 # Setup & Installation
 
-> v1.0.1 — Last updated 2026-04-06
+> v1.0.1 — Last updated 2026-04-07
 
 Complete guide to installing and configuring the Quoth plugin for Claude Code.
 
@@ -224,8 +224,14 @@ The `.claude-plugin/plugin.json` manifest defines the plugin for the Claude Code
 ```json
 {
   "name": "quoth",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Universal self-learning and agent coordination for Claude Code. Captures trajectories, learns patterns, shares knowledge across projects.",
+  "author": {
+    "name": "Montino",
+    "url": "https://github.com/Montinou/quoth"
+  },
+  "homepage": "https://github.com/Montinou/quoth",
+  "keywords": ["self-learning", "patterns", "memory", "agents", "coordination"],
   "mcpServers": {
     "quoth-learning": {
       "command": "node",

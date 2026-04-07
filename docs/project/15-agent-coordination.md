@@ -46,7 +46,7 @@ Registration fields:
 | `capabilities` | string[] | No | JSON array of capability strings |
 | `metadata` | object | No | Arbitrary JSON metadata |
 
-Registration is upsert-based -- calling `quoth_agent_register` with an existing `agentId` updates all fields.
+Registration is upsert-based -- calling `quoth_agent_register` with an existing `agentId` updates all fields. `last_heartbeat` is set to `Date.now()` at registration time, so a newly registered agent is immediately visible as alive without a separate heartbeat call.
 
 On registration, an `agent.registered` event is emitted with `{ name, type, platform }` payload.
 

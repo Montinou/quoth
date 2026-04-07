@@ -32,45 +32,53 @@ Implemented in `routing.js: routeTask(task)`.
 
 ### Process
 
-1. Convert the task description to lowercase.
-2. Iterate through `TASK_PATTERNS` array in order (array of `[RegExp, agentType]` tuples).
-3. For each entry, test the pre-compiled regex against the lowercased task.
-4. Return the first matching agent with confidence 0.8.
+1. Convert the task description to lowercase, then strip accents via `stripAccents()` (NFD + remove combining marks).
+2. Iterate through `TASK_PATTERNS` array in order (array of `[RegExp, agentType, confidence?]` tuples).
+3. For each entry, test the pre-compiled regex against the normalized task.
+4. Return the first matching agent with confidence from the tuple (defaults to 0.8 if not specified).
 5. If no pattern matches, return `coder` as the default with confidence 0.5.
 
 ### Pattern Table
 
-`TASK_PATTERNS` is an ordered array of `[RegExp, agentType]` tuples (~20 entries). Patterns are tested in priority order — first match wins. Specific intent patterns (fix, debug, refactor) are tested before broad domain patterns (api, frontend, deploy).
+`TASK_PATTERNS` is an ordered array of `[RegExp, agentType, confidence?]` tuples (~28 entries, 14 English + 14 Spanish). Patterns are tested in priority order — first match wins. Specific intent patterns (fix, debug, refactor) are tested before broad domain patterns (api, frontend, deploy). Conversational/question patterns are last with an explicit confidence of 0.6.
 
 **English patterns (with `\b` word boundaries):**
 
 | Priority | Pattern (keywords) | Routes To | Example Matches |
 |----------|--------------------|-----------|-----------------|
-| 1 | fix, bug, debug, broken, crash, hotfix, patch | `coder` | "fix the broken auth", "debug the crash" |
-| 2 | refactor, rename, extract, reorganize, cleanup, clean up, simplify | `coder` | "refactor the database layer", "cleanup imports" |
-| 3 | test, spec, coverage, unit test, integration test, assert, mock, fixture, jest, vitest | `tester` | "write tests for the API", "check coverage" |
-| 4 | review, audit, security check, lint, inspect, validate | `reviewer` | "review this PR", "security audit" |
-| 5 | research, explore, investigate, look up, summarize, documentation | `researcher` | "research best practices", "investigate the issue" |
-| 6 | design, architect, blueprint, diagram, schema, model | `architect` | "design the database schema" |
-| 7 | config, configure, setup, install, env, environment, settings | `devops` | "configure env vars", "setup the project", "env config" |
-| 8 | deploy, docker, ci/cd, pipeline, infrastructure, vercel, nginx, systemd, cron | `devops` | "deploy to production", "fix the CI pipeline" |
-| 9 | implement, create, build, add, develop, scaffold, generate, write code, programá | `coder` | "implement user auth", "create a new endpoint" |
-| 10 | api, endpoint, backend, database, migration, postgres, sqlite, prisma, drizzle, query | `backend-dev` | "database migration", "new API endpoint" |
-| 11 | ui, frontend, component, react, css, style, layout, responsive, tailwind, shadcn | `frontend-dev` | "update the UI", "fix CSS" |
+| 1 | fix, bug, debug, broken, crash, hotfix, patch, error, not working, fails, issue, troubleshoot, stacktrace, exception, segfault, undefined, null pointer | `coder` | "fix the broken auth", "debug the crash", "undefined is not a function" |
+| 2 | refactor, rename, extract, reorganize, cleanup, clean up, simplify, deduplicate, dedup, dry, modularize, split file, move to, optimize code | `coder` | "refactor the database layer", "cleanup imports" |
+| 3 | test, spec, coverage, unit test, integration test, assert, mock, fixture, jest, vitest, e2e, playwright, cypress, snapshot | `tester` | "write tests for the API", "check coverage" |
+| 4 | review, audit, security check, lint, inspect, validate, code quality, sonar, eslint | `reviewer` | "review this PR", "security audit" |
+| 5 | commit, push, pull, merge, rebase, cherry-pick, stash, tag, release, branch, checkout, diff, log, blame, bisect, amend, squash, reset, revert | `coder` | "commit these changes", "rebase onto main" |
+| 6 | readme, changelog, write doc, update doc, jsdoc, typedoc, comment, annotate, documentation | `researcher` | "update the readme", "add jsdoc comments" |
+| 7 | research, explore, investigate, look up, summarize, find out, compare, benchmark, evaluate, analyze, assess | `researcher` | "research best practices", "investigate the issue" |
+| 8 | design, architect, blueprint, diagram, schema, model, system design, data model, erd, uml, sequence diagram | `architect` | "design the database schema" |
+| 9 | config, configure, setup, install, env, environment, settings, .env, yaml, toml, ini, dotfile, eslintrc, tsconfig, package.json | `devops` | "configure env vars", "setup the project" |
+| 10 | deploy, docker, ci/cd, pipeline, infrastructure, vercel, nginx, systemd, cron, kubernetes, k8s, terraform, ansible, aws, gcp, azure, cloudflare, ssl, cert, dns, domain | `devops` | "deploy to production", "fix the CI pipeline" |
+| 11 | implement, create, build, add, develop, scaffold, generate, write code, code, make, new file, new function, new class, new module | `coder` | "implement user auth", "create a new endpoint" |
+| 12 | api, endpoint, backend, database, migration, postgres, sqlite, prisma, drizzle, query, sql, seed, orm, graphql, rest, webhook, middleware, auth, jwt, oauth, session | `backend-dev` | "database migration", "new API endpoint" |
+| 13 | ui, frontend, component, react, css, style, layout, responsive, tailwind, shadcn, animation, modal, form, button, page, view, route, navigation, theme, dark mode | `frontend-dev` | "update the UI", "fix CSS" |
+| 14 | what, how, why, when, where, who, can you, explain, describe, check, status, list, help (prompt-start only) | `researcher` (0.6) | "what does this do?", "how does auth work?" |
 
-**Spanish patterns (Argentine voseo, no `\b` boundaries due to accented chars):**
+**Spanish patterns (accent-stripped input via `stripAccents()`):**
 
 | Priority | Pattern (keywords) | Routes To |
 |----------|--------------------|-----------|
-| 1 | arreglá, corregí, roto, crashea | `coder` |
-| 2 | refactoreá, renombrá, reorganizá, simplificá, limpiá | `coder` |
-| 3 | testea, probá, pruebas, test unitario | `tester` |
-| 4 | revisá, auditá, chequeá, validá, seguridad | `reviewer` |
-| 5 | investigá, buscá, explorá, documentación, analizá, resumí | `researcher` |
-| 6 | diseñá, arquitectura, planificá, diagrama, esquema | `architect` |
-| 7 | configurá, instalá, entorno, configuración | `devops` |
-| 8 | desplegá, infraestructura, servidor | `devops` |
-| 9 | implementa, creá, construí, agregá, desarrollá, generá | `coder` |
+| 1 | arregla, corregi, roto, crashea, no funciona, falla, problema, error, rompio | `coder` |
+| 2 | refactorea, renombra, reorganiza, simplifica, limpia, optimiza, modulariza | `coder` |
+| 3 | testea, proba, pruebas, test unitario | `tester` |
+| 4 | revisa, audita, chequea, valida, seguridad | `reviewer` |
+| 5 | comitear, pushear, mergear, branchear, taggear, releasear | `coder` |
+| 6 | documenta, escribi doc, anota, comenta | `researcher` |
+| 7 | investiga, busca, explora, analiza, resumi, compara, evalua | `researcher` |
+| 8 | disena, arquitectura, planifica, diagrama, esquema, modela | `architect` |
+| 9 | configura, instala, entorno, configuracion | `devops` |
+| 10 | desplega, desplegar, infraestructura, servidor, despliegue | `devops` |
+| 11 | implementa, crea, construi, agrega, desarrolla, genera, hace, programa | `coder` |
+| 12 | base de datos, migracion, consulta, semilla | `backend-dev` |
+| 13 | interfaz, estilo, pantalla, formulario, boton, navegacion, tema | `frontend-dev` |
+| 14 | que, como, por que, cuando, donde, quien, cual, podes, podrias, decime, mostrame, explica, ayuda (prompt-start only) | `researcher` (0.6) |
 
 ### Pattern Priority and Conflicts
 
@@ -82,7 +90,8 @@ Because first-match wins, pattern order is deliberately structured:
 
 Word boundary behavior:
 - **English patterns** use `\b` to prevent substring false positives (e.g., "checking" won't match "check" in reviewer pattern).
-- **Spanish patterns** omit `\b` because JavaScript's `\b` treats accented characters (`á`, `é`, `í`, etc.) as non-word characters, breaking word boundary detection on Spanish words.
+- **Spanish patterns** omit `\b` because JavaScript's `\b` treats accented characters as non-word characters. Instead, `stripAccents()` normalizes the task input (NFD decomposition + strip combining marks) before matching, so patterns work whether the user types accented (`arreglá`) or unaccented (`arregla`) forms.
+- **Conversational patterns** (priority 14) are anchored with `^` to match only at the start of the prompt, reducing false positives on prompts that contain question words mid-sentence.
 
 ### Default Routing
 
@@ -130,32 +139,32 @@ The `route` command in `hook-dispatch.js` is triggered by the `UserPromptSubmit`
 
 2. **Record in session memory**: Call `createSessionMemory().recordPrompt(prompt)` to track the prompt for downstream context snapshots and feedback loops.
 
-3. **Inject relevant patterns**: Call `rankByThompsonAndTrigram(db, project, prompt, 5, {minConfidence: 0.3, excludeRecentMinutes: 2})` — Thompson sampling + trigram matching against the project's pattern library. Records exposure and injection in session memory. Output format:
+3. **Query daemon** (unified): Call `queryDaemon({prompt, project, session_id, limit: 5, type: 'route+inject'})` via Unix socket (`~/.quoth/daemon.sock`). The daemon handles pattern ranking, doc chunk retrieval, and routing in a single round-trip. `ensureDaemon()` is called first — starts the daemon process if the socket is absent or unresponsive.
+
+4. **Inject relevant patterns**: From `resp.patterns`. Records exposure via `recordExposure(db, ids)` and injection via `sm.recordInjection(ids)`. Output format:
    ```
    [Quoth] Patterns for this prompt:
    - [0.42] pattern-name: action summary...
    - [0.31] pattern-name: action summary...
    ```
 
-4. **Inject relevant doc chunks**: Call `generateEmbedding(prompt)` then `db.searchDocChunks(vec, 3)`. Filters by cosine similarity > 0.2. Output format:
+5. **Inject relevant doc chunks**: From `resp.doc_chunks`. Filters by `score > 0.2`. Output format:
    ```
    [Quoth Docs] Relevant project context:
-     • [doc-label] Section Header: content snippet...
+     • [doc-title] content snippet...
    ```
 
-5. **Route the task**: Call `intel.routeTask(prompt)` for the primary recommendation.
-
-6. **Get alternatives**: Call `getAlternatives(result.agent)` for two fallback options.
+6. **Route the task**: Agent, confidence, and reason come from daemon response fields `resp.agent`, `resp.agent_confidence`, `resp.agent_reason`. Alternatives from `resp.alternatives`.
 
 7. **Format output**: Produce a structured table for Claude Code:
    ```
    [INFO] Routing task: <first 80 chars of prompt>
 
    Routing Method
-     - Method: keyword
-     - Backend: quoth-intelligence
-     - Latency: <random 0.1-0.6ms>
-     - Matched Pattern: <reason from routeTask>
+     - Method: semantic+keyword
+     - Backend: quoth-daemon
+     - Latency: <actual ms> (embed: <embed_ms>ms, search: <search_ms>ms)
+     - Matched Pattern: <reason from daemon>
 
    +------------------- Primary Recommendation -------------------+
    | Agent: coder                                                  |
@@ -177,7 +186,7 @@ The `route` command in `hook-dispatch.js` is triggered by the `UserPromptSubmit`
      - Complexity: LOW
    ```
 
-Note: The "Estimated Metrics" section (success probability, duration, complexity) is hardcoded and not derived from any actual analysis. The latency value is randomized between 0.1ms and 0.6ms for display purposes.
+Note: The "Estimated Metrics" section (success probability, duration, complexity) is hardcoded and not derived from any actual analysis. Latency is the actual wall-clock time of the daemon round-trip including embedding and search breakdown.
 
 ## MCP Tool Enrichment
 
@@ -213,25 +222,21 @@ User Prompt
     |
     +---> sessionMemory.recordPrompt()
     |
-    +---> rankByThompsonAndTrigram(db, project, prompt, 5)
-    |         |                        (Thompson sampling + trigram)
-    |         v
-    |     [Quoth] Patterns for this prompt: ...
+    +---> ensureDaemon() ---------> Unix socket ~/.quoth/daemon.sock
     |
-    +---> generateEmbedding(prompt) -> db.searchDocChunks(vec, 3)
-    |         |                        (cosine similarity > 0.2)
+    +---> queryDaemon({type: 'route+inject'})
+    |         |                        (single round-trip: embed + search + route)
     |         v
-    |     [Quoth Docs] Relevant project context: ...
-    |
-    +---> intel.routeTask(prompt) --> Keyword Pattern Matching
-    |         |                        (first-match, ~20 patterns EN+ES)
-    |         v
-    |     Primary agent + confidence
-    |
-    +---> getAlternatives(agent) --> Deterministic selection
-    |         |                        (next 2 in order)
+    |     resp.patterns -----------> recordExposure() + recordInjection()
+    |         |                        [Quoth] Patterns for this prompt: ...
+    |     resp.doc_chunks ---------> filter score > 0.2
+    |         |                        [Quoth Docs] Relevant project context: ...
+    |     resp.agent/confidence/reason
+    |     resp.alternatives
     |         v
     |     Format and output routing table
+    |       (Method: semantic+keyword, Backend: quoth-daemon,
+    |        Latency: actual ms with embed/search breakdown)
     |
     v
 [Routed to agent with context]
@@ -239,13 +244,13 @@ User Prompt
 
 ## Current Limitations
 
-1. **Keyword-only matching**: The routing uses regex patterns with no semantic understanding. Tasks like "optimize the rendering pipeline" might not match any pattern despite being clearly a `frontend-dev` task.
+1. **Keyword-only routing decision**: The agent-type routing decision uses regex patterns with no semantic understanding. Tasks like "optimize the rendering pipeline" might not match any pattern despite being clearly a `frontend-dev` task. (Note: the daemon does use embeddings for pattern *injection*, but not for the routing *decision* itself.)
 
 2. **No learned routing patterns**: The system does not learn from past routing decisions. A task that was successfully completed by a `backend-dev` after being routed to `coder` does not improve future routing for similar tasks.
 
 3. **No project-specific routing**: All projects use the same keyword patterns. A project that is predominantly frontend work still routes through the same generic patterns.
 
-4. **Static confidence values**: Routing confidence is always either 0.8 (pattern match) or 0.5 (default). There is no mechanism to learn that certain patterns are more reliable predictors than others.
+4. **Static confidence values**: Routing confidence is 0.8 (standard match), 0.6 (conversational/question patterns), or 0.5 (default). There is no mechanism to learn that certain patterns are more reliable predictors than others.
 
 5. **Alternative selection is uninformed**: Alternatives are always the next two agents in insertion order, regardless of task content.
 
@@ -255,8 +260,10 @@ User Prompt
 
 The following limitations from v3.2.0 have been addressed:
 
-- ~~High default routing fallback rate~~ — Expanded from 8 to ~20 pattern groups including fix/debug/refactor/config categories. Spanish language support added with Argentine voseo forms.
+- ~~High default routing fallback rate~~ — Expanded from 8 to ~28 pattern groups including fix/debug/refactor/config/git/docs/conversational categories. Spanish language support added with Argentine voseo forms.
 - ~~Pattern overlap ("check" false positives)~~ — Word boundaries (`\b`) added to English patterns to prevent substring matches. "checking" no longer triggers "check" in the reviewer pattern.
+- ~~Accent sensitivity in Spanish matching~~ — `stripAccents()` normalizes input before matching, so accented and unaccented forms work interchangeably.
+- ~~Direct pattern/embedding calls in hook~~ — Route handler now delegates to the daemon via Unix socket (single `route+inject` query), reducing hook latency and centralizing ranking logic.
 
 ## Exported API
 
@@ -267,4 +274,4 @@ The following limitations from v3.2.0 have been addressed:
 | `routeTask(task)` | Function | Returns `{ agent, confidence, reason }` |
 | `getAlternatives(primaryAgent)` | Function | Returns array of 2 alternatives |
 | `AGENT_CAPABILITIES` | Object | Map of agent name to capability tags |
-| `TASK_PATTERNS` | Array | Array of `[RegExp, agentType]` tuples, tested in order |
+| `TASK_PATTERNS` | Array | Array of `[RegExp, agentType, confidence?]` tuples, tested in order |

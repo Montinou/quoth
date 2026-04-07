@@ -266,19 +266,28 @@ The `createDb()` factory attaches all data access methods directly to the better
 - **Failure:** `beta += 1`, `confidence = alpha / (alpha + beta + 1)`
 - Both paths update `last_matched_at` and the corresponding count.
 
-**`applyHourlyDecay()`** -- Called by the daemon on a schedule. Four operations:
-1. **Alpha decay:** For all active patterns, reduce alpha by `decay_rate * alpha * 0.01` with floor at 0.1. Confidence floor at 0.05.
-2. **Tier 1 — Never matched:** Patterns with `last_matched_at IS NULL` and zero feedback get `beta += 0.1` (aggressive — drops to ~0.3 in a week).
-3. **Tier 2 — Inactive >7 days:** Patterns matched before but idle >7 days get `beta += 0.05` (moderate).
-4. **Tier 3 — Inactive >30 days:** All patterns idle >30 days get `beta += 0.15` (strong, stacks with Tier 1 or 2).
+**`applyHourlyDecay()`** -- Called by the daemon on a schedule. Exposure-based decay only — never-exposed patterns are not penalized (no signal = no change). Two tiers:
+1. **Tier 1 — Exposed but unhelpful:** Patterns with `exposure_count >= 5` and a conversion rate below 10% get `beta += 0.05` per hour.
+2. **Tier 2 — Dominance prevention:** Patterns with `exposure_count > 20` get very gentle alpha decay: `alpha *= 0.9995` per hour (~3.5% weekly reduction), floored at 0.1.
 
-**`archiveWeakPatterns()`** -- Two rules:
-1. Set `status = 'archived'` for patterns where `confidence < 0.1` AND total uses > 3 (evidence-based archival).
+**`archiveWeakPatterns()`** -- Three rules:
+1. Set `status = 'archived'` for patterns where `confidence < 0.1` AND `exposure_count >= 10` AND conversion rate (success / exposure) < 5% (evidence-based archival with enough data).
 2. Archive raw tool-call patterns (`name LIKE 'claude-code: Bash %'` etc.) with `confidence < 0.15` and zero feedback (garbage cleanup).
+3. Archive patterns older than 30 days with `exposure_count = 0` and no feedback (never-exposed stale patterns; threshold was previously 90 days).
 
-**`getPromotionCandidates()`** -- Find patterns eligible for cloud promotion: `confidence > 0.8`, total uses > 10, `status = 'active'`, `source = 'distilled'`.
+**`pruneYoungUnused()`** -- Delete patterns aged 1–24 hours with zero exposures, zero successes, and zero failures (distiller noise cleanup). Returns the number of deleted rows.
+
+**`getPromotionCandidates()`** -- Find patterns eligible for cloud promotion: `confidence > 0.8`, `(success_count + failure_count) > 10`, `status = 'active'`, `source = 'distilled'`.
 
 **`markPromoted(id, cloudDocumentId, confidence)`** -- Record promotion metadata: sets `promoted_at`, `cloud_document_id`, and `promoted_confidence` snapshot.
+
+### Doc Chunk Operations
+
+**`upsertDocChunk(chunk)`** -- Insert or update a documentation chunk via `INSERT ... ON CONFLICT(id) DO UPDATE`. Updates `content`, `embedding`, `content_hash`, and `updated_at` on conflict.
+
+**`searchDocChunks(queryVector, limit)`** -- Linear scan over all `doc_chunks` rows with embeddings. Computes cosine similarity against each, sorts descending, returns top `limit` (default 3). No HNSW path — doc chunks use linear scan only.
+
+**`getDocChunkCount()`** -- Returns the total count of rows in `doc_chunks`.
 
 ### Trajectory Operations
 

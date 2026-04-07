@@ -33,6 +33,7 @@ The Quoth daemon is a long-running Node.js process that watches trajectory files
 | Log file | `~/.quoth/daemon.log` (JSON lines) |
 | Lock file | `~/.quoth/processing.lock` |
 | Database | `~/.quoth/memory.db` (SQLite via better-sqlite3) |
+| Unix socket | `~/.quoth/daemon.sock` (query server for hook communication) |
 | Debug mode | `QUOTH_DEBUG=true` (enables stderr output) |
 | Trajectories | `~/.quoth/trajectories/` |
 
@@ -59,7 +60,9 @@ The daemon performs the following steps on startup, in order:
 13. **Schedule nightly pipeline:** Calculate milliseconds until next 06:00 UTC (03:00 ART) and set a timeout. Then run `checkStartupCatchup()` — if >24h since last execution, run the pipeline immediately (10s delay).
 14. **Initial scan:** Run `scanAndEnqueue()` to pick up any unprocessed trajectory entries.
 15. **Process queue:** Run `processQueue()` to begin processing enqueued entries.
-16. **Index docs (async):** Non-blocking call to `indexDocs()` to index project documentation chunks into the database.
+16. **Start query server:** Create and start a Unix socket server (`createQueryServer`) at `~/.quoth/daemon.sock` for low-latency hook-to-daemon communication.
+17. **Pre-warm embedding pipeline:** Call `generateEmbedding('warmup')` asynchronously to avoid a 500ms cold start on the first real embedding request.
+18. **Index docs (async):** Non-blocking call to `indexDocs()` to index project documentation chunks into the database.
 
 ---
 
@@ -468,7 +471,7 @@ Adjusts Bayesian parameters based on exposure vs. success rates:
 
 ### Phase 2.6: Capacity Pruning
 
-When the active pattern count exceeds 1000, archives the lowest-scoring patterns to keep the library at ≤ 900 active entries. Score = `success_rate × log(1 + total_uses)`.
+When the active pattern count exceeds 600, archives the lowest-scoring patterns to keep the library at ≤ 500 active entries. Score = `success_rate × log(1 + total_uses)`.
 
 These phases run inside `runDeepConsolidate()`, which is Phase A of the nightly pipeline.
 
@@ -507,7 +510,7 @@ Currently logs the number of eligible patterns for cross-validation. Full implem
 |-------|------|-------------|
 | A | Deep consolidation | `runDeepConsolidate()` — garbage archival, name dedup, LLM merge/archive, rebalancing, capacity pruning, cloud/global promotion |
 | B | Doc auto-update | `runDocUpdate()` — hash-based stale doc detection, LLM update via `claude -p`, git commit + push (spawned as detached process) |
-| C | Cloud pull | `syncFromCloud(db, log)` — pull updated patterns from Quoth cloud |
+| C | Cloud pull | `syncFromCloud(db, log)` — pull updated patterns from Quoth cloud; `pullSharedPatterns(db, log)` — pull shared cross-org patterns |
 | D | Cluster rebuild | `rebuildClusters()` — k-means clustering of active pattern embeddings per namespace (feature-flagged: `injection`) |
 | E | SNIPS posteriors | `updateClusterPosteriors()` — update cluster Beta posteriors using SNIPS off-policy estimator from last 7 days of injection logs (feature-flagged: `injection`) |
 | F | LLM-as-Judge | `enqueueJudgePairs()` + `runJudgeBatch()` — pairwise cluster uncertainty judgments, up to 100 pairs/run (feature-flagged: `judge`) |
@@ -673,7 +676,7 @@ Pure JavaScript implementation of the Hierarchical Navigable Small World (HNSW) 
 
 | Signal | Behavior |
 |--------|----------|
-| `SIGTERM` | Graceful shutdown: clear all timers, close database, exit with code 0 |
+| `SIGTERM` | Graceful shutdown: clear all timers, stop query server, close database, exit with code 0 |
 | `SIGUSR1` | Immediate flush: trigger `scanAndEnqueue()` + `processQueue()`. Used by `quoth_ingest_trajectory` MCP tool to signal new data. |
 
 ---
@@ -692,6 +695,7 @@ process.on('uncaughtException', (err) => {
 On exit (normal or forced), the daemon cleans up:
 - Removes the PID file (`~/.quoth/daemon.pid`)
 - Removes the lock file (`~/.quoth/processing.lock`)
+- Removes the Unix socket file (`~/.quoth/daemon.sock`)
 
 These are handled via `process.on('exit', ...)` to cover all exit paths.
 

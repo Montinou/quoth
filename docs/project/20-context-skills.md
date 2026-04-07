@@ -2,7 +2,7 @@
 
 Two subsystems added in v3.2.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
-**Version:** 1.0.2 | **Last updated:** 2026-04-07
+**Version:** 1.0.3 | **Last updated:** 2026-04-07
 
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart
@@ -48,7 +48,7 @@ The files are printed as plain markdown to stdout. Claude Code captures stdout f
 
 ### Doc Chunk Injection (UserPromptSubmit)
 
-The `route` handler (UserPromptSubmit) performs a second form of context injection: semantic search over indexed documentation chunks. For every prompt of 10+ characters, it generates an embedding and calls `db.searchDocChunks(promptVec, 3)`. Chunks with cosine similarity > 0.2 are printed to stdout as:
+The `route` handler (UserPromptSubmit) performs a second form of context injection: semantic search over indexed documentation chunks. For every prompt of 10+ characters, the handler delegates to the daemon via a unified `route+inject` query over the Unix socket (`type: 'route+inject'`). The daemon generates the embedding and performs the doc chunk search; results are returned in `resp.doc_chunks`. Before the daemon query, the prompt is also persisted to `~/.quoth/intelligence/prompt-history.json` (rolling last 5, session-scoped). Chunks with cosine similarity > 0.2 are printed to stdout as:
 
 ```
 [Quoth Docs] Relevant project context:
@@ -69,6 +69,19 @@ Example output:
 ```
 
 The `doc-manifest.json` file is written by the daemon's doc auto-update pipeline; `session-restore` is read-only with respect to the manifest (except for updating `lastReportedAt`).
+
+### Context-Aware Pattern Injection (SessionStart)
+
+After reporting doc updates, `session-restore` performs a final daemon-based pattern injection informed by the previous session's context. It loads `~/.quoth/intelligence/last-context-{project}.json` (written by `session-end`) and builds a query string from the last 2 prompts and top 5 topics. If no prior context is available, it falls back to `"session start"`.
+
+The daemon is queried with `{ type: 'inject', limit: 7 }` and matching patterns are printed:
+
+```
+[Quoth] N patterns loaded for project "my-project":
+- [0.82] pattern-name: action description...
+```
+
+Pattern IDs are recorded via `recordExposure()` and `session-memory.js` so that `session-end` can apply the appropriate feedback (V1 soft-negative on stale injections, V2 reward-weighted via `injection_log`). The `last-context-{project}.json` snapshot itself is written by `session-end` from the `createSessionMemory` summary.
 
 ### Project-Local Context Override
 

@@ -64,8 +64,8 @@ Tests the SQLite database layer (`daemon/db.js`).
   - `agent_registry` — includes `capabilities`, `last_heartbeat`, `metadata`
   - `events` — with indexes on `event_type`, `agent_id`, `created_at`
   - `cluster_stats` — compound PK `(cluster_id, namespace)`; Thompson sampling state per cluster: `alpha`, `beta`, `attempts`, `centroid_embedding`, `member_count`
-  - `injection_log` — per-injection record: `session_id`, `pattern_id`, `cluster_id`, `rank`, `propensity`, `is_exploration`, `query_text`, `injected_at`, `outcome_at`, `reward`; indexes on `session_id`, `pattern_id`, pending outcomes
-  - `judge_queue` — pairwise pattern comparison jobs: `pattern_a_id`, `pattern_b_id`, `trajectory_summary`, `priority`, `status`, `verdict`, `judged_at`, `cost_cents`
+  - `injection_log` — per-injection record: `session_id`, `namespace`, `pattern_id`, `cluster_id`, `rank`, `propensity`, `is_exploration`, `query_text`, `injected_at`, `outcome_at`, `reward`; indexes on `session_id`, `pattern_id`, pending outcomes
+  - `judge_queue` — pairwise pattern comparison jobs: `session_id`, `pattern_a_id`, `pattern_b_id`, `trajectory_summary`, `priority`, `status`, `verdict`, `judged_at`, `cost_cents`
   - `doc_chunks` — project documentation chunks for semantic search: `doc_file`, `section_header`, `content`, `embedding` (384d), `content_hash`
 - Validates WAL mode and foreign key constraints are enabled.
 

@@ -379,30 +379,38 @@ The intelligence tools depend on a graph library providing:
 
 ### Routing Library (`mcp/lib/routing.js`)
 
-The routing system uses keyword matching against 20 ordered patterns (first match wins). Patterns are ordered from most-specific intent to broadest domain, and each English pattern has a paired Spanish voseo variant.
+The routing system uses keyword matching against 28 ordered patterns (first match wins). Input is normalized via `stripAccents()` before matching, so patterns work with or without diacritics (e.g., Argentine voseo "arregla" and "arreglá" both match). Patterns are ordered from most-specific intent to broadest domain, and each English pattern has a paired Spanish voseo variant.
 
 | Pattern (regex, case-insensitive) | Agent Type | Notes |
 |-----------------------------------|------------|-------|
-| `\b(?:fix\|bug\|debug\|broken\|crash\|hotfix\|patch)\b` | `coder` | Highest priority — explicit fix intent |
-| `(?:arreglá\|corregí\|roto\|crashea)` | `coder` | Spanish voseo |
-| `\b(?:refactor\|rename\|extract\|reorganize\|cleanup\|clean up\|simplify)\b` | `coder` | |
-| `(?:refactoreá\|renombrá\|reorganizá\|simplificá\|limpiá)` | `coder` | Spanish voseo |
-| `\b(?:test\|spec\|coverage\|unit.?test\|integration.?test\|assert\|mock\|fixture\|jest\|vitest)\b` | `tester` | |
-| `(?:testea\|probá\|pruebas\|test unitario)` | `tester` | Spanish voseo |
-| `\b(?:review\|audit\|security.?check\|lint\|inspect\|validate)\b` | `reviewer` | |
-| `(?:revisá\|auditá\|chequeá\|validá\|seguridad)` | `reviewer` | Spanish voseo |
-| `\b(?:research\|explore\|investigate\|look.?up\|summarize\|documentation)\b` | `researcher` | |
-| `(?:investigá\|buscá\|explorá\|documentación\|analizá\|resumí)` | `researcher` | Spanish voseo |
-| `\b(?:design\|architect\|blueprint\|diagram\|schema\|model)\b` | `architect` | |
-| `(?:diseñá\|arquitectura\|planificá\|diagrama\|esquema)` | `architect` | Spanish voseo |
-| `\b(?:config(?:ure)?\|setup\|install\|env(?:ironment)?\|settings)\b` | `devops` | New: config/setup intent |
-| `(?:configurá\|instalá\|entorno\|configuración)` | `devops` | Spanish voseo |
-| `\b(?:deploy\|docker\|ci.?cd\|pipeline\|infrastructure\|vercel\|nginx\|systemd\|cron)\b` | `devops` | Extended keywords |
-| `(?:desplegá\|infraestructura\|servidor)` | `devops` | Spanish voseo |
-| `\b(?:implement\|create\|build\|add\|develop\|scaffold\|generate\|write.?code\|programá)\b` | `coder` | Broad coder intent |
-| `(?:implementa\|creá\|construí\|agregá\|desarrollá\|generá)` | `coder` | Spanish voseo |
-| `\b(?:api\|endpoint\|backend\|database\|migration\|postgres\|sqlite\|prisma\|drizzle\|query)\b` | `backend-dev` | Domain match |
-| `\b(?:ui\|frontend\|component\|react\|css\|style\|layout\|responsive\|tailwind\|shadcn)\b` | `frontend-dev` | Domain match |
+| `\b(?:fix\|bug\|debug\|broken\|crash\|hotfix\|patch\|error\|not.?working\|fails?\|issue\|troubleshoot\|stacktrace\|exception\|segfault\|undefined\|null.?pointer)\b` | `coder` | Highest priority — explicit fix/debug intent |
+| `(?:arregla\|corregi\|roto\|crashea\|no.?funciona\|falla\|problema\|error\|rompio)` | `coder` | Spanish voseo |
+| `\b(?:refactor\|rename\|extract\|reorganize\|cleanup\|clean.?up\|simplify\|deduplicate\|dedup\|dry\|modularize\|split.?file\|move.?to\|optimize.?code)\b` | `coder` | |
+| `(?:refactorea\|renombra\|reorganiza\|simplifica\|limpia\|optimiza\|modulariza)` | `coder` | Spanish voseo |
+| `\b(?:test\|spec\|coverage\|unit.?test\|integration.?test\|assert\|mock\|fixture\|jest\|vitest\|e2e\|playwright\|cypress\|snapshot)\b` | `tester` | |
+| `(?:testea\|proba\|pruebas\|test unitario)` | `tester` | Spanish voseo |
+| `\b(?:review\|audit\|security.?check\|lint\|inspect\|validate\|code.?quality\|sonar\|eslint)\b` | `reviewer` | |
+| `(?:revisa\|audita\|chequea\|valida\|seguridad)` | `reviewer` | Spanish voseo |
+| `\b(?:commit\|push\|pull\|merge\|rebase\|cherry.?pick\|stash\|tag\|release\|branch\|checkout\|diff\|log\|blame\|bisect\|amend\|squash\|reset\|revert)\b` | `coder` | Git / version control operations |
+| `(?:comitear\|pushear\|mergear\|branchear\|taggear\|releasear)` | `coder` | Spanish voseo |
+| `\b(?:readme\|changelog\|write.?doc\|update.?doc\|jsdoc\|typedoc\|comment\|annotate\|document(?:ation)?)\b` | `researcher` | Documentation writing intent |
+| `(?:documenta\|escribi.?doc\|anota\|comenta)` | `researcher` | Spanish voseo |
+| `\b(?:research\|explore\|investigate\|look.?up\|summarize\|find.?out\|compare\|benchmark\|evaluate\|analyze\|assess)\b` | `researcher` | |
+| `(?:investiga\|busca\|explora\|analiza\|resumi\|compara\|evalua)` | `researcher` | Spanish voseo |
+| `\b(?:design\|architect\|blueprint\|diagram\|schema\|model\|system.?design\|data.?model\|erd\|uml\|sequence.?diagram)\b` | `architect` | |
+| `(?:disena\|arquitectura\|planifica\|diagrama\|esquema\|modela)` | `architect` | Spanish voseo |
+| `\b(?:config(?:ure)?\|setup\|install\|env(?:ironment)?\|settings\|\.env\|yaml\|toml\|ini\|dotfile\|eslintrc\|tsconfig\|package\.json)\b` | `devops` | Config/setup intent |
+| `(?:configura\|instala\|entorno\|configuracion)` | `devops` | Spanish voseo |
+| `\b(?:deploy\|docker\|ci.?cd\|pipeline\|infrastructure\|vercel\|nginx\|systemd\|cron\|kubernetes\|k8s\|terraform\|ansible\|aws\|gcp\|azure\|cloudflare\|ssl\|cert\|dns\|domain)\b` | `devops` | |
+| `(?:desplega\|desplegar\|infraestructura\|servidor\|despliegue)` | `devops` | Spanish voseo |
+| `\b(?:implement\|create\|build\|add\|develop\|scaffold\|generate\|write.?code\|programa\|code\|make\|new.?file\|new.?function\|new.?class\|new.?module)\b` | `coder` | Broad coder intent |
+| `(?:implementa\|crea\|construi\|agrega\|desarrolla\|genera\|hace\|programa)` | `coder` | Spanish voseo |
+| `\b(?:api\|endpoint\|backend\|database\|migration\|postgres\|sqlite\|prisma\|drizzle\|query\|sql\|seed\|orm\|graphql\|rest\|webhook\|middleware\|auth(?:entication)?\|jwt\|oauth\|session)\b` | `backend-dev` | Domain match |
+| `(?:base.?de.?datos\|migracion\|consulta\|semilla)` | `backend-dev` | Spanish voseo |
+| `\b(?:ui\|frontend\|component\|react\|css\|style\|layout\|responsive\|tailwind\|shadcn\|animation\|modal\|form\|button\|page\|view\|route\|navigation\|theme\|dark.?mode)\b` | `frontend-dev` | Domain match |
+| `(?:interfaz\|estilo\|pantalla\|formulario\|boton\|navegacion\|tema)` | `frontend-dev` | Spanish voseo |
+| `^(?:what\|how\|why\|when\|where\|who\|which\|can you\|could you\|tell me\|show me\|explain\|check\|verify\|status\|list\|help)\b` | `researcher` | Conversational/questions — **0.6 confidence** |
+| `^(?:que\|como\|por ?que\|cuando\|donde\|podes\|podrias\|decime\|explica\|chequea\|hay\|tenemos\|ayuda)` | `researcher` | Spanish conversational — **0.6 confidence** |
 
 Default (no match): `coder` at 0.5 confidence.
 
