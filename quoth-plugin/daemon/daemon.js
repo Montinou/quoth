@@ -78,7 +78,12 @@ function log(level, msg, data) {
 
 // --- PID management ---
 fs.writeFileSync(PID_FILE, String(process.pid))
-process.on('exit', () => { try { fs.unlinkSync(PID_FILE) } catch {}; try { fs.unlinkSync(LOCK_FILE) } catch {} })
+const SOCK_PATH = path.join(QUOTH_HOME, 'daemon.sock')
+process.on('exit', () => {
+  try { fs.unlinkSync(PID_FILE) } catch {}
+  try { fs.unlinkSync(LOCK_FILE) } catch {}
+  try { fs.unlinkSync(SOCK_PATH) } catch {}
+})
 // Clean stale lock from previous crash
 if (fs.existsSync(LOCK_FILE)) {
   try {
@@ -88,9 +93,11 @@ if (fs.existsSync(LOCK_FILE)) {
 }
 
 // --- Signal handlers ---
+let queryServer = null
 process.on('SIGTERM', () => {
   log('info', 'SIGTERM received, shutting down')
   clearTimers()
+  if (queryServer) queryServer.stop()
   db.close()
   process.exit(0)
 })
@@ -1363,6 +1370,24 @@ startStaleSessionTimer()
 scheduleNightlyPipeline()
 scanAndEnqueue()
 processQueue()
+
+// --- Query server (Unix socket for hook → daemon communication) ---
+try {
+  const { createQueryServer } = require('./lib/query-server.js')
+  queryServer = createQueryServer(db, log)
+  queryServer.start()
+} catch (err) {
+  log('error', 'Query server failed to start', { error: err.message })
+}
+
+// --- Pre-warm embedding pipeline (avoids 500ms cold start on first query) ---
+;(async () => {
+  try {
+    const { generateEmbedding } = require('./lib/embed.js')
+    await generateEmbedding('warmup')
+    log('info', 'Embedding pipeline pre-warmed')
+  } catch {}
+})()
 
 // --- Index doc chunks at startup (async, non-blocking) ---
 ;(async () => {

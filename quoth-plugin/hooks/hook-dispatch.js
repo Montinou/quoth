@@ -22,9 +22,13 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+const http = require('http')
+const { spawn } = require('child_process')
+
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
+const SOCK_PATH = path.join(QUOTH_HOME, 'daemon.sock')
 
 function resolveProjectName(dir) {
   // Try git remote origin → use repo name (e.g. "sales-companion" from Montinou/sales-companion)
@@ -65,6 +69,60 @@ function getDb() {
     _db = createDb(DB_PATH)
   } catch {}
   return _db
+}
+
+// --- Daemon query client (Unix socket) ---
+function queryDaemon(body, timeoutMs = 500) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body)
+    const req = http.request({
+      socketPath: SOCK_PATH,
+      path: '/query',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      timeout: timeoutMs,
+    }, (res) => {
+      let chunks = ''
+      res.on('data', c => { chunks += c })
+      res.on('end', () => {
+        try { resolve(JSON.parse(chunks)) }
+        catch { reject(new Error('Invalid JSON from daemon')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Daemon query timeout')) })
+    req.write(data)
+    req.end()
+  })
+}
+
+function isDaemonAlive() {
+  return new Promise(resolve => {
+    const req = http.request({
+      socketPath: SOCK_PATH, path: '/health', method: 'GET', timeout: 200,
+    }, (res) => {
+      let d = ''
+      res.on('data', c => { d += c })
+      res.on('end', () => resolve(res.statusCode === 200))
+    })
+    req.on('error', () => resolve(false))
+    req.on('timeout', () => { req.destroy(); resolve(false) })
+    req.end()
+  })
+}
+
+async function ensureDaemon() {
+  if (fs.existsSync(SOCK_PATH) && await isDaemonAlive()) return
+  // Start daemon
+  const daemonPath = path.join(QUOTH_PLUGIN, 'daemon', 'daemon.js')
+  const child = spawn('node', [daemonPath], { detached: true, stdio: 'ignore' })
+  child.unref()
+  // Wait for socket to become available (max 5s)
+  for (let i = 0; i < 50; i++) {
+    await new Promise(r => setTimeout(r, 100))
+    if (fs.existsSync(SOCK_PATH) && await isDaemonAlive()) return
+  }
+  throw new Error('Daemon failed to start within 5s')
 }
 
 // Read stdin (Claude Code sends hook data as JSON)
@@ -123,75 +181,63 @@ const handlers = {
       sm.recordPrompt(prompt)
     } catch {}
 
-    // Inject prompt-relevant patterns (trigram-matched against current prompt)
-    const db = getDb()
-    if (db && prompt && prompt.trim().length >= 5) {
+    // Query daemon for unified routing + injection + doc chunks
+    await ensureDaemon()
+    const t0 = Date.now()
+    const resp = await queryDaemon({
+      prompt, project, session_id: sessionId, limit: 5, type: 'route+inject'
+    })
+    const latency = Date.now() - t0
+
+    // Pattern injection output
+    if (resp.patterns && resp.patterns.length > 0) {
       try {
-        const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
         const { recordExposure } = require('../daemon/lib/scoring.js')
         const { createSessionMemory } = require('./session-memory.js')
-
-        const patterns = rankByThompsonAndTrigram(db, project, prompt, 5, {
-          minConfidence: 0.3,
-          excludeRecentMinutes: 2,
-        })
-
-        if (patterns.length > 0) {
-          recordExposure(db, patterns.map(p => p.id))
-          const sm = createSessionMemory({
-            dir: path.join(QUOTH_HOME, 'intelligence'),
-            sessionId, project,
-          })
-          sm.recordInjection(patterns.map(p => p.id))
-
-          const lines = ['[Quoth] Patterns for this prompt:']
-          for (const p of patterns) {
-            const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
-            lines.push(`- [${conf.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`)
-          }
-          console.log(lines.join('\n'))
-        }
+        const db = getDb()
+        if (db) recordExposure(db, resp.patterns.map(p => p.id))
+        const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
+        sm.recordInjection(resp.patterns.map(p => p.id))
       } catch {}
+
+      const lines = ['[Quoth] Patterns for this prompt:']
+      for (const p of resp.patterns) {
+        lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`)
+      }
+      console.log(lines.join('\n'))
     }
 
-    // Inject relevant doc chunks (semantic search against prompt)
-    if (db && prompt && prompt.trim().length >= 10) {
-      try {
-        const { generateEmbedding } = require('../daemon/lib/embed.js')
-        const promptVec = await generateEmbedding(prompt)
-        if (promptVec) {
-          const chunks = db.searchDocChunks(promptVec, 3)
-          if (chunks.length > 0 && chunks[0]._similarity > 0.2) {
-            const lines = ['[Quoth Docs] Relevant project context:']
-            for (const c of chunks.filter(c => c._similarity > 0.2)) {
-              const label = c.doc_file.replace('.md', '').replace(/^\d+-/, '')
-              lines.push(`  • [${label}] ${c.section_header}: ${c.content.slice(0, 250)}`)
-            }
-            console.log(lines.join('\n'))
-          }
+    // Doc chunk injection output
+    if (resp.doc_chunks && resp.doc_chunks.length > 0) {
+      const relevant = resp.doc_chunks.filter(c => c.score > 0.2)
+      if (relevant.length > 0) {
+        const lines = ['[Quoth Docs] Relevant project context:']
+        for (const c of relevant) {
+          lines.push(`  • [${c.title}] ${c.content.slice(0, 250)}`)
         }
-      } catch {}
+        console.log(lines.join('\n'))
+      }
     }
 
-    // Route the task
-    const intel = getIntelligence()
-    const result = intel.routeTask(prompt)
-    const { getAlternatives } = require(path.join(QUOTH_PLUGIN, 'mcp', 'lib', 'routing'))
-    const alternatives = getAlternatives(result.agent)
+    // Routing output
+    const agent = resp.agent || 'coder'
+    const confidence = resp.agent_confidence || 0.5
+    const reason = resp.agent_reason || 'Default routing'
+    const alternatives = resp.alternatives || []
 
     const output = [
       `[INFO] Routing task: ${(prompt || '').substring(0, 80) || '(no prompt)'}`,
       '',
       'Routing Method',
-      '  - Method: keyword',
-      '  - Backend: quoth-intelligence',
-      `  - Latency: ${(Math.random() * 0.5 + 0.1).toFixed(3)}ms`,
-      `  - Matched Pattern: ${result.reason}`,
+      '  - Method: semantic+keyword',
+      '  - Backend: quoth-daemon',
+      `  - Latency: ${latency}ms (embed: ${resp.embedding_ms || 0}ms, search: ${resp.search_ms || 0}ms)`,
+      `  - Matched Pattern: ${reason}`,
       '',
       '+------------------- Primary Recommendation -------------------+',
-      `| Agent: ${result.agent.padEnd(53)}|`,
-      `| Confidence: ${(result.confidence * 100).toFixed(1)}%${' '.repeat(44)}|`,
-      `| Reason: ${result.reason.substring(0, 53).padEnd(53)}|`,
+      `| Agent: ${agent.padEnd(53)}|`,
+      `| Confidence: ${(confidence * 100).toFixed(1)}%${' '.repeat(44)}|`,
+      `| Reason: ${reason.substring(0, 53).padEnd(53)}|`,
       '+--------------------------------------------------------------+',
       '',
       'Alternative Agents',
@@ -200,7 +246,7 @@ const handlers = {
       '+------------+------------+-------------------------------------+',
     ]
     for (const alt of alternatives) {
-      output.push(`| ${alt.agent.padEnd(10)} | ${(alt.confidence * 100).toFixed(1).padStart(9)}% | ${alt.reason.substring(0, 35).padEnd(35)} |`)
+      output.push(`| ${(alt.agent || '').padEnd(10)} | ${((alt.confidence || 0) * 100).toFixed(1).padStart(9)}% | ${(alt.reason || '').substring(0, 35).padEnd(35)} |`)
     }
     output.push('+------------+------------+-------------------------------------+')
     output.push('')
@@ -274,95 +320,48 @@ const handlers = {
       }
     } catch {}
 
-    // Context-aware semantic injection
-    if (db) {
+    // Context-aware semantic injection via daemon query
+    try {
+      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
+
+      // Load last session's context for query
+      let queryText = ''
       try {
-        const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-        const { recordExposure } = require('../daemon/lib/scoring.js')
-        const { createSessionMemory } = require('./session-memory.js')
-        const { isSubFlag } = require('../daemon/lib/flags.js')
+        const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
+        const ctx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'))
+        queryText = [
+          ...(ctx.recentPrompts || []).slice(-2),
+          (ctx.topTopics || []).slice(0, 5).join(' '),
+        ].filter(Boolean).join(' ')
+      } catch {}
 
-        // Load last session's context snapshot for query
-        let queryText = ''
-        try {
-          const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
-          const ctx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'))
-          queryText = [
-            ...(ctx.recentPrompts || []).slice(-2),
-            (ctx.topTopics || []).slice(0, 5).join(' '),
-          ].filter(Boolean).join(' ')
-        } catch {}
+      if (queryText || true) {
+        await ensureDaemon()
+        const resp = await queryDaemon({
+          prompt: queryText || 'session start',
+          project, session_id: sessionId, limit: 7, type: 'inject'
+        })
 
-        let patterns
-        const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
-
-        if (isSubFlag('injection')) {
-          // V2 path: Hierarchical Thompson + exploration + propensity logging
-          const { hierarchicalSelect } = require('../daemon/lib/bandit-v2.js')
-          const { replaceWithExploration, EXPLORATION_RATE } = require('../daemon/lib/propensity.js')
-
-          // Query embedding from last-context (or null → cosine weight will be 0.5 default)
-          let queryEmbedding = null
-          try {
-            const { generateEmbedding } = require('../daemon/lib/embed.js')
-            if (queryText && generateEmbedding) queryEmbedding = await generateEmbedding(queryText)
-          } catch (e) {
-            console.error('[quoth-v2 session-restore] embedding failed:', e.message)
-          }
-
-          const candidates = queryEmbedding
-            ? (db.searchBySimilarity(queryEmbedding, 20, []) || [])
-            : db.getProjectPatterns(project, 20)
-
-          const clusterMap = new Map()
-          for (const c of candidates) {
-            if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
-              const stats = db.getClusterStats(c.cluster_id, project)
-              if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
-            }
-          }
-
-          let selected = hierarchicalSelect(candidates, clusterMap, 7, queryEmbedding)
-          if (isSubFlag('exploration')) selected = replaceWithExploration(selected, candidates, EXPLORATION_RATE)
-
-          for (const s of selected) {
-            db.logInjection({
-              session_id: sessionId, namespace: project, pattern_id: s.id,
-              cluster_id: s.cluster_id, rank: s.rank, propensity: s.propensity,
-              is_exploration: !!s.is_exploration, query_text: queryText,
-            })
-          }
-          patterns = selected
-        } else {
-          // V1 path: Thompson + trigram
-          const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
-          patterns = rankByThompsonAndTrigram(db, project, queryText, 7, {
-            minConfidence: 0.3,
-            excludeRecentMinutes: 5,
-          })
-        }
-
+        const patterns = resp.patterns || []
         if (patterns.length > 0) {
-          recordExposure(db, patterns.map(p => p.id))
+          try {
+            const { recordExposure } = require('../daemon/lib/scoring.js')
+            const { createSessionMemory } = require('./session-memory.js')
+            const db = getDb()
+            if (db) recordExposure(db, patterns.map(p => p.id))
+            const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
+            sm.recordInjection(patterns.map(p => p.id))
+          } catch {}
 
-          // Track injection in session memory for feedback loop
-          const sm = createSessionMemory({
-            dir: path.join(QUOTH_HOME, 'intelligence'),
-            sessionId, project,
-          })
-          sm.recordInjection(patterns.map(p => p.id))
-
-          const version = isSubFlag('injection') ? 'v2' : 'v1'
-          const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}" (${version}):`]
+          const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
           for (const p of patterns) {
-            const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
-            const tag = p.is_exploration ? ' [exp]' : ''
-            lines.push(`- [${conf.toFixed(2)}${tag}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
+            lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
           }
           console.log(lines.join('\n'))
         }
-      } catch {}
-    }
+      }
+    } catch {}
   },
 
   'session-end': () => {
@@ -589,88 +588,39 @@ const handlers = {
   },
 
   'subagent-start': async (hookInput) => {
-    const db = getDb()
-    if (!db) return
-
     const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-
-    const { recordExposure } = require('../daemon/lib/scoring.js')
-    const { createSessionMemory } = require('./session-memory.js')
-    const { isSubFlag } = require('../daemon/lib/flags.js')
-
     const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
-    const sm = createSessionMemory({
-      dir: path.join(QUOTH_HOME, 'intelligence'),
-      sessionId, project,
-    })
-
-    // Build query from task description + session context
     const taskText = hookInput.prompt || hookInput.description || ''
-    const queryText = sm.getQueryText([taskText, agentType].filter(Boolean).join(' '))
 
-    let scored
-    if (isSubFlag('injection')) {
-      // V2 path: Hierarchical Thompson + exploration
-      const { hierarchicalSelect } = require('../daemon/lib/bandit-v2.js')
-      const { replaceWithExploration, EXPLORATION_RATE } = require('../daemon/lib/propensity.js')
+    try {
+      await ensureDaemon()
+      const resp = await queryDaemon({
+        prompt: [taskText, agentType].filter(Boolean).join(' ') || 'subagent task',
+        project, session_id: sessionId, limit: 5, type: 'inject'
+      })
 
-      let queryEmbedding = null
+      const scored = resp.patterns || []
+      if (scored.length === 0) return
+
       try {
-        const { generateEmbedding } = require('../daemon/lib/embed.js')
-        if (queryText && generateEmbedding) queryEmbedding = await generateEmbedding(queryText)
+        const { recordExposure } = require('../daemon/lib/scoring.js')
+        const { createSessionMemory } = require('./session-memory.js')
+        const db = getDb()
+        if (db) recordExposure(db, scored.map(p => p.id))
+        const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
+        sm.recordInjection(scored.map(p => p.id))
       } catch {}
 
-      const candidates = queryEmbedding
-        ? (db.searchBySimilarity(queryEmbedding, 20, []) || [])
-        : db.getProjectPatterns(project, 20)
+      const context = scored.map(p =>
+        `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
+      ).join('\n')
 
-      const clusterMap = new Map()
-      for (const c of candidates) {
-        if (c.cluster_id != null && !clusterMap.has(c.cluster_id)) {
-          const stats = db.getClusterStats(c.cluster_id, project)
-          if (stats) clusterMap.set(c.cluster_id, { alpha: stats.alpha, beta: stats.beta, memberCount: stats.member_count })
-        }
+      const output = {
+        additionalContext: `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
       }
-
-      let selected = hierarchicalSelect(candidates, clusterMap, 5, queryEmbedding)
-      if (isSubFlag('exploration')) selected = replaceWithExploration(selected, candidates, EXPLORATION_RATE)
-
-      for (const s of selected) {
-        db.logInjection({
-          session_id: sessionId, namespace: project, pattern_id: s.id,
-          cluster_id: s.cluster_id, rank: s.rank, propensity: s.propensity,
-          is_exploration: !!s.is_exploration, query_text: queryText,
-        })
-      }
-      scored = selected
-    } else {
-      // V1 path
-      const { rankByThompsonAndTrigram } = require('../daemon/lib/injection.js')
-      scored = rankByThompsonAndTrigram(db, project, queryText, 5, {
-        minConfidence: 0.3,
-        excludeRecentMinutes: 2,
-      })
-    }
-
-    if (scored.length === 0) return
-
-    recordExposure(db, scored.map(p => p.id))
-    sm.recordInjection(scored.map(p => p.id))
-
-    // Output as additionalContext for the subagent
-    const context = scored.map(p => {
-      const conf = p.confidence ?? (p.alpha / (p.alpha + p.beta))
-      const tag = p.is_exploration ? ' [exp]' : ''
-      return `- [${conf.toFixed(2)}${tag}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
-    }).join('\n')
-
-    const version = isSubFlag('injection') ? 'v2' : 'v1'
-    const output = {
-      additionalContext: `[Quoth ${version}] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
-    }
-    // Claude Code reads JSON from stdout for SubagentStart hooks
-    console.log(JSON.stringify(output))
+      console.log(JSON.stringify(output))
+    } catch {}
   },
 
   'stats': () => {
