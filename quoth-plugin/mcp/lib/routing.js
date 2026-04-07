@@ -45,7 +45,7 @@ const TASK_PATTERNS = [
   [/(?:configurá|instalá|entorno|configuración)/i, 'devops'],
   // Deploy/infra
   [/\b(?:deploy|docker|ci.?cd|pipeline|infrastructure|vercel|nginx|systemd|cron|kubernetes|k8s|terraform|ansible|aws|gcp|azure|cloudflare|ssl|cert|dns|domain)\b/i, 'devops'],
-  [/(?:desplegá|infraestructura|servidor|despliegue)/i, 'devops'],
+  [/(?:desplegá|desplegar|infraestructura|servidor|despliegue)/i, 'devops'],
   // Implement/create — broad coder intent
   [/\b(?:implement|create|build|add|develop|scaffold|generate|write.?code|programá|code|make|new.?file|new.?function|new.?class|new.?module)\b/i, 'coder'],
   [/(?:implementá|creá|construí|agregá|desarrollá|generá|hacé|programá)/i, 'coder'],
@@ -57,7 +57,7 @@ const TASK_PATTERNS = [
   [/(?:interfaz|estilo|pantalla|formulario|botón|navegación|tema)/i, 'frontend-dev'],
   // Conversational/questions — lower confidence (ambiguous intent)
   [/^(?:what|how|why|when|where|who|which|can you|could you|tell me|show me|explain|describe|check|verify|status|is there|are there|do we|does it|list|help)\b/i, 'researcher', 0.6],
-  [/^(?:qué|cómo|por ?qué|cuándo|dónde|quién|cuál|podés|podrías|decime|mostrame|explicá|describí|chequeá|verificá|hay|tenemos|ayuda)\b/i, 'researcher', 0.6],
+  [/^(?:qué|cómo|por ?qué|cuándo|dónde|quién|cuál|podés|podrías|decime|mostrame|explicá|describí|chequeá|verificá|hay|tenemos|ayuda)[\s?]/i, 'researcher', 0.6],
 ]
 
 function routeTask(task) {

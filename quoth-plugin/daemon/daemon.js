@@ -34,6 +34,7 @@ const { distillBatch } = require('./pipeline/distill-batch.js')
 const { consolidate } = require('./pipeline/consolidate.js')
 const { promotePattern } = require('./lib/promote.js')
 const { callPipelineAPI } = require('./lib/pipeline-api.js')
+const { callDocUpdateAPI } = require('./lib/doc-update-api.js')
 const { scanDocs } = require('./lib/doc-manifest.js')
 const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
 
@@ -578,9 +579,13 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase A (consolidation) failed', { error: err.message, stack: err.stack })
   }
 
-  // Phase B: Doc auto-update (requires claude CLI — skip in managed mode)
+  // Phase B: Doc auto-update
   if (QUOTH_MODE === 'managed') {
-    log('info', 'Skipping doc auto-update (managed mode — no claude CLI)')
+    try {
+      await runDocUpdateManaged()
+    } catch (err) {
+      log('error', 'Nightly Phase B (managed doc update) failed', { error: err.message, stack: err.stack })
+    }
   } else {
     try {
       await runDocUpdate()
@@ -591,8 +596,11 @@ async function runNightlyPipeline() {
 
   // Phase C: Cloud pull
   try {
-    const { syncFromCloud } = require('./lib/pull.js')
+    const { syncFromCloud, pullSharedPatterns } = require('./lib/pull.js')
     await syncFromCloud(db, log)
+    // Also pull shared cross-org patterns
+    const sharedCount = await pullSharedPatterns(db, log)
+    if (sharedCount > 0) log('info', `Pulled ${sharedCount} shared patterns from cross-org pool`)
   } catch (err) {
     log('error', 'Nightly Phase C (cloud pull) failed', { error: err.message })
   }
@@ -1026,6 +1034,137 @@ function clearTimers() {
   if (v2MiniTimer) clearInterval(v2MiniTimer)
   if (agentCleanupTimer) clearInterval(agentCleanupTimer)
   if (staleSessionTimer) clearInterval(staleSessionTimer)
+}
+
+// --- Doc auto-update via cloud API (managed mode, Phase B of nightly pipeline) ---
+async function runDocUpdateManaged() {
+  const { appendExecLog, commitAndPush: commitAndPushDocs } = require('./lib/doc-updater.js')
+  const { recordUpdate, bumpPatch } = require('./lib/doc-manifest.js')
+  log('info', 'Starting managed doc auto-update scan')
+  appendExecLog(STATE_DIR, { event: 'doc_scan_start', mode: 'managed' })
+
+  const docsDir = path.join(PROJECT_ROOT, 'docs', 'project')
+  if (!fs.existsSync(docsDir)) {
+    log('debug', 'No docs/project/ found, skipping managed doc update')
+    appendExecLog(STATE_DIR, { event: 'doc_scan_skip', reason: 'no docs/project/ dir', mode: 'managed' })
+    return
+  }
+
+  const { staleDocs } = scanDocs(PROJECT_ROOT, STATE_DIR)
+
+  if (staleDocs.length === 0) {
+    log('info', 'All docs up to date (managed)')
+    appendExecLog(STATE_DIR, { event: 'doc_scan_complete', stale: 0, mode: 'managed' })
+    return
+  }
+
+  log('info', `Found ${staleDocs.length} stale doc(s) for managed update`, {
+    docs: staleDocs.map(d => `${d.doc} (${d.changedFiles.length} changes)`)
+  })
+  appendExecLog(STATE_DIR, {
+    event: 'doc_scan_complete', stale: staleDocs.length, mode: 'managed',
+    docs: staleDocs.map(d => d.doc),
+  })
+
+  // Derive project name from git remote or directory name
+  let project = path.basename(PROJECT_ROOT)
+  try {
+    const { execSync } = require('child_process')
+    const remote = execSync('git remote get-url origin', {
+      cwd: PROJECT_ROOT, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
+    }).toString().trim()
+    const match = remote.match(/\/([^/]+?)(?:\.git)?$/)
+    if (match) project = match[1]
+  } catch {}
+
+  const updates = []
+  const failures = []
+
+  // Sequential — one API call at a time
+  for (const staleInfo of staleDocs) {
+    const docPath = path.join(docsDir, staleInfo.doc)
+    let docContent
+    try { docContent = fs.readFileSync(docPath, 'utf8') } catch (err) {
+      log('error', 'Failed to read doc', { doc: staleInfo.doc, error: err.message })
+      failures.push(staleInfo.doc)
+      continue
+    }
+
+    const oldVersion = staleInfo.version || '1.0.0'
+    const newVersion = bumpPatch(oldVersion)
+
+    // Read each changed source file
+    const sourceFiles = []
+    for (const src of staleInfo.changedFiles) {
+      const candidates = [
+        path.join(PROJECT_ROOT, src),
+        path.join(PROJECT_ROOT, 'quoth-plugin', src),
+        path.join(PROJECT_ROOT, src.replace(/^quoth-plugin\//, '')),
+      ]
+      for (const candidate of candidates) {
+        try {
+          const content = fs.readFileSync(candidate, 'utf8')
+          sourceFiles.push({ path: src, content })
+          break
+        } catch {}
+      }
+    }
+
+    if (sourceFiles.length === 0) {
+      log('debug', 'No source files found for managed doc update', { doc: staleInfo.doc })
+      appendExecLog(STATE_DIR, { event: 'update_skipped', doc: staleInfo.doc, reason: 'no source files found', mode: 'managed' })
+      continue
+    }
+
+    log('info', `Calling cloud doc-update API for ${staleInfo.doc}`, {
+      sourceFiles: sourceFiles.length, version: `${oldVersion} → ${newVersion}`
+    })
+
+    const result = await callDocUpdateAPI(
+      { filename: staleInfo.doc, content: docContent, version: oldVersion },
+      sourceFiles,
+      project
+    )
+
+    if (result && result.updated_content) {
+      try {
+        fs.writeFileSync(docPath, result.updated_content)
+        recordUpdate(STATE_DIR, staleInfo.doc, result.new_version || newVersion, PROJECT_ROOT)
+
+        const finalVersion = result.new_version || newVersion
+        appendExecLog(STATE_DIR, {
+          event: 'update_success', doc: staleInfo.doc, mode: 'managed',
+          oldVersion, newVersion: finalVersion,
+          changedFiles: staleInfo.changedFiles,
+          changesSummary: result.changes_summary || undefined,
+        })
+        log('info', 'Doc auto-updated via cloud', {
+          doc: staleInfo.doc, version: `${oldVersion} → ${finalVersion}`,
+          changedFiles: staleInfo.changedFiles.length,
+        })
+        updates.push({ doc: staleInfo.doc, oldVersion, newVersion: finalVersion })
+      } catch (err) {
+        log('error', 'Failed to write updated doc', { doc: staleInfo.doc, error: err.message })
+        appendExecLog(STATE_DIR, { event: 'update_failed', doc: staleInfo.doc, error: err.message, mode: 'managed' })
+        failures.push(staleInfo.doc)
+      }
+    } else {
+      log('warn', 'Cloud doc-update returned no content', { doc: staleInfo.doc })
+      appendExecLog(STATE_DIR, { event: 'update_failed', doc: staleInfo.doc, reason: 'no content from API', mode: 'managed' })
+      failures.push(staleInfo.doc)
+    }
+  }
+
+  if (updates.length > 0) {
+    commitAndPushDocs(PROJECT_ROOT, updates, log)
+  }
+
+  appendExecLog(STATE_DIR, {
+    event: 'doc_update_batch_complete', mode: 'managed',
+    updated: updates.length, failed: failures.length,
+    failures: failures.length > 0 ? failures : undefined,
+  })
+  log('info', 'Managed doc update complete', { updated: updates.length, failed: failures.length })
 }
 
 // --- Doc auto-update (called as Phase B of nightly pipeline) ---

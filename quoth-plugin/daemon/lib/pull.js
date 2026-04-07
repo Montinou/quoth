@@ -74,4 +74,85 @@ async function syncFromCloud(db, log) {
   log('info', `Cloud pull: ${totalNew} new patterns from ${namespaces.length} namespaces`)
 }
 
-module.exports = { pullProjectPatterns, syncFromCloud }
+/**
+ * Pull high-confidence shared patterns from cross-org pool.
+ * Only pulls broad, high-confidence patterns not already in local DB.
+ */
+async function pullSharedPatterns(db, log) {
+  const apiKey = process.env.QUOTH_API_KEY
+  if (!apiKey) { log('info', 'Shared pull skipped: no QUOTH_API_KEY'); return 0 }
+
+  const apiUrl = process.env.QUOTH_API_URL || 'https://quoth.triqual.dev'
+  const sevenDaysAgo = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000)
+  const url = new URL(
+    `/api/v1/patterns/shared?min_confidence=0.85&limit=20&since=${sevenDaysAgo}`,
+    apiUrl
+  )
+
+  const result = await new Promise((resolve) => {
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      timeout: 5000,
+    }, (res) => {
+      let chunks = ''
+      res.on('data', c => { chunks += c })
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(chunks)
+          resolve({ patterns: data.patterns || [], status: res.statusCode })
+        } catch {
+          resolve({ patterns: [], error: 'parse error' })
+        }
+      })
+    })
+    req.on('error', (err) => resolve({ patterns: [], error: err.message }))
+    req.on('timeout', () => { req.destroy(); resolve({ patterns: [], error: 'timeout' }) })
+    req.end()
+  })
+
+  if (result.error) {
+    log('warn', 'Shared pattern pull failed', { error: result.error })
+    return 0
+  }
+
+  let inserted = 0
+  for (const p of result.patterns) {
+    const id = p.patternId || p.id
+    // Skip if already exists by ID
+    const existsById = db.prepare('SELECT id FROM patterns WHERE id = ?').get(id)
+    if (existsById) continue
+
+    // Skip near-duplicate names
+    const dupe = db.findDuplicateByName(p.name)
+    if (dupe) continue
+
+    try {
+      // Cap confidence at 0.6 locally — shared patterns need to prove themselves
+      const cappedConfidence = Math.min(p.confidence || 0.5, 0.6)
+      const tags = Array.isArray(p.tags) ? [...p.tags, 'shared'] : ['shared']
+
+      db.upsertPattern({
+        id,
+        name: p.name,
+        condition: p.condition,
+        action: p.action,
+        confidence: cappedConfidence,
+        alpha: 1,
+        beta: 1,
+        tags,
+        namespace: 'global',
+        source: 'shared-pull',
+        applicability: p.applicability || 'broad',
+        embedding: p.embedding,
+      })
+      inserted++
+    } catch {}
+  }
+
+  return inserted
+}
+
+module.exports = { pullProjectPatterns, syncFromCloud, pullSharedPatterns }
