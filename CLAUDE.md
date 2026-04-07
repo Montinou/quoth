@@ -4,9 +4,10 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous
 
 ## Setup
 ```bash
-bash quoth-plugin/scripts/setup.sh
+node quoth-plugin/scripts/cli.js init    # Interactive wizard (recommended)
+bash quoth-plugin/scripts/setup.sh       # Non-interactive (legacy)
 ```
-Symlinks hooks to `~/.quoth/hooks/`, injects hook declarations into `~/.claude/settings.json`, and adds permissions. Idempotent — safe to re-run.
+Auto-detects `claude` CLI → sets mode (local/managed), writes `~/.quoth/.env`, installs hooks, starts daemon. Idempotent — safe to re-run.
 
 ## What It Does
 - Logs all agent trajectories to `~/.quoth/trajectories/{repo-name}-{date}.jsonl`
@@ -25,8 +26,10 @@ Quoth is configured once globally — no per-project setup needed:
 - `~/.quoth/hooks/` → symlinks to `quoth-plugin/hooks/` in this repo
 - Project segregation is automatic via `CLAUDE_PROJECT_DIR` → git remote name
 
-## Daemon
-- Auto-starts via `session-start` hook
+## Daemon Modes
+- **Local** (`QUOTH_MODE=local`): Full local pipeline — JUDGE/DISTILL via AI Gateway, CONSOLIDATE via `claude -p` Haiku, doc-updater via Sonnet 4.6. Requires own API keys.
+- **Managed** (`QUOTH_MODE=managed`): Cloud pipeline — daemon sends trajectories to `POST /api/v1/pipeline/process`, server runs JUDGE→DISTILL→CONSOLIDATE. Only needs `QUOTH_API_KEY`.
+- Auto-starts via `session-start` hook or `cli.js init`
 - PID: `~/.quoth/daemon.pid`, Log: `~/.quoth/daemon.log`
 - Debug: `QUOTH_DEBUG=true`
 - Nightly promotion: high-confidence patterns (>0.8, >10 uses) auto-promote to Quoth cloud at 3am
@@ -74,12 +77,13 @@ mcp/
   lib/                      — graph.js (PageRank), routing.js (task routing)
 
 daemon/
-  daemon.js   — Background trajectory processor
+  daemon.js   — Background trajectory processor (local/managed mode switch)
   db.js       — SQLite + HNSW index management
-  lib/        — embed.js (OpenAI embeddings), promote.js (cloud sync)
+  lib/        — embed.js (MiniLM local embeddings + batch), pipeline-api.js (cloud client), promote.js (cloud sync)
 
 scripts/
-  setup.sh    — Automated installation (symlinks, settings.json injection)
+  cli.js      — Interactive onboarding CLI (init, status, restart)
+  setup.sh    — Non-interactive installation (symlinks, settings.json injection)
 
 .claude-plugin/
   plugin.json            — Plugin manifest (MCP server, hooks, commands, agents)
@@ -101,8 +105,22 @@ npm run lint
 
 ## Roadmap
 
-### Next: Core Quality Improvements
-- **Distiller quality** — pattern names are too raw ("claude-code: Write /path/to/file"). Improve daemon's JUDGE → DISTILL pipeline to produce meaningful, reusable pattern names and actions
-- **Temporal confidence decay** — patterns not matched/used should decay over time (e.g. -0.01/week). Prevents stale patterns from dominating
-- **Routing coverage** — expand keyword patterns in `routing.js` to reduce "Default routing" fallback rate. Add project-specific routing patterns learned from trajectories
-- **Pattern dedup** — detect and merge near-duplicate patterns (e.g. multiple "Write to skill-registry/scripts/*" entries)
+### Done in v3.3.0
+- ~~Managed mode~~ — SaaS-ready daemon without user API keys (`POST /api/v1/pipeline/process`)
+- ~~CLI onboarding~~ — `node cli.js init` interactive wizard
+- ~~Batch embeddings~~ — `generateEmbeddingBatch()` for cost optimization (MiniLM local)
+- ~~Distiller quality~~ — batch-only distill with session context, improved prompts
+- ~~Pattern lifecycle~~ — 30d archive for never-exposed, 600 cap, exposure-based decay only
+- ~~Venice.ai skill~~ — embedding model research (BGE-M3, 1024d, compatible with cloud)
+
+### Phase 2: Cloud & Monetization
+- **Venice.ai cloud embeddings** — migrate `src/lib/embeddings/gateway.ts` from voyage-4-lite to Venice BGE-M3 ($0 vs $0.02/MTok)
+- **Usage dashboard** — show tokens consumed, patterns learned, quota remaining per org
+- **Tier system** — free (50 pipeline calls/day, 500 patterns) vs pro (unlimited)
+- **`npx quoth init`** — publish CLI as npm package for zero-friction onboarding
+
+### Phase 3: Distribution & Scale
+- **Doc-updater cloud endpoint** — so managed users get doc auto-updates too (cheaper model)
+- **Routing coverage** — expand keyword patterns in `routing.js` to reduce "Default routing" fallback rate
+- **Cross-org pattern sharing** — opt-in anonymous pattern exchange between organizations
+- **Pattern marketplace** — curated high-confidence patterns installable by new users
