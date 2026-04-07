@@ -1,6 +1,4 @@
-Write permission was denied. Per the instructions, here is the complete updated document:
-
----
+<!-- version: 1.0.1 | updated: 2026-04-07 -->
 
 # Confidence Scoring
 
@@ -86,7 +84,7 @@ When the background daemon processes trajectories through JUDGE -> DISTILL -> CO
 
 ### 2. SubagentStop Hook (post-task implicit feedback)
 
-When a subagent completes (`SubagentStop` event), the `post-task` handler in `hook-dispatch.js` executes a two-phase feedback process:
+When a subagent completes (`SubagentStop` event), the `post-task` handler in `hook-dispatch.js` executes a three-phase feedback process:
 
 **Phase 1 -- Intelligence graph update:**
 ```javascript
@@ -107,7 +105,33 @@ Only IDs with the `pat-` prefix (pattern entries) are updated in SQLite. Memory 
 
 The IDs come from `last-matched.json`, which was written by the most recent `getContext` call during routing. This creates a feedback loop: patterns that were surfaced as relevant context and then led to a successful task completion get reinforced.
 
-### 3. MCP Tools (explicit feedback)
+**Phase 3 -- Session memory feedback loop:**
+```javascript
+const fiveMinAgo = Date.now() - 5 * 60 * 1000
+const recentUnused = Object.entries(injections)
+  .filter(([, v]) => !v.used && v.at > fiveMinAgo)
+  .map(([id]) => id)
+for (const id of recentUnused) {
+  sm.markPatternUsed(id)
+  // V1: db.applyBayesianUpdate(id, 'success')
+  // V2: db.updateInjectionOutcome(sessionId, id, 1.0)
+}
+```
+Patterns that were injected into agent context in the last 5 minutes but not yet explicitly marked as used are treated as implicitly successful. In V1 mode this triggers a Bayesian update; in V2 (bandit) mode it records a reward of 1.0 in the `injection_log` table for nightly SNIPS aggregation.
+
+### 3. SessionEnd Hook (session-level feedback)
+
+When a session ends (`SessionEnd` or `PreCompact` event), the `session-end` handler applies session-level feedback based on which injected patterns were used during the session.
+
+**V1 mode** (default): patterns that were injected but never marked as used by the end of the session receive a soft-negative penalty via `applySoftNegative(db, stale)`. This penalises patterns that were consistently shown but never acted upon across full sessions (slower signal than the per-task SubagentStop update).
+
+**V2 mode** (`injection` feature flag set): for each pattern that was logged in `injection_log` during the session, `db.updateInjectionOutcome(sessionId, pid, reward)` is called:
+- Patterns marked as used receive `reward = 1.0`
+- Unused patterns receive a reward derived from the overall session outcome (success/partial/failure), computed by `sessionOutcomeReward(events)` from the trajectory file
+
+The session outcome reward allows partial credit: a session that completed successfully but didn't use a given pattern still contributes weak positive signal rather than a hard negative.
+
+### 4. MCP Tools (explicit feedback)
 
 Three MCP tools allow explicit feedback:
 
@@ -126,7 +150,7 @@ Note: this bypasses the Bayesian alpha/beta system and directly modifies `confid
 
 **`quoth_intelligence_feedback(success)`** -- Updates the intelligence graph JSON entries only (not SQLite). Applies +0.05 for success, -0.02 for failure to entries in `last-matched.json`.
 
-### 4. Search Match (last_matched_at tracking)
+### 5. Search Match (`last_matched_at` tracking)
 
 When `quoth_search_patterns` returns results from a semantic search:
 ```javascript
@@ -216,6 +240,22 @@ WHERE status = 'active'
   AND created_at < ?  -- 90 days ago
 ```
 Archives patterns that were distilled but never injected into any agent context in 90 days. These are considered irrelevant to the user's actual workflow.
+
+### Eager Pruning: `pruneYoungUnused()`
+
+A separate, more aggressive cleanup function `db.pruneYoungUnused()` **deletes** (not archives) very recent patterns that already look like distiller noise:
+
+```sql
+DELETE FROM patterns
+WHERE status = 'active'
+  AND created_at < ?   -- older than 1 hour
+  AND created_at > ?   -- but younger than 24 hours
+  AND exposure_count = 0
+  AND success_count = 0
+  AND failure_count = 0
+```
+
+This removes patterns aged 1–24 hours with zero exposures and zero feedback. These are almost certainly low-quality distillations that have already been superseded or were never worth keeping. Unlike `archiveWeakPatterns()`, this permanently deletes records and runs on a tighter time window.
 
 ### Purpose
 
@@ -330,17 +370,12 @@ This is a simple linear decay (0.005 per day), much gentler than the Bayesian ho
 | `applyConfidenceDelta(id, delta)` | SQLite | Up/Down | confidence += delta (bypasses Bayesian) |
 | `applyHourlyDecay` Tier 1 | SQLite | Down | beta += 0.05/hr (exposure_count ≥5, conversion <10%) |
 | `applyHourlyDecay` Tier 2 | SQLite | Down | alpha *= 0.9995/hr (exposure_count >20) |
+| `post-task` Phase 3 (V1) | SQLite | Up | Bayesian success for recently-injected unused patterns |
+| `post-task` Phase 3 (V2) | injection_log | Up | reward=1.0 recorded for nightly SNIPS aggregation |
+| `session-end` soft-negative (V1) | SQLite | Down | `applySoftNegative` on stale injections |
+| `session-end` outcome reward (V2) | injection_log | Up/Down | reward=session outcome for all injected patterns |
 | `applyFeedback(true)` | JSON graph | Up | +0.05 to matched entries |
 | `applyFeedback(false)` | JSON graph | Down | -0.02 to matched entries |
 | `consolidateGraph` decay | JSON graph | Down | -0.005/day for unaccessed nodes |
 | Search match | SQLite | Neutral | Updates `last_matched_at` only |
 
----
-
-The key changes from the source files:
-
-1. **Column table**: Added `exposure_count`, `last_exposed_at`, `ignored_count`; noted `alpha`/`beta` are runtime-migrated; `decay_rate` is now reserved/unused.
-2. **Hourly Decay**: Completely rewritten — old time-based tiers (never-matched, >7 days, >30 days) replaced with exposure-based tiers (poor conversion rate, high-exposure dominance prevention). Never-exposed patterns no longer decay.
-3. **Archival**: Rule 1 now uses `exposure_count >= 10` + conversion rate threshold; new Rule 3 archives never-exposed patterns older than 90 days.
-4. **Lifecycle example**: Updated to reflect new decay model.
-5. **Summary table**: Removed old 3 decay tiers, added 2 new exposure-based tiers.

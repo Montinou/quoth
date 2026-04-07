@@ -1,6 +1,8 @@
 # Daemon and Processing Pipeline
 
-The Quoth daemon is a long-running Node.js process that watches trajectory files, processes them through a three-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE), and maintains the pattern database. It also manages periodic maintenance tasks including confidence decay, HNSW index persistence, agent cleanup, and nightly deep consolidation with cloud promotion.
+The Quoth daemon is a long-running Node.js process that watches trajectory files, processes them through batch-level LLM distillation (DISTILL + CONSOLIDATE per session), and maintains the pattern database. Individual tool-use entries are accumulated and processed in batch when a session summary arrives. It also manages periodic maintenance tasks including confidence decay, HNSW index persistence, agent cleanup, cloud sync, and nightly deep consolidation with cloud promotion.
+
+**Version:** 1.0.1 | **Last updated:** 2026-04-07
 
 ## Table of Contents
 
@@ -48,12 +50,16 @@ The daemon performs the following steps on startup, in order:
 4. **Write PID file:** Write `process.pid` to `~/.quoth/daemon.pid`.
 5. **Clean stale lock:** If `~/.quoth/processing.lock` exists from a previous crash, check if the PID it contains is still alive. If the process is dead, remove the stale lock file.
 6. **Start file watcher:** Watch `~/.quoth/trajectories/` for `.jsonl` file changes.
-7. **Start hourly decay timer:** Applies confidence decay and archives weak patterns every hour.
+7. **Start hourly decay timer:** Applies confidence decay, archives weak patterns, and prunes young unused patterns every hour.
 8. **Start HNSW save timer:** Persists the HNSW index to disk every 30 minutes.
-9. **Start agent cleanup timer:** Marks stale agents as offline every 5 minutes.
-10. **Schedule deep consolidation:** Calculate milliseconds until next 3:00 AM and set a timeout.
-11. **Initial scan:** Run `scanAndEnqueue()` to pick up any unprocessed trajectory entries.
-12. **Process queue:** Run `processQueue()` to begin processing enqueued entries.
+9. **Start cloud pull timer:** Syncs patterns from Quoth cloud every 6 hours.
+10. **Start V2 mini-pipeline timer:** Runs cluster rebuild, SNIPS posterior update, and judge batch every 2 hours (feature-flagged).
+11. **Start agent cleanup timer:** Marks stale agents as offline every 5 minutes.
+12. **Start stale session timer:** Detects orphaned sessions and generates synthetic summaries every 10 minutes.
+13. **Schedule nightly pipeline:** Calculate milliseconds until next 06:00 UTC (03:00 ART) and set a timeout. Then run `checkStartupCatchup()` — if >24h since last execution, run the pipeline immediately (10s delay).
+14. **Initial scan:** Run `scanAndEnqueue()` to pick up any unprocessed trajectory entries.
+15. **Process queue:** Run `processQueue()` to begin processing enqueued entries.
+16. **Index docs (async):** Non-blocking call to `indexDocs()` to index project documentation chunks into the database.
 
 ---
 
@@ -109,7 +115,12 @@ while (jobQueue.length > 0) {
 
 ## Processing Pipeline
 
-Each trajectory entry passes through a three-stage LLM pipeline: JUDGE, DISTILL, CONSOLIDATE.
+`processEntry()` dispatches based on entry type:
+
+- **`tool_use` entries:** Marked as processed immediately — no LLM calls. These entries are accumulated in the JSONL file and consumed later as context by the batch distiller when the session summary arrives.
+- **`session_summary` entries:** Delegated to `processSessionBatch()`, which runs batch DISTILL + CONSOLIDATE for the entire session.
+
+The three-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE) described below applies to the **batch distill path only** — not to individual tool-use entries.
 
 ### Stage 1: JUDGE (`pipeline/judge.js`)
 
@@ -205,10 +216,10 @@ Decides whether to merge the new pattern into an existing one or create a distin
 
 | Property | Value |
 |----------|-------|
-| LLM | Kimi K2.5 via Moonshot API (same as JUDGE and DISTILL) |
+| LLM | Kimi K2.5 via Moonshot API |
 | Max tokens | 300 |
 | Temperature | 0.6 |
-| Invocation | `callLLM()` (async, unified with other pipeline stages) |
+| Invocation | `callLLM()` (async) |
 
 **Input:**
 
@@ -329,15 +340,17 @@ When a namespace correction occurs, a debug log entry is emitted showing the `fr
 
 ## Timers and Scheduled Tasks
 
-The daemon runs six recurring timers:
+The daemon runs eight recurring timers:
 
 | Timer | Interval | Function | Description |
 |-------|----------|----------|-------------|
-| Hourly decay | 60 min | `db.applyHourlyDecay()` + `db.archiveWeakPatterns()` | Reduce confidence on unused patterns (3-tier decay), archive patterns below threshold |
+| Hourly decay | 60 min | `db.applyHourlyDecay()` + `db.archiveWeakPatterns()` + `db.pruneYoungUnused()` | Reduce confidence on unused patterns (3-tier decay), archive patterns below threshold, prune young patterns with no usage |
 | HNSW save | 30 min | `db.saveHnsw()` | Persist the in-memory HNSW index to disk as JSON |
+| Cloud pull | 6 hours | `syncFromCloud(db, log)` | Pull updated patterns from Quoth cloud (`lib/pull.js`) |
+| V2 mini-pipeline | 2 hours | `rebuildClusters()` + `updateClusterPosteriors()` + `runJudgeBatch()` | Feature-flagged: cluster rebuild, SNIPS posterior update, judge batch (drains judge queue frequently between nightly runs) |
 | Agent cleanup | 5 min | `db.cleanupStaleAgents(300000)` | Mark agents as offline if no heartbeat in 5 minutes (300,000ms) |
 | Stale session detector | 10 min | `detectStaleSessions()` | Generate synthetic session summaries for orphaned sessions (see below) |
-| Nightly pipeline | Daily at 3:00 AM | `runNightlyPipeline()` | Phase A: deep consolidation (dedup, merge, promotion). Phase B: doc auto-update (hash scan, LLM update, git push) |
+| Nightly pipeline | Daily at 06:00 UTC (03:00 ART) | `runNightlyPipeline()` | Phases A–G: deep consolidation, doc update, cloud pull, clusters, SNIPS, judge, curation |
 | File watcher | Event-driven | `scanAndEnqueue()` + `processQueue()` | Triggered by filesystem events on trajectories directory |
 
 All timers are cleared on `SIGTERM` via `clearTimers()`.
@@ -405,7 +418,7 @@ Once the synthetic summary is written to the JSONL, the file watcher triggers `s
 
 ## Deep Consolidation
 
-**Schedule:** Runs at 3:00 AM local time daily. The first execution is scheduled via `setTimeout` (milliseconds until next 3 AM), and subsequent executions use `setInterval` at 24-hour intervals.
+**Schedule:** Runs daily at 06:00 UTC (03:00 ART). The first execution is scheduled via `setTimeout` (milliseconds until next 06:00 UTC), and subsequent executions use `setInterval` at 24-hour intervals. At startup, `checkStartupCatchup()` runs the pipeline immediately (with a 10s delay) if more than 24 hours have elapsed since the last recorded execution — preventing missed runs after daemon restarts.
 
 ### Phase 0: Garbage Pattern Archival
 
@@ -436,18 +449,28 @@ These are patterns created by the old distiller fallback that used raw tool call
 ### Phase 2: LLM-Assisted Deduplication and Archival
 
 1. Fetch top 20 patterns by confidence from the database.
-2. Send to Kimi K2.5 with a prompt asking to identify:
-   - Duplicate pairs to merge (keep one, archive the other)
-   - Low-value patterns to archive outright
-3. Expected response format:
-   ```json
-   {
-     "merges": [{"keep": "id1", "archive": "id2"}],
-     "archives": ["id3", "id4"]
-   }
+2. Send to **Claude Haiku 4.5** via `claude -p` CLI (`claude-haiku-4-5-20251001`) with a prompt asking to identify duplicates and low-value entries.
+3. Response format is **line-based** (not JSON) — each action line uses bare 12-char hex IDs:
    ```
-4. Execute archival: Set `status='archived'` on identified patterns.
-5. Execute merges: Apply Bayesian success update to the "keep" pattern, archive the "archive" pattern.
+   MERGE keep_id archive_id1 archive_id2 — reason
+   ARCHIVE id — reason
+   NONE
+   ```
+4. Execute merges: Apply Bayesian success update to the keep pattern, set `status='archived'` on archive IDs.
+5. Execute archival: Set `status='archived'` on ARCHIVE IDs.
+
+### Phase 2.5: Conversion-Rate Rebalancing
+
+Adjusts Bayesian parameters based on exposure vs. success rates:
+
+- **Penalize** patterns with `exposure_count > 20` and success rate < 5%: `beta += 2`.
+- **Boost** patterns with `exposure_count > 5` and success rate > 50%: `alpha += 1`.
+
+### Phase 2.6: Capacity Pruning
+
+When the active pattern count exceeds 1000, archives the lowest-scoring patterns to keep the library at ≤ 900 active entries. Score = `success_rate × log(1 + total_uses)`.
+
+These phases run inside `runDeepConsolidate()`, which is Phase A of the nightly pipeline.
 
 ### Phase 3: Cloud Promotion
 
@@ -473,6 +496,22 @@ These are patterns created by the old distiller fallback that used raw tool call
 ### Phase 5: Exolar Cross-Validation (Placeholder)
 
 Currently logs the number of eligible patterns for cross-validation. Full implementation requires MCP context (the daemon runs outside Claude Code). Future plans include direct HTTP calls to the Exolar API.
+
+---
+
+## Nightly Pipeline Phases
+
+`runNightlyPipeline()` runs at 06:00 UTC daily (and on startup catch-up). It executes the following phases in order:
+
+| Phase | Name | Description |
+|-------|------|-------------|
+| A | Deep consolidation | `runDeepConsolidate()` — garbage archival, name dedup, LLM merge/archive, rebalancing, capacity pruning, cloud/global promotion |
+| B | Doc auto-update | `runDocUpdate()` — hash-based stale doc detection, LLM update via `claude -p`, git commit + push (spawned as detached process) |
+| C | Cloud pull | `syncFromCloud(db, log)` — pull updated patterns from Quoth cloud |
+| D | Cluster rebuild | `rebuildClusters()` — k-means clustering of active pattern embeddings per namespace (feature-flagged: `injection`) |
+| E | SNIPS posteriors | `updateClusterPosteriors()` — update cluster Beta posteriors using SNIPS off-policy estimator from last 7 days of injection logs (feature-flagged: `injection`) |
+| F | LLM-as-Judge | `enqueueJudgePairs()` + `runJudgeBatch()` — pairwise cluster uncertainty judgments, up to 100 pairs/run (feature-flagged: `judge`) |
+| G | Curation | Backfill distinctiveness scores; weekly (Sunday UTC): near-duplicate detection + dedup pair enqueuing + poor-pattern retirement (feature-flagged: `curation`) |
 
 ---
 

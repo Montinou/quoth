@@ -1,6 +1,6 @@
 # Local Database (SQLite)
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-06
+**Version:** 1.0.1 | **Last updated:** 2026-04-07
 
 The Quoth plugin maintains a local SQLite database for pattern storage, trajectory tracking, agent coordination, and event sourcing. All data is stored on the user's machine at `~/.quoth/memory.db`.
 
@@ -17,7 +17,7 @@ The database is created and migrated on first access via the `createDb(dbPath)` 
 
 ## Tables
 
-The schema defines 6 tables, created via `CREATE TABLE IF NOT EXISTS` on every startup.
+The schema defines 6 core tables plus 4 V2 auxiliary tables, all created via `CREATE TABLE IF NOT EXISTS` on every startup.
 
 ### patterns
 
@@ -35,7 +35,7 @@ Primary storage for learned and distilled patterns, scored using Bayesian confid
 | `success_count` | INTEGER | 0 | Total recorded successes |
 | `failure_count` | INTEGER | 0 | Total recorded failures |
 | `decay_rate` | REAL | 0.005 | Hourly decay rate applied to alpha |
-| `embedding` | TEXT | NULL | JSON-serialized float array (1536-dim text-embedding-3-small vector) |
+| `embedding` | TEXT | NULL | JSON-serialized float array (384-dim MiniLM-L6-v2 local embeddings) |
 | `version` | INTEGER | 1 | Schema version for forward compatibility |
 | `tags` | TEXT | `'[]'` | JSON array of tag strings |
 | `source` | TEXT | `'distilled'` | Origin: `distilled`, `exolar-seeded`, `healer-learned`, `attributed`, `skill-derived` |
@@ -50,6 +50,18 @@ Primary storage for learned and distilled patterns, scored using Bayesian confid
 | `cloud_document_id` | TEXT | NULL | Cloud document ID after successful promotion |
 | `promoted_confidence` | REAL | NULL | Confidence snapshot at time of promotion |
 | `applicability` | TEXT | `'narrow'` | Scope classification: `narrow`, `broad` |
+| `exposure_count` | INTEGER | 0 | Number of times injected into session context |
+| `last_exposed_at` | INTEGER | NULL | Last time pattern was injected |
+| `ignored_count` | INTEGER | 0 | Injection exposures with no observed benefit |
+| `embedding_text` | TEXT | NULL | Source text used to generate the embedding |
+| `pattern_trigrams` | TEXT | NULL | JSON-serialized trigram set for fast text similarity |
+| `quality_history` | TEXT | `'[]'` | JSON array of historical quality scores |
+| `cluster_id` | INTEGER | NULL | Cluster assignment (Thompson sampling groups) |
+| `cluster_rank_score` | REAL | 0.5 | Cluster-level ranking score |
+| `effective_exposures` | REAL | 0 | Weighted exposure count (discounted by outcomes) |
+| `distinctiveness` | REAL | NULL | Embedding distinctiveness score within cluster |
+| `retired_at` | INTEGER | NULL | Epoch ms when pattern was retired |
+| `retired_reason` | TEXT | NULL | Reason for retirement |
 
 **Indexes:**
 - `idx_patterns_confidence` on `confidence DESC` -- fast top-N queries
@@ -145,6 +157,80 @@ Append-only event sourcing log for all system activity.
 - `idx_events_agent` on `agent_id` -- filter by agent
 - `idx_events_created` on `created_at DESC` -- reverse chronological queries
 
+### cluster_stats
+
+Hierarchical Thompson sampling: cluster-level Beta distribution for grouping patterns into injection cohorts. Compound primary key `(cluster_id, namespace)` so cluster IDs are scoped per namespace.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `cluster_id` | INTEGER NOT NULL | -- | Cluster identifier (0..K-1, local per namespace) |
+| `namespace` | TEXT NOT NULL | `'default'` | Namespace scope |
+| `alpha` | REAL | 1.0 | Beta distribution alpha (cluster success prior) |
+| `beta` | REAL | 1.0 | Beta distribution beta (cluster failure prior) |
+| `attempts` | INTEGER | 0 | Total injection attempts from this cluster |
+| `centroid_embedding` | TEXT | NULL | JSON-serialized cluster centroid vector |
+| `member_count` | INTEGER | 0 | Number of patterns assigned to this cluster |
+| `updated_at` | INTEGER | epoch ms | Last update timestamp |
+
+**Indexes:** `idx_cluster_stats_ns` on `namespace`
+
+### injection_log
+
+Tracks every pattern injection into agent sessions for outcome attribution and propensity scoring.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | INTEGER PK | AUTOINCREMENT | Sequential log ID |
+| `session_id` | TEXT NOT NULL | -- | Claude Code session identifier |
+| `namespace` | TEXT NOT NULL | -- | Pattern namespace |
+| `pattern_id` | TEXT NOT NULL | -- | Injected pattern ID |
+| `cluster_id` | INTEGER | NULL | Pattern's cluster assignment at injection time |
+| `rank` | INTEGER NOT NULL | -- | Injection rank (1 = highest priority) |
+| `propensity` | REAL NOT NULL | -- | Selection probability score |
+| `is_exploration` | INTEGER | 0 | 1 if selected via Thompson exploration, 0 if exploitation |
+| `query_text` | TEXT | NULL | Query that triggered the injection |
+| `injected_at` | INTEGER NOT NULL | -- | Injection timestamp (epoch ms) |
+| `outcome_at` | INTEGER | NULL | Outcome observation timestamp (epoch ms) |
+| `reward` | REAL | NULL | Observed outcome reward signal |
+
+**Indexes:** `idx_injection_log_session` on `session_id`, `idx_injection_log_pattern` on `pattern_id`, `idx_injection_log_pending` on `outcome_at WHERE outcome_at IS NULL`
+
+### judge_queue
+
+Pairwise comparison queue for LLM-based pattern ranking (A/B judgement).
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | INTEGER PK | AUTOINCREMENT | Sequential queue ID |
+| `session_id` | TEXT NOT NULL | -- | Session that generated the comparison |
+| `pattern_a_id` | TEXT NOT NULL | -- | First pattern for comparison |
+| `pattern_b_id` | TEXT NOT NULL | -- | Second pattern for comparison |
+| `trajectory_summary` | TEXT | NULL | Summary of the trajectory context |
+| `priority` | REAL | 0.5 | Queue priority (higher = processed first) |
+| `status` | TEXT | `'pending'` | Queue state: `pending`, `judged` |
+| `verdict` | TEXT | NULL | LLM judge verdict |
+| `judged_at` | INTEGER | NULL | Judgement timestamp (epoch ms) |
+| `cost_cents` | REAL | NULL | LLM cost for this judgement |
+| `created_at` | INTEGER | epoch ms | Creation timestamp |
+
+**Indexes:** `idx_judge_queue_status` on `(status, priority DESC)`
+
+### doc_chunks
+
+Chunked project documentation with embeddings for semantic search during session context injection.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | TEXT PK | -- | Chunk identifier |
+| `doc_file` | TEXT NOT NULL | -- | Source documentation file path |
+| `section_header` | TEXT NOT NULL | -- | Section heading the chunk belongs to |
+| `content` | TEXT NOT NULL | -- | Chunk text content |
+| `embedding` | TEXT | NULL | JSON-serialized 384-dim embedding |
+| `content_hash` | TEXT | NULL | Hash of content for change detection |
+| `updated_at` | INTEGER | epoch ms | Last update timestamp |
+
+**Indexes:** `idx_doc_chunks_file` on `doc_file`
+
 ## Key Methods
 
 The `createDb()` factory attaches all data access methods directly to the better-sqlite3 database instance.
@@ -220,7 +306,7 @@ The `createDb()` factory attaches all data access methods directly to the better
 
 ### HNSW Index Operations
 
-The database instance manages an in-memory `HnswIndex` (from `daemon/lib/hnsw.js`) alongside SQLite.
+The database instance manages an in-memory `HnswIndex(384)` (from `daemon/lib/hnsw.js`, 384-dim MiniLM-L6-v2) alongside SQLite.
 
 **`initHnsw()`** -- Loads from `~/.quoth/hnsw.index.json` if it exists, otherwise builds from all active patterns with embeddings in the database. Sets `hnswHealthy = true` on success or `false` on any error (fallback to linear scan remains functional).
 
@@ -230,7 +316,7 @@ The database instance manages an in-memory `HnswIndex` (from `daemon/lib/hnsw.js
 
 ## Cosine Similarity
 
-The `cosineSimilarity(a, b)` and `cosineDistance(a, b)` functions are defined in `daemon/lib/hnsw.js` and used throughout both the HNSW index and the linear scan fallback path:
+`cosineDistance(a, b)` is defined in `daemon/lib/hnsw.js` and used by the HNSW index internally. `cosineSimilarity(a, b)` is also defined locally in `daemon/db.js` for the linear scan fallback path. Both share the same implementation:
 
 ```javascript
 function cosineSimilarity(a, b) {
@@ -253,13 +339,18 @@ Division-by-zero is guarded: returns 0 if either vector has zero magnitude. `cos
 
 ## Runtime Migrations
 
-The `createDb()` constructor runs three migration blocks on every startup, checking `PRAGMA table_info(patterns)` before each:
+The `createDb()` constructor runs multiple migration blocks on every startup, each idempotent:
 
-1. **Promotion columns:** `promoted_at` (INTEGER), `cloud_document_id` (TEXT), `promoted_confidence` (REAL), `applicability` (TEXT DEFAULT 'narrow')
-2. **Bayesian columns:** `alpha` (REAL DEFAULT 1), `beta` (REAL DEFAULT 1)
-3. **Namespace column:** `namespace` (TEXT DEFAULT 'default') with `idx_patterns_namespace` index
+1. **Promotion columns:** `promoted_at`, `cloud_document_id`, `promoted_confidence`, `applicability` -- checked via `PRAGMA table_info`.
+2. **Bayesian columns:** `alpha` (REAL DEFAULT 1), `beta` (REAL DEFAULT 1).
+3. **Namespace column:** `namespace` (TEXT DEFAULT 'default') with `idx_patterns_namespace` index.
+4. **Exposure/trigram columns:** `exposure_count`, `last_exposed_at`, `ignored_count`, `embedding_text`, `pattern_trigrams`, `quality_history` -- added via try/catch (duplicate column errors are silently swallowed).
+5. **V2 hierarchical Thompson columns:** `cluster_id`, `cluster_rank_score`, `effective_exposures`, `distinctiveness`, `retired_at`, `retired_reason`, `idx_patterns_cluster` index -- via a `v2Migrate()` helper that suppresses "duplicate column / already exists" errors only, re-throwing all others.
+6. **Beta repair (one-time):** Resets `alpha = 1, beta = 1, confidence = 0.5` for never-exposed active patterns where `beta > 2.0` (caused by an earlier aggressive decay that incremented beta hourly).
+7. **Trigram backfill (one-time):** Generates `pattern_trigrams` for any active pattern where the column is NULL.
+8. **MiniLM-L6 migration:** If the first stored embedding has length > 384, all embeddings are nulled out (migration from voyage-4-lite 1536d to MiniLM-L6 384d) and `hnsw.index.json` is deleted.
 
-Each migration is idempotent -- columns are only added if not already present. This approach allows the schema to evolve without a formal migration framework.
+This approach allows the schema to evolve without a formal migration framework.
 
 ## File Layout
 

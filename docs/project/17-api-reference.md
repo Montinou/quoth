@@ -1,6 +1,6 @@
 # API Reference
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-06
+**Version:** 1.0.1 | **Last updated:** 2026-04-07
 
 Complete API reference for the Quoth system. Covers both the local MCP tool interface (22 tools via the `quoth-learning` server) and the SaaS REST API endpoints deployed on Vercel.
 
@@ -93,7 +93,7 @@ Get top-N patterns by confidence score, with optional semantic search and Jina r
 ```
 
 **Behavior:**
-1. If `query` is provided, generates an embedding via `daemon/lib/embed.js` and performs HNSW similarity search.
+1. If `query` is provided, generates a 384-dimensional embedding via `daemon/lib/embed.js` (`Xenova/all-MiniLM-L6-v2`, local ONNX, no API call) and performs HNSW similarity search.
 2. Falls back to confidence-sorted retrieval if embedding generation fails.
 3. If `JINA_API_KEY` is set and `query` is provided, applies Jina reranking to results.
 
@@ -122,7 +122,7 @@ Search local patterns by semantic similarity. Primary tool for finding patterns 
 ```
 
 **Behavior:**
-1. Generates query embedding and performs HNSW vector search.
+1. Generates a 384-dimensional query embedding via local `Xenova/all-MiniLM-L6-v2` (ONNX) and performs HNSW vector search.
 2. Falls back to keyword matching (word overlap on `name`, `condition`, `action`) if embedding fails.
 3. Applies Jina reranking if `JINA_API_KEY` is set and multiple results exist.
 4. Filters out skill-type patterns when `includeSkills` is `false`.

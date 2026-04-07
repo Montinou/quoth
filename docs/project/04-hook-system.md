@@ -1,4 +1,4 @@
-# Hook System <!-- v1.0.1 | 2026-04-06 -->
+# Hook System <!-- v1.0.1 | 2026-04-07 -->
 
 Quoth's hook system integrates with Claude Code's lifecycle events to provide intelligence routing, trajectory capture, pattern injection, and command safety checks. All hooks are declared in `hooks/hooks.json` and execute via two entry points: the unified dispatcher (`hook-dispatch.js`) and the standalone trajectory capture script (`trajectory-capture.js`).
 
@@ -256,15 +256,26 @@ Routes the user's prompt to an optimal agent type and displays relevant intellig
    - [0.48] Update documentation with version and last updated timestamp: Update documentation...
    - [0.50] Use 'ls -la' to inspect directory contents: Use 'ls -la' to inspect...
    ```
-4. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
-5. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
-6. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
+4. **Inject relevant doc chunks:** If a DB is available and the prompt is ≥ 10 chars, call `generateEmbedding(prompt)` from `../daemon/lib/embed.js` to get a query vector, then call `db.searchDocChunks(promptVec, 3)` to retrieve the top 3 semantically similar documentation chunks. Chunks with `_similarity > 0.2` are printed:
+   ```
+   [Quoth Docs] Relevant project context:
+     • [hook-system] Hook Events Reference: ## Hook Events Reference...
+     • [configuration] Setup Script: ## Setup Script...
+   ```
+   The doc label is derived from the chunk's `doc_file` field (`.md` extension and leading `\d+-` prefix stripped). Content is truncated to 250 chars.
+5. Call `intelligence.routeTask(prompt)` for keyword-based agent recommendation. Matches the prompt against `TASK_PATTERNS` (~20 regex pattern groups, English + Spanish, mapping to 8 agent types). Default: `coder` at 0.5 confidence.
+6. Call `routing.getAlternatives(primaryAgent)` to get 2 alternative agent types.
+7. Output formatted routing table with primary recommendation box, alternative agents table, and estimated metrics.
 
 **Output format** (pattern injection printed first, then routing table):
 
 ```
 [Quoth] Patterns for this prompt:
 - [0.48] Some pattern: Pattern action here...
+
+[Quoth Docs] Relevant project context:
+  • [hook-system] Hook Events Reference: ## Hook Events Reference...
+  • [configuration] Setup Script: ## Setup Script...
 
 [INFO] Routing task: implement user authentication...
 

@@ -2,7 +2,7 @@
 
 Two subsystems added in v3.2.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-06
+**Version:** 1.0.2 | **Last updated:** 2026-04-07
 
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart
@@ -45,6 +45,30 @@ The files are printed as plain markdown to stdout. Claude Code captures stdout f
 **`quoth-plugin/context/project-summary.md`**
 - Identical content to `quoth.md` (acts as fallback for quoth project only)
 - Used when the project resolves to `quoth` but no specific file is found by that name
+
+### Doc Chunk Injection (UserPromptSubmit)
+
+The `route` handler (UserPromptSubmit) performs a second form of context injection: semantic search over indexed documentation chunks. For every prompt of 10+ characters, it generates an embedding and calls `db.searchDocChunks(promptVec, 3)`. Chunks with cosine similarity > 0.2 are printed to stdout as:
+
+```
+[Quoth Docs] Relevant project context:
+  • [label] Section Header: chunk content...
+```
+
+The label is derived from the doc filename (e.g., `docs/project/06-mcp-tools.md` → `mcp-tools`). Claude Code captures this stdout output and injects it into the session system context before the user prompt is processed. Only chunks above the 0.2 similarity threshold are shown; if no chunks qualify, nothing is printed.
+
+### Doc Auto-Update Reporting (SessionStart)
+
+The `session-restore` handler reads `~/.quoth/intelligence/doc-manifest.json` after context file injection and reports any doc auto-updates that haven't been shown yet. Updates are deduplicated by timestamp: only entries with `timestamp > lastReportedAt` are printed (up to 5). After reporting, `lastReportedAt` is updated so the same updates are not repeated in future sessions.
+
+Example output:
+```
+[Quoth] 2 doc(s) auto-updated:
+  - 06-mcp-tools.md → v1.2.3
+  - 04-hook-system.md → v2.0.1
+```
+
+The `doc-manifest.json` file is written by the daemon's doc auto-update pipeline; `session-restore` is read-only with respect to the manifest (except for updating `lastReportedAt`).
 
 ### Project-Local Context Override
 

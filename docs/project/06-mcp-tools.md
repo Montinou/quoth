@@ -1,5 +1,7 @@
 # MCP Tools Reference
 
+**Version:** 1.0.1 — 2026-04-07
+
 Quoth exposes 22 MCP tools through a single server (`quoth-learning`) using the JSON-RPC 2.0 protocol over stdio. Tools are organized into 4 handler modules: Patterns, Intelligence, Agents, and Skills.
 
 ## Table of Contents
@@ -87,7 +89,7 @@ Each handler module exports:
 - `TOOLS`: Array of tool definitions (name, description, inputSchema)
 - `handle(name, args, db)`: Async function that processes tool calls and returns results
 
-If a tool name is not found in the dispatch map, an `"Unknown tool: {name}"` error is thrown.
+If a tool name is not found in the dispatch map, an `"Unknown tool: {name}"` error is thrown. Additionally, if the matched handler returns `null` (its internal default branch), the same error is thrown — so unknown-tool errors can originate from either the dispatch map lookup or the handler itself.
 
 ---
 
@@ -377,18 +379,30 @@ The intelligence tools depend on a graph library providing:
 
 ### Routing Library (`mcp/lib/routing.js`)
 
-The routing system uses keyword matching against 8 predefined task patterns:
+The routing system uses keyword matching against 20 ordered patterns (first match wins). Patterns are ordered from most-specific intent to broadest domain, and each English pattern has a paired Spanish voseo variant.
 
-| Pattern (regex, case-insensitive) | Agent Type |
-|-----------------------------------|------------|
-| `implement\|create\|build\|add\|write code` | `coder` |
-| `test\|spec\|coverage\|unit test\|integration` | `tester` |
-| `review\|audit\|check\|validate\|security` | `reviewer` |
-| `research\|find\|search\|documentation\|explore` | `researcher` |
-| `design\|architect\|structure\|plan` | `architect` |
-| `api\|endpoint\|server\|backend\|database` | `backend-dev` |
-| `ui\|frontend\|component\|react\|css\|style` | `frontend-dev` |
-| `deploy\|docker\|ci\|cd\|pipeline\|infrastructure` | `devops` |
+| Pattern (regex, case-insensitive) | Agent Type | Notes |
+|-----------------------------------|------------|-------|
+| `\b(?:fix\|bug\|debug\|broken\|crash\|hotfix\|patch)\b` | `coder` | Highest priority — explicit fix intent |
+| `(?:arreglá\|corregí\|roto\|crashea)` | `coder` | Spanish voseo |
+| `\b(?:refactor\|rename\|extract\|reorganize\|cleanup\|clean up\|simplify)\b` | `coder` | |
+| `(?:refactoreá\|renombrá\|reorganizá\|simplificá\|limpiá)` | `coder` | Spanish voseo |
+| `\b(?:test\|spec\|coverage\|unit.?test\|integration.?test\|assert\|mock\|fixture\|jest\|vitest)\b` | `tester` | |
+| `(?:testea\|probá\|pruebas\|test unitario)` | `tester` | Spanish voseo |
+| `\b(?:review\|audit\|security.?check\|lint\|inspect\|validate)\b` | `reviewer` | |
+| `(?:revisá\|auditá\|chequeá\|validá\|seguridad)` | `reviewer` | Spanish voseo |
+| `\b(?:research\|explore\|investigate\|look.?up\|summarize\|documentation)\b` | `researcher` | |
+| `(?:investigá\|buscá\|explorá\|documentación\|analizá\|resumí)` | `researcher` | Spanish voseo |
+| `\b(?:design\|architect\|blueprint\|diagram\|schema\|model)\b` | `architect` | |
+| `(?:diseñá\|arquitectura\|planificá\|diagrama\|esquema)` | `architect` | Spanish voseo |
+| `\b(?:config(?:ure)?\|setup\|install\|env(?:ironment)?\|settings)\b` | `devops` | New: config/setup intent |
+| `(?:configurá\|instalá\|entorno\|configuración)` | `devops` | Spanish voseo |
+| `\b(?:deploy\|docker\|ci.?cd\|pipeline\|infrastructure\|vercel\|nginx\|systemd\|cron)\b` | `devops` | Extended keywords |
+| `(?:desplegá\|infraestructura\|servidor)` | `devops` | Spanish voseo |
+| `\b(?:implement\|create\|build\|add\|develop\|scaffold\|generate\|write.?code\|programá)\b` | `coder` | Broad coder intent |
+| `(?:implementa\|creá\|construí\|agregá\|desarrollá\|generá)` | `coder` | Spanish voseo |
+| `\b(?:api\|endpoint\|backend\|database\|migration\|postgres\|sqlite\|prisma\|drizzle\|query)\b` | `backend-dev` | Domain match |
+| `\b(?:ui\|frontend\|component\|react\|css\|style\|layout\|responsive\|tailwind\|shadcn)\b` | `frontend-dev` | Domain match |
 
 Default (no match): `coder` at 0.5 confidence.
 
@@ -589,6 +603,34 @@ Get comprehensive intelligence diagnostics for debugging and monitoring.
     "elapsed": "45m",
     "nodes": 2,
     "edges": 1
+  },
+  "exposure": {
+    "total": 100,
+    "exposed": 45,
+    "used": 22,
+    "avg_conversion_rate": 0.1234
+  },
+  "v2": {
+    "clusters": {
+      "count": 12,
+      "avg_conf": 0.650,
+      "min_conf": 0.100,
+      "max_conf": 0.950,
+      "total_attempts": 300
+    },
+    "injections_7d": {
+      "total": 150,
+      "explorations": 20,
+      "avg_propensity": 0.450,
+      "with_outcome": 80,
+      "avg_reward": 0.750
+    },
+    "judge_30d": {
+      "total": 200,
+      "judged": 180,
+      "cost_cents": 1.50
+    },
+    "retired_total": 5
   }
 }
 ```
@@ -604,6 +646,13 @@ Get comprehensive intelligence diagnostics for debugging and monitoring.
 | `pendingInsights` | Number of unprocessed lines in `pending-insights.jsonl` |
 | `snapshots` | Number of historical snapshots in `snapshots.json` |
 | `delta` | Comparison between the two most recent snapshots (null if < 2 snapshots) |
+| `exposure` | Pattern exposure stats from SQLite `patterns` table (null if DB unavailable). `exposed` = patterns shown at least once; `used` = patterns that resulted in a success. |
+| `exposure.avg_conversion_rate` | Average `success_count / exposure_count` across exposed active patterns |
+| `v2` | Extended v2 telemetry (null if DB tables not present). Requires `cluster_stats`, `injection_log`, and `judge_queue` tables. |
+| `v2.clusters` | Cluster stats: count, confidence distribution, and total attempts across all clusters |
+| `v2.injections_7d` | Pattern injection activity in the last 7 days: totals, explorations (ε-greedy), propensity scores, and average reward |
+| `v2.judge_30d` | JUDGE pipeline activity in the last 30 days: total enqueued, judged count, and cost in cents |
+| `v2.retired_total` | Total number of patterns with a `retired_at` timestamp |
 
 ### 14. `quoth_intelligence_feedback`
 

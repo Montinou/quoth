@@ -1,5 +1,7 @@
 # Security Model
 
+**Version:** 1.0.1 | **Updated:** 2026-04-07
+
 Complete documentation of the Quoth security architecture across both the local plugin and the cloud SaaS platform.
 
 ## Authentication Layers
@@ -230,6 +232,8 @@ If a dangerous pattern is detected:
 - Prints `[BLOCKED] Dangerous command detected: <pattern>` to stderr
 - Exits with code 1, which causes Claude Code to abort the command
 
+If the command is safe, prints `[OK] Command validated` to stdout.
+
 The check is case-insensitive (`cmd.toLowerCase()`).
 
 ## Secret Management
@@ -312,7 +316,11 @@ Path patterns are matched against the task description to determine the actual p
 
 ### Plugin
 
-- All hook execution is local (no network calls in hooks)
+- Most hook execution is local; however, three hooks make outbound embedding API calls:
+  - `route`: calls `generateEmbedding(prompt)` for doc chunk injection (semantic context retrieval)
+  - `session-restore` (V2 injection path): calls `generateEmbedding(queryText)` for candidate ranking
+  - `subagent-start` (V2 injection path): calls `generateEmbedding(queryText)` for domain pattern selection
+  - All embedding calls are wrapped in try/catch and fail silently — hooks degrade gracefully if the API is unavailable
 - Daemon cloud promotion uses HTTPS with 15-second timeout
 - No listening ports -- daemon communicates via filesystem (trajectory files) and signals (SIGUSR1)
 

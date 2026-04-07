@@ -1,6 +1,6 @@
 # Configuration
 
-*Version: 1.0.1 | Last updated: 2026-04-06*
+*Version: 1.0.1 | Last updated: 2026-04-07*
 
 Complete reference for all configuration files, environment variables, file paths, and setup procedures in the Quoth system.
 
@@ -474,12 +474,12 @@ PRAGMA foreign_keys = ON;
 
 The HNSW (Hierarchical Navigable Small World) index is stored at `~/.quoth/hnsw.index.json` and managed by `daemon/lib/hnsw.js`. It provides approximate nearest neighbor search for pattern embeddings.
 
-- **Embedding model:** `voyage-4-lite` (via Vercel AI Gateway)
-- **Dimensions:** 1024
+- **Embedding model:** `MiniLM-L6-v2` (local, no API call required)
+- **Dimensions:** 384
 - **Similarity metric:** Cosine similarity
 - **Index format:** JSON-serialized graph with multiple navigation layers
 
-The index is rebuilt during daemon processing and loaded lazily by the MCP server when semantic search is requested.
+The index is rebuilt during daemon processing and loaded lazily by the MCP server when semantic search is requested. Deleted nodes are soft-deleted (excluded from search results but retained in the graph until a full rebuild).
 
 ---
 

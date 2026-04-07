@@ -1,10 +1,8 @@
-You need to grant write permission to edit that file. Here's the complete updated document with all five changes applied — ready to paste once you approve:
-
 # Task Routing
 
 Quoth's task routing system classifies incoming tasks by keyword matching and recommends the optimal agent type for execution. It is a lightweight, zero-latency classifier that runs entirely in-process with no API calls or model inference.
 
-<!-- v1.0.1 — Last updated: 2026-04-06 -->
+<!-- v1.0.1 — Last updated: 2026-04-07 -->
 
 Source files:
 - `quoth-plugin/mcp/lib/routing.js` -- agent definitions, pattern matching, alternative selection
@@ -128,20 +126,28 @@ The `route` command in `hook-dispatch.js` is triggered by the `UserPromptSubmit`
 
 ### Execution Flow
 
-1. **Get intelligence context**: Call `intel.getContext(prompt, 5)` to find relevant entries in the intelligence graph using trigram matching + PageRank scoring.
+1. **Persist prompt history**: Append current prompt (up to 500 chars) to `intelligence/prompt-history.json`, keeping the last 5 entries keyed by `CLAUDE_SESSION_ID`. Resets automatically when the session ID changes.
 
-2. **Display relevant patterns**: Filter entries with `score >= 0.1`, take top 3, and output:
+2. **Record in session memory**: Call `createSessionMemory().recordPrompt(prompt)` to track the prompt for downstream context snapshots and feedback loops.
+
+3. **Inject relevant patterns**: Call `rankByThompsonAndTrigram(db, project, prompt, 5, {minConfidence: 0.3, excludeRecentMinutes: 2})` — Thompson sampling + trigram matching against the project's pattern library. Records exposure and injection in session memory. Output format:
    ```
-   [INTELLIGENCE] Relevant patterns for this task:
-     * (0.42) Pattern summary [rank #1, 5x accessed]
-     * (0.31) Pattern summary [rank #2, 2x accessed]
+   [Quoth] Patterns for this prompt:
+   - [0.42] pattern-name: action summary...
+   - [0.31] pattern-name: action summary...
    ```
 
-3. **Route the task**: Call `routeTask(prompt)` for the primary recommendation.
+4. **Inject relevant doc chunks**: Call `generateEmbedding(prompt)` then `db.searchDocChunks(vec, 3)`. Filters by cosine similarity > 0.2. Output format:
+   ```
+   [Quoth Docs] Relevant project context:
+     • [doc-label] Section Header: content snippet...
+   ```
 
-4. **Get alternatives**: Call `getAlternatives(result.agent)` for two fallback options.
+5. **Route the task**: Call `intel.routeTask(prompt)` for the primary recommendation.
 
-5. **Format output**: Produce a structured table for Claude Code:
+6. **Get alternatives**: Call `getAlternatives(result.agent)` for two fallback options.
+
+7. **Format output**: Produce a structured table for Claude Code:
    ```
    [INFO] Routing task: <first 80 chars of prompt>
 
@@ -203,12 +209,21 @@ User Prompt
     v
 [UserPromptSubmit Hook]
     |
-    +---> getContext(prompt, 5) ---> Intelligence Graph
-    |         |                        (trigram + PageRank)
-    |         v
-    |     Display relevant patterns (score >= 0.1)
+    +---> Save prompt history (last 5, session-keyed)
     |
-    +---> routeTask(prompt) -------> Keyword Pattern Matching
+    +---> sessionMemory.recordPrompt()
+    |
+    +---> rankByThompsonAndTrigram(db, project, prompt, 5)
+    |         |                        (Thompson sampling + trigram)
+    |         v
+    |     [Quoth] Patterns for this prompt: ...
+    |
+    +---> generateEmbedding(prompt) -> db.searchDocChunks(vec, 3)
+    |         |                        (cosine similarity > 0.2)
+    |         v
+    |     [Quoth Docs] Relevant project context: ...
+    |
+    +---> intel.routeTask(prompt) --> Keyword Pattern Matching
     |         |                        (first-match, ~20 patterns EN+ES)
     |         v
     |     Primary agent + confidence
@@ -216,7 +231,7 @@ User Prompt
     +---> getAlternatives(agent) --> Deterministic selection
     |         |                        (next 2 in order)
     |         v
-    |     Format and output table
+    |     Format and output routing table
     |
     v
 [Routed to agent with context]
@@ -253,12 +268,3 @@ The following limitations from v3.2.0 have been addressed:
 | `getAlternatives(primaryAgent)` | Function | Returns array of 2 alternatives |
 | `AGENT_CAPABILITIES` | Object | Map of agent name to capability tags |
 | `TASK_PATTERNS` | Array | Array of `[RegExp, agentType]` tuples, tested in order |
-```
-
-**Summary of changes (5 total):**
-- Row 2: added `clean up`
-- Row 3: added `integration test`, `fixture`
-- Row 7: expanded to `config, configure` and `env, environment` (short forms now also match)
-- Row 9: added `programá` (moved from Spanish-only into the English regex)
-- Row 10: added `query`
-- Added `<!-- v1.0.1 — Last updated: 2026-04-06 -->` comment under the title
