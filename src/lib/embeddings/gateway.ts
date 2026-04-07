@@ -1,32 +1,39 @@
 /**
- * Vercel AI Gateway Embeddings
- * QUOTH-03: Unified embedding via voyage/voyage-4-lite (1024d)
- * 6.5x cheaper than text-embedding-3-large ($0.02 vs $0.13/MTok).
- * Same model used by local daemon (quoth-plugin) for SQLite HNSW.
+ * Cloud Embeddings — Venice.ai BGE-M3 (primary) / Vercel AI Gateway (fallback)
+ * QUOTH-03: Unified embedding via text-embedding-bge-m3 (1024d)
+ * Venice BGE-M3: $0.02/MTok — cheapest option, OpenAI-compatible API.
+ * Falls back to Vercel AI Gateway (voyage/voyage-4-lite) if VENICE_API_KEY not set.
+ * Same dimensionality used by local daemon (quoth-plugin) for SQLite HNSW.
  *
- * Gateway URL: https://ai-gateway.vercel.sh/v1
- * Auth: AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN (auto on Vercel deploys)
+ * Primary: https://api.venice.ai/api/v1 (VENICE_API_KEY)
+ * Fallback: https://ai-gateway.vercel.sh/v1 (AI_GATEWAY_API_KEY / OPENAI_API_KEY)
  */
 
 import { embed, embedMany } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 
-const EMBEDDING_MODEL = 'voyage/voyage-4-lite';
+// Primary: Venice.ai (cheapest)
+// Fallback: Vercel AI Gateway (if VENICE_API_KEY not set)
+const VENICE_BASE_URL = 'https://api.venice.ai/api/v1';
+const GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
+
+const EMBEDDING_MODEL = process.env.VENICE_API_KEY ? 'text-embedding-bge-m3' : 'voyage/voyage-4-lite';
 const EMBEDDING_DIMS = 1024;
 
 /**
- * OpenAI-compatible provider routed through Vercel AI Gateway.
+ * OpenAI-compatible provider — routes to Venice.ai when VENICE_API_KEY is set,
+ * otherwise falls back to Vercel AI Gateway.
  */
 const openai = createOpenAI({
-  apiKey: process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY,
-  baseURL: 'https://ai-gateway.vercel.sh/v1',
+  apiKey: process.env.VENICE_API_KEY || process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY,
+  baseURL: process.env.VENICE_API_KEY ? VENICE_BASE_URL : GATEWAY_BASE_URL,
 });
 
 /** Maximum inputs per embedMany call (OpenAI limit) */
 const BATCH_SIZE = 2048;
 
 /**
- * Generate a single embedding vector via Vercel AI Gateway.
+ * Generate a single embedding vector via Venice.ai (or AI Gateway fallback).
  *
  * @param text - Text to embed (query or passage)
  * @returns 1024-dimensional embedding vector
@@ -102,11 +109,11 @@ export async function generateEmbeddingsBatch(texts: string[]): Promise<number[]
 }
 
 /**
- * Check if gateway embeddings are configured.
- * Prefers AI_GATEWAY_API_KEY (Vercel AI Gateway); falls back to OPENAI_API_KEY.
+ * Check if cloud embeddings are configured.
+ * Prefers VENICE_API_KEY (Venice.ai); falls back to AI_GATEWAY_API_KEY or OPENAI_API_KEY.
  */
 export function isGatewayConfigured(): boolean {
-  return !!(process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY);
+  return !!(process.env.VENICE_API_KEY || process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY);
 }
 
 /** Exported constants for use in search/indexing modules */
