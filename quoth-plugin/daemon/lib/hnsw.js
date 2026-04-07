@@ -4,7 +4,7 @@ const fs = require('fs')
 
 /**
  * Pure JS HNSW (Hierarchical Navigable Small World) index for approximate nearest neighbor search.
- * Replaces O(n) linear scan with O(log n) search over 1536-dim embeddings.
+ * Replaces O(n) linear scan with O(log n) search over 384-dim embeddings (MiniLM-L6-v2 local).
  */
 
 function cosineSimilarity(a, b) {
@@ -24,11 +24,11 @@ function cosineDistance(a, b) {
 
 class HnswIndex {
   /**
-   * @param {number} dimensions - Vector dimensionality (default 1536 for text-embedding-3-small)
+   * @param {number} dimensions - Vector dimensionality (default 384 for MiniLM-L6-v2)
    * @param {number} M - Max neighbors per layer (layer 0 gets 2*M)
    * @param {number} efConstruction - Size of dynamic candidate list during construction
    */
-  constructor(dimensions = 1536, M = 16, efConstruction = 200) {
+  constructor(dimensions = 384, M = 16, efConstruction = 200) {
     this.dimensions = dimensions
     this.M = M
     this.M0 = M * 2 // layer 0 max neighbors

@@ -293,8 +293,41 @@ function createDb(dbPath) {
     }
   } catch {}
 
+  // --- Migration: invalidate 1536d embeddings from voyage-4-lite (now using 384d MiniLM-L6) ---
+  v2Migrate('invalidate 1536d embeddings for MiniLM migration', () => {
+    const check = db.prepare("SELECT embedding FROM patterns WHERE embedding IS NOT NULL LIMIT 1").get()
+    if (check) {
+      try {
+        const vec = JSON.parse(check.embedding)
+        if (vec.length > 384) {
+          const nulled = db.prepare("UPDATE patterns SET embedding = NULL WHERE embedding IS NOT NULL").run()
+          console.error(`[db] Invalidated ${nulled.changes} old 1536d embeddings for MiniLM-L6 migration`)
+          // Delete stale HNSW index
+          const indexPath = path.join(path.dirname(dbPath), 'hnsw.index.json')
+          try { fs.unlinkSync(indexPath) } catch {}
+        }
+      } catch {}
+    }
+  })
+
+  // --- doc_chunks table for project documentation semantic search ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS doc_chunks (
+        id TEXT PRIMARY KEY,
+        doc_file TEXT NOT NULL,
+        section_header TEXT NOT NULL,
+        content TEXT NOT NULL,
+        embedding TEXT,
+        content_hash TEXT,
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_doc_chunks_file ON doc_chunks(doc_file);
+    `)
+  } catch (e) { console.error('[db] doc_chunks create failed:', e.message) }
+
   // --- HNSW index state ---
-  const hnsw = new HnswIndex(1536)
+  const hnsw = new HnswIndex(384)
   let hnswHealthy = false
 
   db.initHnsw = function() {
@@ -593,6 +626,21 @@ function createDb(dbPath) {
     `).run(ninetyDaysAgo)
   }
 
+  db.pruneYoungUnused = function() {
+    // Delete patterns aged 1-24h with 0 exposures and 0 successes (distiller noise)
+    const oneHourAgo = Date.now() - (1 * 60 * 60 * 1000)
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000)
+    return db.prepare(`
+      DELETE FROM patterns
+      WHERE status = 'active'
+        AND created_at < ?
+        AND created_at > ?
+        AND exposure_count = 0
+        AND success_count = 0
+        AND failure_count = 0
+    `).run(oneHourAgo, oneDayAgo).changes
+  }
+
   db.getPromotionCandidates = function() {
     return db.prepare(`
       SELECT * FROM patterns
@@ -612,6 +660,46 @@ function createDb(dbPath) {
         updated_at = strftime('%s','now') * 1000
       WHERE id = ?
     `).run(cloudDocumentId, confidence, id)
+  }
+
+  // --- Doc chunks ---
+
+  db.upsertDocChunk = function(chunk) {
+    db.prepare(`
+      INSERT INTO doc_chunks (id, doc_file, section_header, content, embedding, content_hash, updated_at)
+      VALUES (@id, @doc_file, @section_header, @content, @embedding, @content_hash, strftime('%s','now') * 1000)
+      ON CONFLICT(id) DO UPDATE SET
+        content = excluded.content,
+        embedding = excluded.embedding,
+        content_hash = excluded.content_hash,
+        updated_at = strftime('%s','now') * 1000
+    `).run({
+      id: chunk.id,
+      doc_file: chunk.doc_file,
+      section_header: chunk.section_header,
+      content: chunk.content,
+      embedding: chunk.embedding || null,
+      content_hash: chunk.content_hash || null,
+    })
+  }
+
+  db.searchDocChunks = function(queryVector, limit = 3) {
+    const rows = db.prepare(`
+      SELECT * FROM doc_chunks WHERE embedding IS NOT NULL
+    `).all()
+    if (rows.length === 0) return []
+
+    const scored = rows.map(row => {
+      let sim = 0
+      try { sim = cosineSimilarity(queryVector, JSON.parse(row.embedding)) } catch {}
+      return { ...row, _similarity: sim }
+    })
+    scored.sort((a, b) => b._similarity - a._similarity)
+    return scored.slice(0, limit)
+  }
+
+  db.getDocChunkCount = function() {
+    return db.prepare('SELECT COUNT(*) as c FROM doc_chunks').get().c
   }
 
   db.appendTrajectoryEntry = function(entry) {

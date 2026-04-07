@@ -86,7 +86,7 @@ async function readStdin() {
 }
 
 const handlers = {
-  'route': (prompt) => {
+  'route': async (prompt) => {
     // Persist rolling prompt history for trajectory context enrichment.
     // Keeps last 5 prompts so tool calls can reference nearby user intents + planning context.
     try {
@@ -150,6 +150,25 @@ const handlers = {
             lines.push(`- [${conf.toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`)
           }
           console.log(lines.join('\n'))
+        }
+      } catch {}
+    }
+
+    // Inject relevant doc chunks (semantic search against prompt)
+    if (db && prompt && prompt.trim().length >= 10) {
+      try {
+        const { generateEmbedding } = require('../daemon/lib/embed.js')
+        const promptVec = await generateEmbedding(prompt)
+        if (promptVec) {
+          const chunks = db.searchDocChunks(promptVec, 3)
+          if (chunks.length > 0 && chunks[0]._similarity > 0.2) {
+            const lines = ['[Quoth Docs] Relevant project context:']
+            for (const c of chunks.filter(c => c._similarity > 0.2)) {
+              const label = c.doc_file.replace('.md', '').replace(/^\d+-/, '')
+              lines.push(`  • [${label}] ${c.section_header}: ${c.content.slice(0, 250)}`)
+            }
+            console.log(lines.join('\n'))
+          }
         }
       } catch {}
     }
@@ -678,7 +697,7 @@ async function main() {
   if (command && handlers[command]) {
     try {
       if (command === 'route') {
-        handlers[command](prompt)
+        await handlers[command](prompt)
       } else if (command === 'post-edit' || command === 'pre-bash' || command === 'subagent-start') {
         await handlers[command](hookInput)
       } else {

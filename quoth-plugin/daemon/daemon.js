@@ -429,7 +429,8 @@ function startDecayTimer() {
     try {
       db.applyHourlyDecay()
       db.archiveWeakPatterns()
-      log('info', 'Hourly decay applied')
+      const pruned = db.pruneYoungUnused()
+      log('info', 'Hourly decay applied', { pruned: pruned || 0 })
     } catch (err) {
       log('error', 'Decay failed', { error: err.message })
     }
@@ -1199,3 +1200,14 @@ startStaleSessionTimer()
 scheduleNightlyPipeline()
 scanAndEnqueue()
 processQueue()
+
+// --- Index doc chunks at startup (async, non-blocking) ---
+;(async () => {
+  try {
+    const { indexDocs } = require('./lib/doc-chunks.js')
+    const result = await indexDocs(PROJECT_ROOT, db, log)
+    if (result.indexed > 0) log('info', 'Doc chunk indexing complete', result)
+  } catch (err) {
+    log('error', 'Doc chunk indexing failed', { error: err.message })
+  }
+})()

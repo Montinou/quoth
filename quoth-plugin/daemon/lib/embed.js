@@ -1,56 +1,37 @@
 'use strict'
 
 /**
- * Daemon embedding — voyage/voyage-4-lite via Vercel AI Gateway
- * URL: https://ai-gateway.vercel.sh/v1/embeddings
- * Cost: $0.02/MTok (6.5x cheaper than text-embedding-3-large)
- * Auth: AI_GATEWAY_API_KEY (vck_* key)
+ * Daemon embedding — local MiniLM-L6-v2 via @xenova/transformers (ONNX).
+ * 384-dimensional vectors, zero API calls, ~5ms per embedding after warmup.
+ *
+ * Previously: voyage/voyage-4-lite (1536d) via Vercel AI Gateway ($0.02/MTok).
  */
 
-const https = require('https')
+const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
+const DIMENSIONS = 384
 
-const MODEL = 'voyage/voyage-4-lite'
-const GATEWAY_HOST = 'ai-gateway.vercel.sh'
-const GATEWAY_PATH = '/v1/embeddings'
+let _pipeline = null
+
+async function getPipeline() {
+  if (_pipeline) return _pipeline
+  const { pipeline } = require('@xenova/transformers')
+  _pipeline = await pipeline('feature-extraction', MODEL_NAME, {
+    quantized: true, // Use quantized model for speed
+  })
+  return _pipeline
+}
 
 async function generateEmbedding(text) {
-  const apiKey = process.env.AI_GATEWAY_API_KEY
-  if (!apiKey) return null
-
   const clean = (text || '').replace(/\n+/g, ' ').trim()
   if (!clean) return null
 
   try {
-    const body = JSON.stringify({ model: MODEL, input: clean })
-
-    const data = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: GATEWAY_HOST,
-        path: GATEWAY_PATH,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Length': Buffer.byteLength(body)
-        },
-        timeout: 10000
-      }, (res) => {
-        let chunks = ''
-        res.on('data', c => { chunks += c })
-        res.on('end', () => {
-          try { resolve(JSON.parse(chunks)) } catch { reject(new Error('Invalid JSON')) }
-        })
-      })
-      req.on('error', reject)
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
-      req.write(body)
-      req.end()
-    })
-
-    return data.data?.[0]?.embedding || null
+    const pipe = await getPipeline()
+    const output = await pipe(clean, { pooling: 'mean', normalize: true })
+    return Array.from(output.data).slice(0, DIMENSIONS)
   } catch {
     return null
   }
 }
 
-module.exports = { generateEmbedding, MODEL }
+module.exports = { generateEmbedding, MODEL_NAME, DIMENSIONS }
