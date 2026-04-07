@@ -14,23 +14,66 @@ Quoth can be connected to any MCP-compatible AI tool. This guide covers installa
 
 ### Local Plugin (Recommended)
 
-The Quoth local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon:
+The Quoth local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon.
+
+#### Interactive Setup (Recommended)
 
 ```bash
 # Clone the repo
 git clone https://github.com/Montinou/quoth.git
 cd quoth
 
-# Run setup (idempotent — safe to re-run)
+# Interactive CLI wizard
+node quoth-plugin/scripts/cli.js init
+```
+
+The wizard will prompt you to choose between two modes:
+
+| | Managed Mode | Local Mode |
+|---|---|---|
+| **API keys required** | None (uses cloud pipeline) | Anthropic + embedding provider |
+| **Trajectory processing** | Cloud (`POST /api/v1/pipeline/process`) | Local Haiku subagents |
+| **Doc updates** | Cloud (`POST /api/v1/docs/update`) | Local daemon process |
+| **Best for** | Quick start, teams | Full control, air-gapped envs |
+
+#### Manual Setup
+
+```bash
+# Run setup script (idempotent — safe to re-run)
 bash quoth-plugin/scripts/setup.sh
 ```
 
-This gives you:
+#### What You Get
+
 - **22 local MCP tools**: 8 patterns, 6 intelligence, 6 agents, 2 skills
 - **9 hooks**: trajectory capture, task routing, pattern injection, Bayesian feedback
 - **Background daemon**: JUDGE → DISTILL → CONSOLIDATE pipeline + session batch distill
+- **Unix socket query server**: `~/.quoth/daemon.sock` for ~20ms routing and pattern injection
+- **Batch embeddings**: `generateEmbeddingBatch()` for cost-optimized vector generation
 - **Context enrichment**: user intent, LLM reasoning, sanitized I/O in every trajectory
 - **Autonomous doc maintenance**: nightly content-hash-based doc updates with git push
+
+#### Embedding Provider
+
+The daemon uses **Venice BGE-M3** for cloud embeddings (migrated from voyage-4-lite in v3.3.0). For local mode, configure your embedding API key:
+
+```bash
+# Venice API key (for local embeddings via Venice BGE-M3)
+export VENICE_API_KEY="your-key"
+```
+
+<Callout type="info">
+  In managed mode, embeddings are handled by the cloud pipeline — no API key needed.
+</Callout>
+
+#### Daemon Socket
+
+The daemon exposes a Unix socket at `~/.quoth/daemon.sock` for fast IPC. Hooks use this socket for ~20ms routing and pattern injection instead of spawning subprocesses.
+
+```bash
+# Check daemon status (includes socket health)
+quoth_daemon_status
+```
 
 ### Cloud MCP (Cross-Team Features)
 
@@ -161,6 +204,8 @@ quoth_agent_list()
 | "Unauthorized" | Ensure token is properly formatted in header |
 | "No agents found" | Register an agent with `quoth_agent_register` |
 | "Message delivery failed" | Check recipient agent status is "active" |
+| "Socket not found" | Daemon not running — restart with `quoth_daemon_status` or re-run `cli.js init` |
+| "Default routing" fallback | Expand routing keywords or check daemon socket at `~/.quoth/daemon.sock` |
 
 ### Agent Communication Issues
 

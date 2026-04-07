@@ -1,6 +1,6 @@
 ---
 title: "MCP Tools Reference"
-description: "Complete reference for all 18 Quoth MCP tools"
+description: "Complete reference for all Quoth MCP tools and cloud API endpoints"
 order: 1
 ---
 
@@ -316,6 +316,86 @@ All agents authenticate with their own project-scoped MCP token. Messages are de
 | `normal` | Regular messages |
 | `high` | Important notifications |
 | `urgent` | Critical alerts + notification |
+
+---
+
+## Cloud API Endpoints
+
+In addition to MCP tools, Quoth exposes REST endpoints for managed mode and cross-org integrations.
+
+### Pipeline Processing
+
+`POST /api/v1/pipeline/process`
+
+Cloud trajectory processing pipeline for managed mode users. Replaces local Haiku subagent processing.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trajectory` | object | Yes | Trajectory payload (tool calls, context, metadata) |
+| `project_id` | string | Yes | Project UUID or slug |
+
+```bash
+curl -X POST https://quoth.triqual.dev/api/v1/pipeline/process \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"trajectory": {...}, "project_id": "my-project"}'
+```
+
+<Callout type="info">
+  Managed mode users don't call this directly — the daemon sends trajectories automatically when configured in managed mode via `cli.js init`.
+</Callout>
+
+### Doc Update
+
+`POST /api/v1/docs/update`
+
+Cloud document updater for managed mode users. Triggers content-hash-based doc updates without requiring local git access.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_id` | string | Yes | Project UUID or slug |
+| `docs` | object[] | No | Specific docs to update (omit for full scan) |
+
+### Cross-Org Pattern Sharing
+
+Share and discover patterns across organizations.
+
+#### List Shared Patterns
+
+`GET /api/v1/patterns/shared`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `category` | string | No | Filter by category |
+| `min_confidence` | number | No | Minimum confidence score (0-1) |
+| `limit` | number | No | Max results (default: 20) |
+
+#### Share a Pattern
+
+`POST /api/v1/patterns/shared`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pattern_id` | string | Yes | Local pattern ID to share |
+| `visibility` | `"public"` \| `"org"` | No | Default: org |
+
+<Callout type="warning">
+  Only patterns with confidence >= 0.8 and >= 10 uses can be shared publicly. Organization-scoped sharing has no minimum threshold.
+</Callout>
+
+---
+
+## Routing
+
+The local plugin includes task routing with 20+ categories (v3.3.0), including Spanish-language and accent-agnostic keyword matching. Routing uses the Unix socket (`~/.quoth/daemon.sock`) for ~20ms response times.
+
+Categories include: `code`, `test`, `debug`, `deploy`, `docs`, `design`, `security`, `database`, `api`, `frontend`, `backend`, `infra`, `git`, `review`, `refactor`, `performance`, `accessibility`, `i18n`, `marketing`, `sales`, `spanish`, and more.
+
+---
+
+## Embeddings
+
+Cloud embeddings use **Venice BGE-M3** (migrated from voyage-4-lite in v3.3.0). Local plugin supports batch embedding via `generateEmbeddingBatch()` for cost optimization when processing multiple trajectories.
 
 ---
 

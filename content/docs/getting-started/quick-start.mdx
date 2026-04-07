@@ -35,22 +35,35 @@ Before you begin, make sure you have:
 
 ### Claude Code — Local Plugin (Recommended)
 
-The local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon:
+The local plugin provides autonomous self-learning with 22 MCP tools, 9 hook bindings, and a background daemon. The fastest way to set up is the interactive CLI:
 
 ```bash
 # Clone the repo (if you haven't)
 git clone https://github.com/Montinou/quoth.git
 cd quoth
 
-# Run setup (creates symlinks, injects hooks, adds permissions)
+# Interactive setup wizard (recommended)
+node quoth-plugin/scripts/cli.js init
+
+# Or manual setup (creates symlinks, injects hooks, adds permissions)
 bash quoth-plugin/scripts/setup.sh
 ```
+
+The `cli.js init` wizard will guide you through:
+- **Mode selection**: managed (cloud pipeline, no API keys needed) or local (full self-hosted)
+- **Hook and MCP server installation**
+- **Daemon configuration** including Unix socket query server
 
 This gives you:
 - **22 local MCP tools** for patterns, intelligence, agents, and skills
 - **9 hooks** for automatic trajectory capture, task routing, pattern injection
 - **Background daemon** that learns from your sessions autonomously
+- **Unix socket query server** at `~/.quoth/daemon.sock` for ~20ms routing and injection
 - **Session-level batch distill** for high-quality pattern extraction
+
+<Callout type="info">
+  **Managed mode** lets you skip API key setup entirely. The daemon sends trajectories to the cloud pipeline (`POST /api/v1/pipeline/process`) for processing. Choose managed mode during `cli.js init` if you want zero-config learning.
+</Callout>
 
 <Callout type="info">
   The local plugin captures every tool interaction with full context (user intent, LLM reasoning, sanitized I/O) and distills reusable patterns automatically. No manual steps needed.

@@ -5,6 +5,56 @@ description: "All notable changes to Quoth"
 
 ## April 2026
 
+### 2026-04-07
+
+**Quoth v3.3.0: Managed Mode & Socket IPC**
+
+SaaS-ready managed pipeline, Unix socket query server for sub-millisecond hook latency, and expanded routing coverage.
+
+**Managed Mode Pipeline**
+
+- SaaS-ready daemon that runs without user API keys
+- Cloud processes JUDGE→DISTILL→CONSOLIDATE server-side via `POST /api/v1/pipeline/process`
+
+**CLI Onboarding Wizard**
+
+- Interactive `node cli.js init` with mode detection, API key setup, auto-daemon start
+
+**Unix Socket Query Server**
+
+- Daemon serves routing + pattern injection via `~/.quoth/daemon.sock`
+- Hooks query in ~20ms instead of ~200ms cold start
+
+**Venice BGE-M3 Embeddings**
+
+- Cloud embeddings migrated from voyage-4-lite to Venice.ai BGE-M3 (1024d, cheaper)
+
+**Batch Embeddings**
+
+- `generateEmbeddingBatch()` for cost-optimized MiniLM processing
+
+**Expanded Routing**
+
+- 20+ categories including Spanish (accent-agnostic)
+- Questions route to researcher@0.6
+
+**Cross-Org Pattern Sharing**
+
+- `GET/POST /api/v1/patterns/shared` for opt-in anonymous pattern exchange
+
+**Doc-Updater Cloud**
+
+- `POST /api/v1/docs/update` endpoint for managed-mode doc auto-updates
+
+**Improvements**
+
+- Pattern lifecycle tightened: 30-day archive for never-exposed, capacity cap 1000→600
+- Exposure-based decay only — inactive patterns no longer penalized
+- 66 new tests across pipeline-api, embed-batch, routing-v2, doc-update-api, shared-pull
+- Doc manifest hash refresh for accurate staleness detection
+
+---
+
 ### 2026-04-05
 
 **Quoth v3.3.0: Intelligent Self-Learning Pipeline**

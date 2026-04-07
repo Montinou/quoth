@@ -1,0 +1,140 @@
+---
+title: "Quoth v3.3.0 — Self-Learning as a Service"
+description: "Managed mode eliminates API key setup. The daemon's new Unix socket server cuts injection latency from 200ms to 20ms. Plus: Venice embeddings, cross-org sharing, and Spanish routing."
+date: "2026-04-07"
+author: "Quoth Team"
+tags: ["release", "v3.3.0", "managed-mode", "performance"]
+featured: true
+---
+
+Quoth v3.3.0 is the biggest release since v3.0. The headline: any developer can now install the self-learning plugin without needing their own AI API keys. Behind the scenes, we rebuilt the daemon's query path, switched embedding providers, and opened the door to cross-organization pattern sharing.
+
+## Managed Mode — Zero-Config Self-Learning
+
+Until now, getting Quoth's self-learning loop running meant configuring at least two API keys: `AI_GATEWAY_API_KEY` for embeddings and LLM calls, plus `MOONSHOT_API_KEY` if you wanted the Kimi distiller. For teams that just want to learn from their trajectories, that was too much friction.
+
+**Managed mode** removes all of it.
+
+```bash
+node cli.js init
+```
+
+The CLI detects your environment and sets the mode automatically:
+
+```
+$ node cli.js init
+
+  Quoth v3.3.0 — Self-Learning Setup
+
+  Detected: Claude Code CLI, no AI keys configured
+
+  ? Select mode:
+    ❯ Managed (recommended) — we handle the AI pipeline
+      Self-hosted — bring your own keys
+
+  ✓ Mode set to managed
+  ✓ Daemon configured → trajectories sync to Quoth cloud
+  ✓ Patterns will be delivered within ~60 seconds of session end
+
+  Done. Start a new Claude Code session to begin learning.
+```
+
+With `QUOTH_MODE=managed`, the daemon sends raw trajectories to our cloud infrastructure. We run the full JUDGE → DISTILL → CONSOLIDATE pipeline on our side and push distilled patterns back to your local `memory.db`. Your code never leaves your machine — only tool-call metadata and file paths are transmitted.
+
+The cost works out to roughly **$0.03/month per active user**, covered by the Quoth subscription. No per-token billing, no surprise invoices.
+
+## 10x Faster Pattern Injection
+
+Every time you type a prompt, Quoth's `UserPromptSubmit` hook needs to look up relevant patterns. In v3.2, that meant loading the SQLite database, initializing the ONNX runtime for MiniLM embeddings, and querying the HNSW index — all inside a short-lived hook process. Total overhead: **~200ms**.
+
+In v3.3.0, the daemon runs a persistent Unix socket server. Hooks send a single HTTP request over the socket and get patterns back in **~20ms**.
+
+```bash
+curl --unix-socket ~/.quoth/daemon.sock http://localhost/health
+# {"status":"ok","pid":240990,"uptime":9.15}
+```
+
+The architecture is simple: one long-running process holds the database connection, the loaded ONNX model, and the HNSW index in memory. Hooks connect, query, disconnect. No cold starts, no repeated initialization.
+
+Pattern queries follow the same socket path:
+
+```bash
+curl --unix-socket ~/.quoth/daemon.sock \
+  -X POST http://localhost/query \
+  -H "Content-Type: application/json" \
+  -d '{"text":"vitest mock patterns","limit":3}'
+# [{"name":"mock-first-testing","confidence":0.82,"action":"..."}]
+```
+
+The daemon starts automatically on `SessionStart` and shuts down gracefully on `SessionEnd`. If it crashes, the hooks fall back to direct DB access — same as v3.2, no degradation.
+
+## Venice Embeddings & Cost Optimization
+
+Cloud-side embeddings have moved from Voyage AI's `voyage-4-lite` ($0.02/MTok) to **Venice BGE-M3** — a multilingual model with comparable quality at a fraction of the cost. This matters for managed mode, where we run embeddings on every trajectory batch.
+
+Local embeddings remain unchanged: **MiniLM-L6 via ONNX** runs entirely on your CPU at zero cost with ~5ms latency per embedding. No API calls, no network dependency.
+
+For the daemon pipeline, we added a batch embedding endpoint that amortizes overhead across trajectory chunks:
+
+```typescript
+const embeddings = await batchEmbed(chunks, {
+  model: "bge-m3",
+  batchSize: 64,
+});
+```
+
+The total AI cost per active user in managed mode comes out to approximately **$0.003/day** — embeddings, Haiku distillation, and pattern consolidation included.
+
+## Cross-Org Pattern Sharing
+
+Some patterns are universal. "Always validate environment variables at startup." "Use structured error types instead of string messages." "Run tests before committing." These should not need to be re-learned by every team.
+
+v3.3.0 introduces **shared patterns** — an opt-in system where high-confidence patterns can be contributed to a public pool:
+
+```bash
+POST /api/v1/patterns/shared
+Content-Type: application/json
+
+{
+  "pattern_id": "uuid",
+  "org_id": "anonymous",
+  "min_confidence": 0.8
+}
+```
+
+Patterns eligible for sharing must have:
+- Confidence score above **0.8**
+- At least **10 successful applications**
+- No project-specific file paths or variable names
+- Category marked as `broad` (not domain-specific)
+
+When your daemon pulls shared patterns, they start at **0.6 confidence** locally. They have to prove themselves in your codebase before reaching injection threshold. Bad patterns decay naturally through Quoth's Bayesian scoring.
+
+The long-term vision is a **pattern marketplace** — curated collections for specific stacks, frameworks, and workflows. v3.3.0 lays the infrastructure.
+
+## Habla Espanol
+
+Quoth's task router now understands **20+ categories in Spanish**, with accent-agnostic matching. Tildes are optional — the router normalizes input before classification.
+
+```
+"arregla este bug"           → coder@0.8
+"disena la landing page"     → designer@0.7
+"revisá los tests"           → tester@0.8
+"desplegá a producción"      → deployer@0.9
+```
+
+This covers Argentine voseo, Mexican formal, and everything in between. The keyword patterns live in `routing.js` alongside the English equivalents — no separate language module, no translation layer.
+
+## What's Next
+
+We are working toward making Quoth installable as an npm package:
+
+```bash
+npx quoth init
+```
+
+One command, zero configuration, self-learning active. Beyond that, the roadmap includes a **usage dashboard** showing pattern hit rates and confidence trends, and the full **pattern marketplace** for sharing learned intelligence across teams.
+
+---
+
+*Quoth v3.3.0 is available now. Run `node cli.js init` in the quoth-plugin directory to get started, or update your existing installation with `git pull && bash scripts/setup.sh`.*
