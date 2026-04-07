@@ -1,4 +1,4 @@
-# Quoth v3.2.0 — Project Context
+# Quoth v3.3.0 — Project Context
 
 Self-learning platform for AI agents. Two components: local Claude Code plugin (`quoth-plugin/`) and SaaS cloud (`src/`, Next.js 16 on Vercel at quoth.triqual.dev).
 

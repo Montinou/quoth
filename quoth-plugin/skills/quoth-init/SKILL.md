@@ -53,7 +53,7 @@ mkdir -p .quoth/sessions
 # Create config.json with user choices
 cat > .quoth/config.json << 'EOF'
 {
-  "version": "3.2.0",
+  "version": "3.3.0",
   "project_id": "",
   "project_slug": "PROJECT_NAME",
   "strictness": "STRICTNESS_CHOICE",

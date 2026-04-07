@@ -1098,15 +1098,8 @@ async function runDocUpdate() {
   })
   child.unref() // Don't wait for it — daemon continues running
   log('info', 'Doc update spawned as separate process', { pid: child.pid, docs: staleDocs.length })
-
-  appendExecLog(STATE_DIR, {
-    event: 'doc_update_batch_complete',
-    scanned: staleDocs.length, updated: updates.length, failed: failures.length,
-    failures: failures.length > 0 ? failures : undefined,
-  })
-  log('info', 'Doc auto-update complete', {
-    scanned: staleDocs.length, updated: updates.length, failed: failures.length,
-  })
+  // Note: updates/failures are tracked inside the child process, not here.
+  // The child writes its own appendExecLog when done.
 }
 
 // --- Stale agent cleanup every 5 minutes ---

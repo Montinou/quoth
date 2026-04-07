@@ -1,6 +1,6 @@
 {
   "name": "quoth-plugin",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Autonomous self-learning plugin for Claude Code",
   "main": "daemon/daemon.js",
   "scripts": {

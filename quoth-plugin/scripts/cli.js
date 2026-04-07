@@ -15,7 +15,7 @@ const os = require('os')
 
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const PLUGIN_DIR = path.resolve(__dirname, '..')
-const VERSION = '3.2.0'
+const VERSION = '3.3.0'
 
 // --- Colors (ANSI, no deps) ---
 const c = {

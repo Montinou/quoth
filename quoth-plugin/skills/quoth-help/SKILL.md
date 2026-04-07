@@ -22,7 +22,7 @@ Valid topics: `tools`, `hooks`, `daemon`, `skills`, `cloud`, `troubleshooting`
 Display this when no topic is provided:
 
 ```
-Quoth v3.2.0 — Self-Learning Plugin for Claude Code
+Quoth v3.3.0 — Self-Learning Plugin for Claude Code
 
 Quoth gives Claude autonomous learning through trajectory capture,
 pattern extraction, and intelligence routing. Local SQLite + HNSW storage.

@@ -1,4 +1,4 @@
-# Quoth Plugin v3.2.0 (Self-Learning)
+# Quoth Plugin v3.3.0 (Self-Learning)
 
 Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous self-learning, intelligence routing, and agent coordination. Modular architecture: 4 handler modules, 22 MCP tools.
 
