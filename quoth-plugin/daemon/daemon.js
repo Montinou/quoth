@@ -7,8 +7,13 @@ const os = require('os')
 // --- Load .env from project root (no dependency on dotenv) ---
 const DAEMON_REAL_DIR = fs.realpathSync(__dirname)
 const _projectRoot = process.env.QUOTH_PROJECT_ROOT || path.join(DAEMON_REAL_DIR, '..', '..')
-for (const envFile of ['.env.local', '.env']) {
-  const envPath = path.join(_projectRoot, envFile)
+// Load env from: ~/.quoth/.env (user config) → project .env.local → project .env
+const _quothHome = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
+for (const envPath of [
+  path.join(_quothHome, '.env'),
+  path.join(_projectRoot, '.env.local'),
+  path.join(_projectRoot, '.env'),
+]) {
   try {
     const content = fs.readFileSync(envPath, 'utf8')
     for (const line of content.split('\n')) {
@@ -28,8 +33,14 @@ const { distill } = require('./pipeline/distill.js')
 const { distillBatch } = require('./pipeline/distill-batch.js')
 const { consolidate } = require('./pipeline/consolidate.js')
 const { promotePattern } = require('./lib/promote.js')
+const { callPipelineAPI } = require('./lib/pipeline-api.js')
 const { scanDocs } = require('./lib/doc-manifest.js')
 const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
+
+// --- Daemon mode ---
+// 'local' = full local LLM pipeline (needs AI_GATEWAY_API_KEY or claude CLI)
+// 'managed' = cloud pipeline via Quoth API (only needs QUOTH_API_KEY)
+const QUOTH_MODE = process.env.QUOTH_MODE || 'local'
 
 // --- Paths ---
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
@@ -103,7 +114,7 @@ function watchTrajectories() {
         setTimeout(() => { scanAndEnqueue(); processQueue() }, 500)
       }
     })
-    log('info', 'Watching trajectories', { dir: TRAJECTORIES_DIR })
+    log('info', 'Watching trajectories', { dir: TRAJECTORIES_DIR, mode: QUOTH_MODE })
   } catch (err) {
     log('error', 'Failed to start watcher', { error: err.message })
   }
@@ -265,61 +276,20 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
     return
   }
 
-  // Run batch distill — one LLM call for the entire session
-  const batchPatterns = await distillBatch(summaryEntry, toolEntries)
-  log('info', 'Batch distill produced patterns', { count: batchPatterns.length, session: sessionId })
+  // --- Mode switch: managed (cloud) vs local ---
+  let batchPatterns = []
+  if (QUOTH_MODE === 'managed') {
+    batchPatterns = await processSessionManaged(summaryEntry, toolEntries, project)
+  } else {
+    batchPatterns = await processSessionLocal(summaryEntry, toolEntries)
+  }
 
-  // Process each batch pattern through consolidate + dedup + insert
+  log('info', 'Batch distill produced patterns', { count: batchPatterns.length, session: sessionId, mode: QUOTH_MODE })
+
+  // Insert patterns into local DB (same for both modes)
   for (const distilled of batchPatterns) {
     try {
-      const similarTags = distilled.tags.length > 0 ? distilled.tags : []
-      const similarPatterns = distilled.embedding
-        ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
-        : db.getTopPatterns(3, similarTags)
-      const consolidation = await consolidate(distilled, similarPatterns)
-
-      if (consolidation.action === 'strengthen' && consolidation.targetId) {
-        db.applyBayesianUpdate(consolidation.targetId, 'success')
-        db.emitEvent('pattern.strengthened', summaryEntry.agent || 'daemon', project, {
-          patternId: consolidation.targetId,
-          update: 'batch-distill'
-        })
-        log('info', 'Batch: strengthened pattern', { id: consolidation.targetId })
-      } else {
-        // Pre-insert dedup
-        const dupByName = db.findDuplicateByName(distilled.pattern)
-        const dupByEmbed = distilled.embedding
-          ? db.findDuplicateByEmbedding(distilled.embedding)
-          : null
-        const existing = dupByEmbed || dupByName
-
-        if (existing) {
-          db.applyBayesianUpdate(existing.id, 'success')
-          log('info', 'Batch: deduped → strengthened', { id: existing.id })
-        } else {
-          db.upsertPattern({
-            id: distilled.id,
-            name: distilled.pattern.slice(0, 80),
-            pattern_type: 'code-pattern',
-            condition: `Session batch: ${(summaryEntry.task || '').slice(0, 100)}`,
-            action: distilled.pattern,
-            confidence: 0.55,  // Slightly above default — batch patterns have more context
-            tags: [...distilled.tags, ...(project !== 'default' ? [`project:${project}`] : []), 'batch-distilled'],
-            source: 'distilled',
-            embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
-          })
-          db.emitEvent('pattern.learned', summaryEntry.agent || 'daemon', project, {
-            patternId: distilled.id,
-            name: distilled.pattern.slice(0, 80),
-            confidence: 0.55,
-            source: 'batch-distilled'
-          })
-          if (project !== 'default') {
-            db.setPatternNamespace(distilled.id, project)
-          }
-          log('info', 'Batch: new pattern', { id: distilled.id, name: distilled.pattern.slice(0, 60) })
-        }
-      }
+      applyDistilledPattern(distilled, summaryEntry, project)
     } catch (err) {
       log('error', 'Batch pattern consolidation failed', { error: err.message })
     }
@@ -330,6 +300,141 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
     markProcessed(filePath, toolLine)
   }
   markProcessed(filePath, summaryLine)
+}
+
+// --- Managed mode: send sessions to cloud pipeline API ---
+async function processSessionManaged(summaryEntry, toolEntries, project) {
+  // Get top local patterns for consolidation context
+  const topPatterns = db.getTopPatterns(10).map(p => ({
+    id: p.id, name: p.name, confidence: p.confidence
+  }))
+
+  const session = {
+    summary: {
+      project,
+      outcome: summaryEntry.outcome || 'unknown',
+      success_rate: summaryEntry.success_rate || 0,
+      total_calls: summaryEntry.total_calls || toolEntries.length,
+      user_intents: summaryEntry.user_intents || [],
+      task: summaryEntry.task || ''
+    },
+    tool_entries: toolEntries.slice(-30).map(e => ({
+      tool: e.tool || '', task: (e.task || '').slice(0, 200),
+      outcome: e.outcome || 'success', llm_reasoning: (e.llm_reasoning || '').slice(0, 150)
+    }))
+  }
+
+  const result = await callPipelineAPI([session], topPatterns)
+  if (!result || !result.patterns) {
+    log('warn', 'Managed pipeline returned no results, falling back to local', { project })
+    return processSessionLocal(summaryEntry, toolEntries)
+  }
+
+  if (result.tokens_used) {
+    log('info', 'Cloud pipeline tokens used', { tokens: result.tokens_used, quota: result.quota_remaining })
+  }
+
+  // Map cloud response to local pattern format (add local embeddings)
+  const { generateEmbeddingBatch } = require('./lib/embed.js')
+  const texts = result.patterns.map(p => p.pattern)
+  const embeddings = await generateEmbeddingBatch(texts)
+
+  return result.patterns.map((p, i) => ({
+    id: p.id,
+    pattern: p.pattern,
+    tags: p.tags || [],
+    applicability: p.applicability || 'broad',
+    embedding: embeddings[i],
+    source: 'distilled',
+    // Cloud already did consolidation
+    _action: p.action,
+    _targetId: p.targetId
+  }))
+}
+
+// --- Local mode: original distill + consolidate pipeline ---
+async function processSessionLocal(summaryEntry, toolEntries) {
+  return distillBatch(summaryEntry, toolEntries)
+}
+
+// --- Apply a distilled pattern to local DB (shared by both modes) ---
+function applyDistilledPattern(distilled, summaryEntry, project) {
+  // If cloud already decided action (managed mode)
+  if (distilled._action === 'strengthen' && distilled._targetId) {
+    db.applyBayesianUpdate(distilled._targetId, 'success')
+    db.emitEvent('pattern.strengthened', summaryEntry.agent || 'daemon', project, {
+      patternId: distilled._targetId, update: 'batch-distill'
+    })
+    log('info', 'Batch: strengthened pattern', { id: distilled._targetId, mode: QUOTH_MODE })
+    return
+  }
+
+  // For local mode or cloud action='new': run local consolidation
+  if (!distilled._action) {
+    const similarTags = distilled.tags.length > 0 ? distilled.tags : []
+    const similarPatterns = distilled.embedding
+      ? db.searchBySimilarity(distilled.embedding, 3, similarTags)
+      : db.getTopPatterns(3, similarTags)
+
+    // Local consolidation (requires claude CLI or LLM)
+    // In managed mode with action='new', skip consolidation (cloud already decided)
+    if (QUOTH_MODE === 'local') {
+      consolidate(distilled, similarPatterns).then(consolidation => {
+        if (consolidation.action === 'strengthen' && consolidation.targetId) {
+          db.applyBayesianUpdate(consolidation.targetId, 'success')
+          db.emitEvent('pattern.strengthened', summaryEntry.agent || 'daemon', project, {
+            patternId: consolidation.targetId, update: 'batch-distill'
+          })
+          log('info', 'Batch: strengthened pattern', { id: consolidation.targetId })
+          return
+        }
+        insertNewPattern(distilled, summaryEntry, project)
+      }).catch(err => {
+        log('error', 'Local consolidation failed, inserting as new', { error: err.message })
+        insertNewPattern(distilled, summaryEntry, project)
+      })
+      return
+    }
+  }
+
+  // Insert as new pattern (managed mode action='new' or fallback)
+  insertNewPattern(distilled, summaryEntry, project)
+}
+
+function insertNewPattern(distilled, summaryEntry, project) {
+  // Pre-insert dedup
+  const dupByName = db.findDuplicateByName(distilled.pattern)
+  const dupByEmbed = distilled.embedding
+    ? db.findDuplicateByEmbedding(distilled.embedding)
+    : null
+  const existing = dupByEmbed || dupByName
+
+  if (existing) {
+    db.applyBayesianUpdate(existing.id, 'success')
+    log('info', 'Batch: deduped → strengthened', { id: existing.id })
+  } else {
+    db.upsertPattern({
+      id: distilled.id,
+      name: distilled.pattern.slice(0, 80),
+      pattern_type: 'code-pattern',
+      condition: `Session batch: ${(summaryEntry.task || '').slice(0, 100)}`,
+      action: distilled.pattern,
+      confidence: 0.55,
+      tags: [...distilled.tags, ...(project !== 'default' ? [`project:${project}`] : []), 'batch-distilled'],
+      source: 'distilled',
+      embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
+    })
+    db.emitEvent('pattern.learned', summaryEntry.agent || 'daemon', project, {
+      patternId: distilled.id,
+      name: distilled.pattern.slice(0, 80),
+      confidence: 0.55,
+      source: 'batch-distilled'
+    })
+    if (project !== 'default') {
+      db.setPatternNamespace(distilled.id, project)
+    }
+    log('info', 'Batch: new pattern', { id: distilled.id, name: distilled.pattern.slice(0, 60) })
+  }
 }
 
 // --- Mark a line as processed ---
@@ -473,11 +578,15 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase A (consolidation) failed', { error: err.message, stack: err.stack })
   }
 
-  // Phase B: Doc auto-update
-  try {
-    await runDocUpdate()
-  } catch (err) {
-    log('error', 'Nightly Phase B (doc update) failed', { error: err.message, stack: err.stack })
+  // Phase B: Doc auto-update (requires claude CLI — skip in managed mode)
+  if (QUOTH_MODE === 'managed') {
+    log('info', 'Skipping doc auto-update (managed mode — no claude CLI)')
+  } else {
+    try {
+      await runDocUpdate()
+    } catch (err) {
+      log('error', 'Nightly Phase B (doc update) failed', { error: err.message, stack: err.stack })
+    }
   }
 
   // Phase C: Cloud pull

@@ -85,25 +85,24 @@ async function distillBatch(summaryEntry, toolEntries) {
 
     if (!result.patterns || !Array.isArray(result.patterns)) return []
 
-    const patterns = []
-    for (const p of result.patterns.slice(0, 3)) {
-      if (!p.pattern || p.pattern.length < 10) continue
-      const id = makeId(p.pattern)
-      let embedding = null
-      try {
-        const { generateEmbedding } = require('../lib/embed.js')
-        embedding = await generateEmbedding(p.pattern)
-      } catch {}
-      patterns.push({
-        id,
-        pattern: p.pattern.slice(0, 80),
-        tags: p.tags || [],
-        applicability: p.applicability || 'broad',
-        embedding,
-        source: 'distilled'
-      })
-    }
-    return patterns
+    const validPatterns = result.patterns.slice(0, 3).filter(p => p.pattern && p.pattern.length >= 10)
+    if (validPatterns.length === 0) return []
+
+    // Batch embed all patterns in a single model pass
+    let embeddings = validPatterns.map(() => null)
+    try {
+      const { generateEmbeddingBatch } = require('../lib/embed.js')
+      embeddings = await generateEmbeddingBatch(validPatterns.map(p => p.pattern))
+    } catch {}
+
+    return validPatterns.map((p, i) => ({
+      id: makeId(p.pattern),
+      pattern: p.pattern.slice(0, 80),
+      tags: p.tags || [],
+      applicability: p.applicability || 'broad',
+      embedding: embeddings[i],
+      source: 'distilled'
+    }))
   } catch {
     return []  // Batch distill failure is non-fatal — individual distill still works
   }

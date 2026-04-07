@@ -156,7 +156,48 @@ if ! grep -q 'Bash(node .quoth' "$SETTINGS" 2>/dev/null; then
   "
 fi
 
-# 5. Sync skills to skill-registry (if available)
+# 5. Auto-detect daemon mode (local vs managed)
+if command -v claude &>/dev/null; then
+  QUOTH_MODE="local"
+else
+  QUOTH_MODE="managed"
+fi
+
+# 6. Write ~/.quoth/.env (only if it doesn't exist)
+ENV_FILE="$QUOTH_HOME/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  cat > "$ENV_FILE" << EOF
+# Quoth daemon configuration
+# local = uses your own LLM keys (AI_GATEWAY_API_KEY, claude CLI)
+# managed = uses Quoth cloud pipeline (only needs QUOTH_API_KEY)
+QUOTH_MODE=$QUOTH_MODE
+
+# Required for managed mode (get your key at quoth.triqual.dev)
+# QUOTH_API_KEY=qth_your_key_here
+
+# Required for local mode
+# AI_GATEWAY_API_KEY=vck_your_key_here
+EOF
+  echo "  ✓ Created $ENV_FILE (mode: $QUOTH_MODE)"
+else
+  echo "  ✓ $ENV_FILE already exists (skipped)"
+fi
+
+# 7. Auto-start daemon if not already running
+DAEMON_SCRIPT="$SCRIPT_DIR/../daemon/daemon.js"
+if [ -f "$QUOTH_HOME/daemon.pid" ] && kill -0 "$(cat "$QUOTH_HOME/daemon.pid" 2>/dev/null)" 2>/dev/null; then
+  echo "  ✓ Daemon already running (PID $(cat "$QUOTH_HOME/daemon.pid"))"
+else
+  nohup node "$DAEMON_SCRIPT" > /dev/null 2>&1 &
+  sleep 1
+  if [ -f "$QUOTH_HOME/daemon.pid" ]; then
+    echo "  ✓ Daemon started (PID $(cat "$QUOTH_HOME/daemon.pid"))"
+  else
+    echo "  ⚠ Daemon failed to start. Check ~/.quoth/daemon.log"
+  fi
+fi
+
+# 8. Sync skills to skill-registry (if available)
 SKILL_REGISTRY="$HOME/projects/skill-registry"
 if [ -d "$SKILL_REGISTRY" ] && command -v bun &>/dev/null; then
   echo "[quoth] Syncing skills to skill-registry..."
@@ -170,7 +211,15 @@ echo ""
 echo "[quoth] Setup complete!"
 echo "  Hooks: $HOOKS_DIR/"
 echo "  Settings: $SETTINGS"
+echo "  Config: $ENV_FILE"
 echo "  Skills: $PLUGIN_DIR/skills/ ($(ls -d $PLUGIN_DIR/skills/*/SKILL.md 2>/dev/null | wc -l) skills)"
 echo ""
-echo "  Start daemon: node $PLUGIN_DIR/daemon/daemon.js &"
+if [ "$QUOTH_MODE" = "managed" ]; then
+  echo "  Quoth is configured in MANAGED mode (no local LLM keys needed)."
+  echo "  Set your QUOTH_API_KEY in ~/.quoth/.env to enable cloud processing."
+else
+  echo "  Quoth is configured in LOCAL mode (claude CLI detected)."
+  echo "  The daemon will use local LLM calls for pattern processing."
+fi
+echo ""
 echo "  Verify: node ~/.quoth/hooks/hook-dispatch.js stats"
