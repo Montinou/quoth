@@ -69,6 +69,10 @@ let deepConsolidateTimer = null
 let hnswSaveTimer = null
 let agentCleanupTimer = null
 
+const JUDGE_BATCH_SIZE = parseInt(process.env.QUOTH_JUDGE_BATCH_SIZE || '30', 10)
+let pendingJudge = []     // accumulated tool_use entries awaiting batch judge
+let judgedEffective = []  // entries that passed JUDGE, waiting for distill
+
 // --- Logging ---
 function log(level, msg, data) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...(data && { data }) }) + '\n'
@@ -102,8 +106,9 @@ process.on('SIGTERM', () => {
   process.exit(0)
 })
 
-process.on('SIGUSR1', () => {
+process.on('SIGUSR1', async () => {
   log('info', 'SIGUSR1: flush triggered')
+  await flushJudgeQueue()  // flush pending judge entries before processing sessions
   scanAndEnqueue()
   processQueue()
 })
@@ -241,7 +246,19 @@ async function processEntry({ entry, filePath, line }) {
       return
     }
 
-    // Mark tool_use entries as processed immediately (no individual LLM calls)
+    // Accumulate tool_use entries for batch JUDGE
+    if (entry.event === 'tool_use') {
+      const rawProject = entry.project || 'default'
+      const project = detectProjectFromTask(entry.task, rawProject)
+      pendingJudge.push({ entry, filePath, line, project })
+
+      if (pendingJudge.length >= JUDGE_BATCH_SIZE) {
+        await flushJudgeQueue()
+      }
+      return
+    }
+
+    // Mark other non-session entries as processed immediately
     const rawProject = entry.project || 'default'
     const project = detectProjectFromTask(entry.task, rawProject)
     log('debug', 'Processing entry', { agent: entry.agent, outcome: entry.outcome, project })
@@ -250,6 +267,52 @@ async function processEntry({ entry, filePath, line }) {
   } catch (err) {
     log('error', 'processEntry failed', { error: err.message })
   }
+}
+
+// --- Flush accumulated tool_use entries through batch JUDGE ---
+async function flushJudgeQueue() {
+  if (pendingJudge.length === 0) return
+
+  const batch = pendingJudge.splice(0)  // drain queue atomically
+  const entries = batch.map(b => b.entry)
+
+  log('info', 'Batch judging entries', { count: entries.length })
+
+  const { batchJudge } = require('./pipeline/batch-judge.js')
+  const result = await batchJudge(entries)
+
+  // Record cost
+  if (result.usage && result.usage.input_tokens > 0) {
+    try {
+      db.recordPipelineCost({
+        stage: 'judge-batch',
+        model: result.usage.model,
+        input_tokens: result.usage.input_tokens,
+        output_tokens: result.usage.output_tokens,
+        estimated_cost_usd: result.usage.estimated_cost_usd,
+        batch_size: entries.length,
+        session_id: entries[0]?.session || null,
+        project: batch[0]?.project || null,
+      })
+    } catch (err) {
+      log('error', 'Failed to record judge cost', { error: err.message })
+    }
+  }
+
+  let effectiveCount = 0
+  for (let i = 0; i < result.judgments.length; i++) {
+    const j = result.judgments[i]
+    const b = batch[i]
+
+    if (j.effective) {
+      judgedEffective.push({ ...b, domain: j.domain })
+      effectiveCount++
+    } else {
+      markProcessed(b.filePath, b.line)
+    }
+  }
+
+  log('info', 'Batch judge complete', { effective: effectiveCount, discarded: entries.length - effectiveCount })
 }
 
 // --- Process a session_summary entry via batch distill ---
@@ -278,7 +341,28 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
     return
   }
 
-  if (toolEntries.length === 0) {
+  // Merge in judged-effective entries for this session
+  const sessionJudged = judgedEffective.filter(j => j.entry.session === sessionId)
+  judgedEffective = judgedEffective.filter(j => j.entry.session !== sessionId)
+
+  // Use judged entries if available, otherwise fall back to file entries
+  const effectiveEntries = sessionJudged.length > 0
+    ? sessionJudged.map(j => ({ ...j.entry, _domain: j.domain }))
+    : toolEntries
+
+  // Compute dominant domains from judged entries
+  const domainCounts = {}
+  for (const e of effectiveEntries) {
+    const d = e._domain || 'coder'
+    domainCounts[d] = (domainCounts[d] || 0) + 1
+  }
+  const totalEntries = effectiveEntries.length || 1
+  const dominantDomains = Object.entries(domainCounts)
+    .filter(([, count]) => count / totalEntries > 0.3)
+    .map(([domain]) => domain)
+    .slice(0, 2)
+
+  if (effectiveEntries.length === 0 && toolEntries.length === 0) {
     log('debug', 'No tool entries for session batch', { session: sessionId })
     markProcessed(filePath, summaryLine)
     return
@@ -287,9 +371,9 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
   // --- Mode switch: managed (cloud) vs local ---
   let batchPatterns = []
   if (QUOTH_MODE === 'managed') {
-    batchPatterns = await processSessionManaged(summaryEntry, toolEntries, project)
+    batchPatterns = await processSessionManaged(summaryEntry, effectiveEntries, project)
   } else {
-    batchPatterns = await processSessionLocal(summaryEntry, toolEntries)
+    batchPatterns = await processSessionLocal(summaryEntry, effectiveEntries)
   }
 
   log('info', 'Batch distill produced patterns', { count: batchPatterns.length, session: sessionId, mode: QUOTH_MODE })
@@ -297,7 +381,7 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
   // Insert patterns into local DB (same for both modes)
   for (const distilled of batchPatterns) {
     try {
-      applyDistilledPattern(distilled, summaryEntry, project)
+      applyDistilledPattern(distilled, summaryEntry, project, dominantDomains)
     } catch (err) {
       log('error', 'Batch pattern consolidation failed', { error: err.message })
     }
@@ -366,7 +450,7 @@ async function processSessionLocal(summaryEntry, toolEntries) {
 }
 
 // --- Apply a distilled pattern to local DB (shared by both modes) ---
-function applyDistilledPattern(distilled, summaryEntry, project) {
+function applyDistilledPattern(distilled, summaryEntry, project, domains) {
   // If cloud already decided action (managed mode)
   if (distilled._action === 'strengthen' && distilled._targetId) {
     db.applyBayesianUpdate(distilled._targetId, 'success')
@@ -396,20 +480,20 @@ function applyDistilledPattern(distilled, summaryEntry, project) {
           log('info', 'Batch: strengthened pattern', { id: consolidation.targetId })
           return
         }
-        insertNewPattern(distilled, summaryEntry, project)
+        insertNewPattern(distilled, summaryEntry, project, domains)
       }).catch(err => {
         log('error', 'Local consolidation failed, inserting as new', { error: err.message })
-        insertNewPattern(distilled, summaryEntry, project)
+        insertNewPattern(distilled, summaryEntry, project, domains)
       })
       return
     }
   }
 
   // Insert as new pattern (managed mode action='new' or fallback)
-  insertNewPattern(distilled, summaryEntry, project)
+  insertNewPattern(distilled, summaryEntry, project, domains)
 }
 
-function insertNewPattern(distilled, summaryEntry, project) {
+function insertNewPattern(distilled, summaryEntry, project, domains) {
   // Pre-insert dedup
   const dupByName = db.findDuplicateByName(distilled.pattern)
   const dupByEmbed = distilled.embedding
@@ -428,7 +512,12 @@ function insertNewPattern(distilled, summaryEntry, project) {
       condition: `Session batch: ${(summaryEntry.task || '').slice(0, 100)}`,
       action: distilled.pattern,
       confidence: 0.55,
-      tags: [...distilled.tags, ...(project !== 'default' ? [`project:${project}`] : []), 'batch-distilled'],
+      tags: [
+        ...distilled.tags,
+        ...(domains || []).map(d => `agent:${d}`),
+        ...(project !== 'default' ? [`project:${project}`] : []),
+        'batch-distilled'
+      ],
       source: 'distilled',
       embedding: distilled.embedding ? JSON.stringify(distilled.embedding) : undefined
     })
