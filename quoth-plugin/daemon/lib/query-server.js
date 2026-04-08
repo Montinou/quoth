@@ -135,7 +135,7 @@ function _handleRequest(req, res, db, log) {
 }
 
 async function handleQuery(body, db, log) {
-  const { prompt, project, session_id, limit = 7, type = 'route+inject' } = body
+  const { prompt, project, session_id, limit = 7, type = 'route+inject', tags = [] } = body
   if (!prompt) return { error: 'prompt required' }
 
   const t0 = Date.now()
@@ -169,7 +169,7 @@ async function handleQuery(body, db, log) {
       if (isSubFlag('injection') && embedding) {
         // V2: hierarchical Thompson sampling with clusters
         const { hierarchicalSelect } = require('./bandit-v2.js')
-        const candidates = db.searchBySimilarity(embedding, 20, [])
+        const candidates = db.searchBySimilarity(embedding, 20, tags)
         const clusterMap = new Map()
         for (const c of candidates) {
           if (c.cluster_id) {
@@ -184,6 +184,7 @@ async function handleQuery(body, db, log) {
         patterns = rankByThompsonAndTrigram(db, ns, prompt, limit, {
           minConfidence: 0.3,
           excludeRecentMinutes: 2,
+          tags,
         })
       }
     } catch (err) {

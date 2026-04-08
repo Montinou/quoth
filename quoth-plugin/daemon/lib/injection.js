@@ -47,21 +47,31 @@ function rankByThompson(db, namespace, limit, opts = {}) {
     minConfidence = 0.2,
     candidatePoolSize = Math.max(30, limit * 5),
     excludeRecentMinutes = 5,
+    tags = [],
   } = opts
 
   const cutoff = Date.now() - excludeRecentMinutes * 60 * 1000
   // RANDOM() avoids biasing Thompson sampling toward already-proven patterns;
   // Thompson sampling itself should handle exploration vs exploitation via the
   // Beta distribution variance of each candidate.
-  const rows = db.prepare(`
+  let sql = `
     SELECT * FROM patterns
     WHERE status = 'active'
       AND (namespace = ? OR namespace = 'global')
       AND confidence >= ?
-      AND (last_exposed_at IS NULL OR last_exposed_at < ?)
-    ORDER BY RANDOM()
-    LIMIT ?
-  `).all(namespace, minConfidence, cutoff, candidatePoolSize)
+      AND (last_exposed_at IS NULL OR last_exposed_at < ?)`
+  const params = [namespace, minConfidence, cutoff]
+
+  if (tags.length > 0) {
+    const tagConditions = tags.map(() => `tags LIKE ?`).join(' OR ')
+    sql += ` AND (${tagConditions})`
+    tags.forEach(t => params.push(`%"${t}"%`))
+  }
+
+  sql += `\n    ORDER BY RANDOM()\n    LIMIT ?`
+  params.push(candidatePoolSize)
+
+  const rows = db.prepare(sql).all(...params)
 
   const patterns = rows.map(r => ({ ...r, tags: JSON.parse(r.tags || '[]') }))
   const sampled = scoreWithThompson(patterns)

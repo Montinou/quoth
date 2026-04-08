@@ -595,10 +595,21 @@ const handlers = {
 
     try {
       await ensureDaemon()
-      const resp = await queryDaemon({
-        prompt: [taskText, agentType].filter(Boolean).join(' ') || 'subagent task',
-        project, session_id: sessionId, limit: 5, type: 'inject'
+      const agentTag = agentType ? [`agent:${agentType}`] : []
+      let resp = await queryDaemon({
+        prompt: taskText || 'subagent task',
+        project, session_id: sessionId, limit: 5, type: 'inject',
+        tags: agentTag,
       })
+
+      // Fallback: if too few results with tag filter, retry without tags
+      if (agentTag.length > 0 && (resp.patterns || []).length < 2) {
+        resp = await queryDaemon({
+          prompt: taskText || 'subagent task',
+          project, session_id: sessionId, limit: 5, type: 'inject',
+          tags: [],
+        })
+      }
 
       const scored = resp.patterns || []
       if (scored.length === 0) return
