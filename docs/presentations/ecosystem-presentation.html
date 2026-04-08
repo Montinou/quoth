@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agents Tools Ecosystem — Quoth + Skill Registry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @page {
+    size: 1280px 720px;
+    margin: 0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0f1219;
+    --surface: #181d27;
+    --surface2: #1e2535;
+    --border: rgba(255,255,255,0.06);
+    --text: #eaedf3;
+    --text-dim: #8b93a5;
+    --accent: #d4993a;
+    --teal: #2dd4bf;
+    --green: #4ade80;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --purple: #a78bfa;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slide {
+    width: 1280px;
+    height: 720px;
+    padding: 60px 80px;
+    position: relative;
+    overflow: hidden;
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .slide:last-child { page-break-after: auto; }
+
+  /* ---- TYPOGRAPHY ---- */
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  h1 { font-size: 72px; font-weight: 800; letter-spacing: -3px; line-height: 0.95; }
+  h2 { font-size: 40px; font-weight: 700; letter-spacing: -1px; line-height: 1.1; }
+  h3 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  .body-text { font-size: 18px; line-height: 1.6; color: var(--text-dim); }
+  .small { font-size: 14px; color: var(--text-dim); }
+
+  /* ---- DECORATIVE ---- */
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    filter: blur(80px);
+  }
+
+  /* ---- CARDS ---- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+  }
+
+  .card-accent { border-left: 3px solid var(--accent); }
+  .card-teal { border-left: 3px solid var(--teal); }
+  .card-green { border-left: 3px solid var(--green); }
+  .card-blue { border-left: 3px solid var(--blue); }
+  .card-purple { border-left: 3px solid var(--purple); }
+
+  /* ---- GRID ---- */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .flex-col { display: flex; flex-direction: column; }
+  .flex-row { display: flex; align-items: center; }
+  .gap-sm { gap: 8px; }
+  .gap-md { gap: 16px; }
+  .gap-lg { gap: 24px; }
+  .flex-1 { flex: 1; }
+  .justify-center { justify-content: center; }
+  .items-center { align-items: center; }
+  .text-center { text-align: center; }
+
+  /* ---- PIPELINE ---- */
+  .pipeline-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    text-align: center;
+    flex: 1;
+  }
+  .pipeline-arrow {
+    font-size: 22px;
+    color: var(--accent);
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+
+  /* ---- TABLE ---- */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: var(--surface2);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 10px 16px;
+  }
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  tr:last-child td { border-bottom: none; }
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: rgba(212,153,58,0.1);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* ---- BADGES ---- */
+  .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 3px 10px;
+    border-radius: 4px;
+  }
+  .badge-done { background: rgba(74,222,128,0.12); color: var(--green); }
+  .badge-live { background: rgba(45,212,191,0.12); color: var(--teal); }
+  .badge-planned { background: rgba(212,153,58,0.12); color: var(--accent); }
+
+  /* ---- KPI ---- */
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 16px;
+    text-align: center;
+  }
+  .kpi-val {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -1px;
+  }
+  .kpi-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+
+  /* ---- BULLET LIST ---- */
+  .bullets { list-style: none; padding: 0; }
+  .bullets li {
+    padding: 6px 0 6px 20px;
+    position: relative;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* ---- FLOW DIAGRAM (CSS) ---- */
+  .flow-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.3;
+    position: relative;
+  }
+  .flow-box strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-size: 18px;
+  }
+  .flow-arrow-down::after {
+    content: '↓';
+    font-size: 20px;
+    color: var(--accent);
+    display: block;
+    text-align: center;
+    padding: 4px 0;
+  }
+  .flow-arrow-right::after {
+    content: '→';
+    font-size: 20px;
+    color: var(--accent);
+    padding: 0 8px;
+  }
+
+  /* ---- SPLIT ---- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 100%;
+  }
+  .split-panel {
+    padding: 60px 50px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .split-panel:first-child { background: var(--surface); border-radius: 16px 0 0 16px; }
+  .split-panel:last-child { background: var(--surface2); border-radius: 0 16px 16px 0; }
+</style>
+</head>
+<body>
+
+<!-- ==================== SLIDE 1: TITLE ==================== -->
+<div class="slide" style="justify-content:center; align-items:center; text-align:center;">
+  <div class="glow" style="width:500px;height:500px;background:rgba(212,153,58,0.06);top:-100px;left:50%;transform:translateX(-50%);"></div>
+  <p class="label" style="color:var(--text-dim);">AI Agent Infrastructure</p>
+  <h1 style="color:var(--accent); margin-top:8px;">Agents Tools</h1>
+  <p class="body-text" style="margin-top:24px; max-width:640px;">Memory, learning, and intelligent skill curation for autonomous AI agents</p>
+  <p class="mono small" style="margin-top:40px; opacity:0.4;">Quoth v3.4.0 &bull; Skill Registry v1.0.0</p>
+</div>
+
+<!-- ==================== SLIDE 2: PROBLEM ==================== -->
+<div class="slide">
+  <div class="glow" style="width:300px;height:300px;background:rgba(248,113,113,0.05);top:0;right:0;"></div>
+  <p class="label" style="color:var(--red);">The Problem</p>
+  <h2 style="margin-bottom:32px;">Agents Start From Zero, Every Time</h2>
+  <div class="grid-2" style="flex:1;">
+    <div class="flex-col gap-md">
+      <div class="card card-accent" style="border-left-color:var(--red);">
+        <h3 style="color:var(--red); margin-bottom:6px;">No Memory</h3>
+        <p class="small">Every session erases all learned context. Agents repeat the same mistakes across projects.</p>
+      </div>
+      <div class="card card-accent" style="border-left-color:var(--red);">
+        <h3 style="color:var(--red); margin-bottom:6px;">No Feedback Loop</h3>
+        <p class="small">Successes and failures vanish at session end. No way to learn from outcomes.</p>
+      </div>
+      <div class="card card-accent" style="border-left-color:var(--red);">
+        <h3 style="color:var(--red); margin-bottom:6px;">Manual Skill Selection</h3>
+        <p class="small">Skills installed manually with no relevance matching. No optimization per project.</p>
+      </div>
+    </div>
+    <div class="flex-col justify-center items-center" style="opacity:0.6;">
+      <svg viewBox="0 0 200 200" width="240" height="240">
+        <circle cx="100" cy="100" r="80" fill="none" stroke="#f87171" stroke-width="1.5" opacity="0.2" stroke-dasharray="6 4"/>
+        <circle cx="100" cy="100" r="55" fill="none" stroke="#f87171" stroke-width="1.5" opacity="0.15" stroke-dasharray="4 6"/>
+        <circle cx="100" cy="100" r="30" fill="none" stroke="#f87171" stroke-width="1.5" opacity="0.1"/>
+        <line x1="50" y1="50" x2="150" y2="150" stroke="#f87171" stroke-width="2" opacity="0.3"/>
+        <line x1="150" y1="50" x2="50" y2="150" stroke="#f87171" stroke-width="2" opacity="0.3"/>
+        <text x="100" y="195" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#8b93a5">CONTEXT LOST EACH SESSION</text>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 3: THE ECOSYSTEM ==================== -->
+<div class="slide" style="padding:0;">
+  <div class="split" style="height:100%;">
+    <div class="split-panel">
+      <p class="label" style="color:var(--accent);">Memory &amp; Learning</p>
+      <h2 style="color:var(--accent); margin-bottom:16px;">Quoth</h2>
+      <p class="body-text" style="font-size:15px; margin-bottom:20px;">Self-learning platform that captures agent trajectories, distills patterns, and injects high-confidence knowledge.</p>
+      <ul class="bullets">
+        <li>9 hook bindings, 22 MCP tools</li>
+        <li>3-stage LLM pipeline (JUDGE → DISTILL → CONSOLIDATE)</li>
+        <li>Bayesian scoring with Thompson sampling</li>
+        <li>Unified injection: patterns + docs ranked together</li>
+        <li>Graded reward signal (0.0 – 1.0)</li>
+      </ul>
+    </div>
+    <div class="split-panel">
+      <p class="label" style="color:var(--teal);">Knowledge Curation</p>
+      <h2 style="color:var(--teal); margin-bottom:16px;">Skill Registry</h2>
+      <p class="body-text" style="font-size:15px; margin-bottom:20px;">Centralized skill management that matches, forks, and AI-rewrites skills per project context.</p>
+      <ul class="bullets">
+        <li style="color:var(--text-dim);">Semantic search via pgvector (1536d)</li>
+        <li>Per-project fork &amp; AI rewrite pipeline</li>
+        <li>MCP server + REST API (Hono + Bun)</li>
+        <li>Quoth patterns feed optimization queries</li>
+        <li>Drift detection for stale forks</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 4: QUOTH ARCHITECTURE ==================== -->
+<div class="slide">
+  <div class="glow" style="width:400px;height:400px;background:rgba(212,153,58,0.04);bottom:-100px;right:-100px;"></div>
+  <p class="label" style="color:var(--accent);">Quoth v3.4.0</p>
+  <h2 style="margin-bottom:28px;">Architecture &amp; Data Flow</h2>
+  <div class="flex-row" style="flex:1; align-items:center; gap:0;">
+    <div class="flow-box" style="border-color:rgba(45,212,191,0.3);">
+      <strong style="color:var(--teal);">Hooks</strong>
+      9 bindings<br/>route, inject, capture
+    </div>
+    <span class="flow-arrow-right"></span>
+    <div class="flow-box" style="border-color:rgba(212,153,58,0.3);">
+      <strong style="color:var(--accent);">JUDGE</strong>
+      Gemini 2.5 Flash<br/>batch 30
+    </div>
+    <span class="flow-arrow-right"></span>
+    <div class="flow-box" style="border-color:rgba(212,153,58,0.3);">
+      <strong style="color:var(--accent);">DISTILL</strong>
+      Gemini Flash Lite<br/>+ MiniLM-L6 384d
+    </div>
+    <span class="flow-arrow-right"></span>
+    <div class="flow-box" style="border-color:rgba(212,153,58,0.3);">
+      <strong style="color:var(--accent);">CONSOLIDATE</strong>
+      Claude Haiku 4.5<br/>merge/new
+    </div>
+    <span class="flow-arrow-right"></span>
+    <div class="flow-box" style="border-color:rgba(74,222,128,0.3);">
+      <strong style="color:var(--green);">SQLite + HNSW</strong>
+      patterns<br/>Beta(α, β)
+    </div>
+  </div>
+  <div style="display:flex; justify-content:space-between; margin-top:24px; gap:16px;">
+    <div class="card" style="flex:1; text-align:center; padding:14px;">
+      <p class="small" style="color:var(--teal);">← inject ≥ 0.6</p>
+      <p style="font-size:12px; color:var(--text-dim); margin-top:4px;">Thompson sampling selects patterns for session</p>
+    </div>
+    <div class="card" style="flex:1; text-align:center; padding:14px;">
+      <p class="small" style="color:var(--green);">Bayesian feedback →</p>
+      <p style="font-size:12px; color:var(--text-dim); margin-top:4px;">Graded reward updates α/β after session</p>
+    </div>
+    <div class="card" style="flex:1; text-align:center; padding:14px;">
+      <p class="small" style="color:var(--blue);">promote &gt; 0.8 →</p>
+      <p style="font-size:12px; color:var(--text-dim); margin-top:4px;">High-confidence patterns sync to Quoth Cloud</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 5: QUOTH HOOKS ==================== -->
+<div class="slide">
+  <p class="label" style="color:var(--accent);">Hook System</p>
+  <h2 style="margin-bottom:24px;">9 Bindings, Zero API Calls</h2>
+  <div class="card" style="flex:1; padding:0; overflow:hidden;">
+    <table>
+      <thead>
+        <tr><th>Hook Event</th><th>Command</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>UserPromptSubmit</code></td><td>route</td><td>Route task to optimal agent, inject patterns ≥ 0.1</td></tr>
+        <tr><td><code>SessionStart</code></td><td>session-restore</td><td>Init intelligence graph, inject max 3 patterns ≥ 0.6</td></tr>
+        <tr><td><code>SessionEnd</code></td><td>session-end</td><td>Consolidate graph, recompute PageRank, Bayesian update</td></tr>
+        <tr><td><code>PreCompact</code></td><td>session-end</td><td>Same as SessionEnd (pre-context-compression)</td></tr>
+        <tr><td><code>PostToolUse</code></td><td>trajectory-capture</td><td>Capture Bash/Write/Edit/Agent to JSONL</td></tr>
+        <tr><td><code>PostToolUse</code></td><td>post-edit</td><td>Record Write/Edit for intelligence</td></tr>
+        <tr><td><code>PreToolUse</code></td><td>pre-bash</td><td>Block rm -rf /, fork bombs</td></tr>
+        <tr><td><code>SubagentStart</code></td><td>subagent-start</td><td>Inject domain patterns via additionalContext</td></tr>
+        <tr><td><code>SubagentStop</code></td><td>post-task</td><td>Bayesian +1 alpha on matched patterns</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 6: SKILL REGISTRY ==================== -->
+<div class="slide">
+  <div class="glow" style="width:300px;height:300px;background:rgba(45,212,191,0.04);top:0;left:0;"></div>
+  <p class="label" style="color:var(--teal);">Skill Registry v1.0.0</p>
+  <h2 style="margin-bottom:24px;">Centralized, Versioned, Intelligent</h2>
+  <div class="grid-3" style="flex:1;">
+    <div class="card card-teal">
+      <h3 style="color:var(--teal); margin-bottom:8px;">Semantic Search</h3>
+      <p class="small">pgvector HNSW with 1536d embeddings via Vercel AI Gateway. Find skills by meaning.</p>
+    </div>
+    <div class="card card-teal">
+      <h3 style="color:var(--teal); margin-bottom:8px;">Per-Project Forks</h3>
+      <p class="small">Fork any skill, scope to project. AI rewrites content using tech stack + CLAUDE.md context.</p>
+    </div>
+    <div class="card card-blue">
+      <h3 style="color:var(--blue); margin-bottom:8px;">Jinja2 Templates</h3>
+      <p class="small">Skills as markdown or Jinja2 templates with dynamic variables rendered at runtime.</p>
+    </div>
+    <div class="card card-blue">
+      <h3 style="color:var(--blue); margin-bottom:8px;">Drift Detection</h3>
+      <p class="small">Detect when base skills change post-fork. Re-optimize without losing customization.</p>
+    </div>
+    <div class="card card-green">
+      <h3 style="color:var(--green); margin-bottom:8px;">Agent Binding</h3>
+      <p class="small">Skills assigned to agents (OpenClaw, Claude Code, Quoth, Agentical). Resolved via MCP.</p>
+    </div>
+    <div class="card card-green">
+      <h3 style="color:var(--green); margin-bottom:8px;">Optimization Pipeline</h3>
+      <p class="small">Scan project → profile tech stack → semantic match → fork top skills → AI rewrite.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 7: ECOSYSTEM FLOW ==================== -->
+<div class="slide">
+  <p class="label" style="color:var(--purple);">The Feedback Loop</p>
+  <h2 style="margin-bottom:28px;">How They Reinforce Each Other</h2>
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:16px;">
+    <!-- Row 1: Agent → Quoth Capture → Daemon → Patterns -->
+    <div class="flex-row" style="gap:0; justify-content:center;">
+      <div class="flow-box" style="min-width:140px; border-color:rgba(96,165,250,0.3);">
+        <strong style="color:var(--blue);">AI Agent</strong>
+        Session
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:160px; border-color:rgba(212,153,58,0.3);">
+        <strong style="color:var(--accent);">Quoth Capture</strong>
+        trajectory → JSONL
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:200px; border-color:rgba(212,153,58,0.3);">
+        <strong style="color:var(--accent);">Daemon Pipeline</strong>
+        JUDGE → DISTILL → CONSOLIDATE
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:160px; border-color:rgba(74,222,128,0.3);">
+        <strong style="color:var(--green);">Pattern Store</strong>
+        SQLite + Beta(α, β)
+      </div>
+    </div>
+    <!-- Arrows: inject back + feed skill reg -->
+    <div style="display:flex; justify-content:space-between; padding:0 60px;">
+      <div class="card" style="flex:1; text-align:center; padding:10px; margin-right:16px; background:rgba(74,222,128,0.05);">
+        <p style="font-size:13px; color:var(--green);">↑ inject ≥ 0.6 back to agent (Thompson sampling)</p>
+      </div>
+      <div class="card" style="flex:1; text-align:center; padding:10px; background:rgba(45,212,191,0.05);">
+        <p style="font-size:13px; color:var(--teal);">↓ high-confidence patterns feed Skill Registry</p>
+      </div>
+    </div>
+    <!-- Row 2: Patterns → Skill Registry flow -->
+    <div class="flex-row" style="gap:0; justify-content:center;">
+      <div class="flow-box" style="min-width:160px; border-color:rgba(74,222,128,0.3);">
+        <strong style="color:var(--green);">Quoth Patterns</strong>
+        top confidence &gt; 0.8
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:160px; border-color:rgba(45,212,191,0.3);">
+        <strong style="color:var(--teal);">Skill Optimizer</strong>
+        semantic search queries
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:160px; border-color:rgba(45,212,191,0.3);">
+        <strong style="color:var(--teal);">Fork &amp; Rewrite</strong>
+        AI tailors to project
+      </div>
+      <span class="flow-arrow-right"></span>
+      <div class="flow-box" style="min-width:160px; border-color:rgba(96,165,250,0.3);">
+        <strong style="color:var(--blue);">MCP Resolve</strong>
+        skills → agent session
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 8: TECH STACK ==================== -->
+<div class="slide">
+  <p class="label" style="color:var(--text-dim);">Infrastructure</p>
+  <h2 style="margin-bottom:24px;">Tech Stack Comparison</h2>
+  <div class="card" style="flex:1; padding:0; overflow:hidden;">
+    <table>
+      <thead>
+        <tr><th>Layer</th><th style="color:var(--accent);">Quoth</th><th style="color:var(--teal);">Skill Registry</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Runtime</td><td>Node.js (Claude Code plugin)</td><td>Bun + Hono</td></tr>
+        <tr><td>Database</td><td>SQLite (WAL) + HNSW</td><td>Neon Postgres + pgvector</td></tr>
+        <tr><td>Embeddings</td><td>MiniLM-L6-v2 (384d, local, $0)</td><td>text-embedding-3-small (1536d)</td></tr>
+        <tr><td>LLM Pipeline</td><td>Gemini 2.5 Flash + Lite + Haiku 4.5</td><td>GPT-4o-mini via AI Gateway</td></tr>
+        <tr><td>API</td><td>MCP stdio (22 tools)</td><td>REST (Hono) + MCP stdio (6 tools)</td></tr>
+        <tr><td>Cloud</td><td>Next.js 16 on Vercel (Neon + pgvector)</td><td>Bun on Vercel (Neon)</td></tr>
+        <tr><td>Auth</td><td>Clerk + qth_* API keys (SHA-256)</td><td>X-API-Key header</td></tr>
+        <tr><td>Async Jobs</td><td>fs.watch + timers + SIGUSR2</td><td>QStash (Upstash)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 9: KEY METRICS ==================== -->
+<div class="slide">
+  <p class="label" style="color:var(--text-dim);">At a Glance</p>
+  <h2 style="margin-bottom:28px;">Ecosystem Metrics</h2>
+  <div class="grid-6" style="margin-bottom:28px;">
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--accent);">22</div>
+      <div class="kpi-label">Quoth MCP Tools</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal);">6</div>
+      <div class="kpi-label">Skill Reg Tools</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--green);">9</div>
+      <div class="kpi-label">Hook Bindings</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--blue);">246</div>
+      <div class="kpi-label">Tests Passing</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--accent);">100+</div>
+      <div class="kpi-label">Skills Indexed</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal);">4</div>
+      <div class="kpi-label">Agent Types</div>
+    </div>
+  </div>
+  <div class="grid-2" style="flex:1;">
+    <div class="card" style="padding:20px;">
+      <h3 style="color:var(--green); margin-bottom:12px;">Self-Healing</h3>
+      <ul class="bullets" style="font-size:14px;">
+        <li>Exception handling — daemon never crashes</li>
+        <li>Stale lock auto-cleanup from previous crashes</li>
+        <li>HNSW rebuild from DB on corruption</li>
+        <li>Exposure-based decay (30d archive, 600 cap)</li>
+        <li>Stale session detector (10min, synthetic summaries)</li>
+        <li>Auto doc maintenance (nightly hash scan + LLM update)</li>
+      </ul>
+    </div>
+    <div class="card" style="padding:20px;">
+      <h3 style="color:var(--blue); margin-bottom:12px;">Graceful Degradation</h3>
+      <ul class="bullets" style="font-size:14px;">
+        <li><span style="text-decoration:line-through; color:var(--red); opacity:0.6;">Gemini API down</span> → Outcome-based judging</li>
+        <li><span style="text-decoration:line-through; color:var(--red); opacity:0.6;">Embedding model fail</span> → Keyword matching</li>
+        <li><span style="text-decoration:line-through; color:var(--red); opacity:0.6;">Cloud unavailable</span> → Local learning continues</li>
+        <li><span style="text-decoration:line-through; color:var(--red); opacity:0.6;">Redis unavailable</span> → Rate limiting disabled</li>
+        <li><span style="text-decoration:line-through; color:var(--red); opacity:0.6;">Reranker down</span> → Vector similarity order</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 11: ROADMAP ==================== -->
+<div class="slide">
+  <p class="label" style="color:var(--text-dim);">Roadmap</p>
+  <h2 style="margin-bottom:24px;">Completed &amp; Planned</h2>
+  <div class="card" style="flex:1; padding:0; overflow:hidden;">
+    <table>
+      <thead>
+        <tr><th>System</th><th>Feature</th><th style="text-align:center;">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="color:var(--accent);">Quoth</td><td>22 MCP tools, 9 hooks, local + managed daemon, CLI wizard</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--accent);">Quoth</td><td>Unified injection — patterns + docs in single ranked pipeline</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--accent);">Quoth</td><td>V2 hierarchical Thompson sampling + graded reward + SNIPS</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--accent);">Quoth</td><td>Local MiniLM-L6 384d ($0) + batch JUDGE (Gemini) + doc re-indexing</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--teal);">Skill Reg</td><td>REST API + MCP server, semantic search, skill CRUD</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--teal);">Skill Reg</td><td>Project optimization (scan → profile → search → fork → rewrite)</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--teal);">Skill Reg</td><td>Drift detection, skill groups, Jinja2 rendering</td><td style="text-align:center;"><span class="badge badge-done">Done</span></td></tr>
+        <tr><td style="color:var(--purple);">Ecosystem</td><td>Quoth patterns as Skill Registry search signal</td><td style="text-align:center;"><span class="badge badge-live">Live</span></td></tr>
+        <tr><td style="color:var(--purple);">Ecosystem</td><td>Usage dashboard + tier system (free/pro/team)</td><td style="text-align:center;"><span class="badge badge-planned">Planned</span></td></tr>
+        <tr><td style="color:var(--purple);">Ecosystem</td><td>Cross-org pattern sharing + skill marketplace</td><td style="text-align:center;"><span class="badge badge-planned">Planned</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 12: CTA ==================== -->
+<div class="slide" style="justify-content:flex-end; padding:0;">
+  <div style="position:absolute; inset:0; background:linear-gradient(135deg, #1a0f2c 0%, #0f1219 40%, #181d27 100%);"></div>
+  <div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.15) 40%, transparent 100%);"></div>
+  <div class="glow" style="width:500px;height:500px;background:rgba(212,153,58,0.06);top:10%;left:50%;transform:translateX(-50%);"></div>
+  <div style="position:relative; z-index:2; padding:60px 80px; color:#fff;">
+    <p class="label" style="color:rgba(255,255,255,0.4);">Get Started</p>
+    <h1 style="font-size:56px; color:#fff; letter-spacing:-2px;">Build Agents That<br/>Learn &amp; Know</h1>
+    <p class="mono" style="margin-top:24px; color:rgba(255,255,255,0.5); font-size:14px;">
+      Quoth — quoth.triqual.dev &nbsp;&bull;&nbsp;
+      Skill Registry — Hono + MCP + Neon
+    </p>
+  </div>
+</div>
+
+</body>
+</html>

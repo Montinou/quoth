@@ -1056,26 +1056,6 @@ graph TD
     </div>
   </section>
 
-  <!-- ========== SLIDE 18: COST MODEL ========== -->
-  <section class="slide slide--table">
-    <h2 class="slide__heading reveal">Cost-Optimized LLM Usage</h2>
-    <div class="table-wrap reveal" style="flex:1; min-height:0; margin-top:clamp(8px,1.5vh,16px);">
-      <div class="table-scroll">
-        <table class="data-table">
-          <thead><tr><th>Task</th><th>Model</th><th>Cost</th><th>System</th></tr></thead>
-          <tbody>
-            <tr><td>Trajectory judging (batch 30)</td><td><code>Gemini 2.5 Flash</code></td><td style="color:var(--green);">Free tier</td><td>Quoth</td></tr>
-            <tr><td>Pattern distillation</td><td><code>Gemini 2.5 Flash Lite</code></td><td style="color:var(--green);">Free tier</td><td>Quoth</td></tr>
-            <tr><td>Pattern consolidation</td><td><code>Claude Haiku 4.5</code></td><td>$0.80/MTok</td><td>Quoth</td></tr>
-            <tr><td>Local embeddings</td><td><code>MiniLM-L6-v2</code></td><td style="color:var(--green);">$0 (local)</td><td>Quoth</td></tr>
-            <tr><td>Skill search embeddings</td><td><code>text-embedding-3-small</code></td><td>$0.02/MTok</td><td>Skill Reg</td></tr>
-            <tr><td>Skill fork rewriting</td><td><code>GPT-4o-mini</code></td><td>$0.15/MTok</td><td>Skill Reg</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
   <!-- ========== SLIDE 19: ROADMAP DIVIDER ========== -->
   <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 70% 30%, var(--green-dim) 0%, transparent 40%);">
     <span class="slide__number">06</span>

@@ -712,43 +712,6 @@ section {
   color: var(--text-dim);
 }
 
-/* ===== COST TABLE ===== */
-.cost-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.88rem;
-  margin-bottom: 1.5rem;
-}
-
-.cost-table thead th {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
-  text-align: left;
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid var(--border-bright);
-}
-
-.cost-table tbody td {
-  padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
-}
-
-.cost-table tbody td:first-child {
-  color: var(--text);
-}
-
-.cost-table .cost-val {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: var(--green);
-}
-
 .fallback-list {
   list-style: none;
   display: flex;
@@ -1450,72 +1413,6 @@ footer .footer-date {
       <span class="pill">Audit logging</span>
       <span class="pill">Secret rotation</span>
       <span class="pill">CSP headers</span>
-    </div>
-  </div>
-</section>
-
-<div class="section-divider"></div>
-
-<!-- ===== COST OPTIMIZATION ===== -->
-<section>
-  <div class="container">
-    <div class="animate">
-      <p class="section-label">Cost</p>
-      <h2 class="section-title">Cost optimization</h2>
-      <p class="section-subtitle">Aggressive cost control through model selection, batching, and graceful degradation.</p>
-    </div>
-    <div class="grid-2">
-      <div class="animate">
-        <div class="table-wrap">
-          <table class="cost-table">
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th>Model</th>
-                <th>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>JUDGE</td>
-                <td>Gemini 2.5 Flash</td>
-                <td class="cost-val">~$0.001/eval</td>
-              </tr>
-              <tr>
-                <td>DISTILL</td>
-                <td>Gemini 2.5 Flash Lite</td>
-                <td class="cost-val">~$0.002/pattern</td>
-              </tr>
-              <tr>
-                <td>Embeddings</td>
-                <td>MiniLM (local)</td>
-                <td class="cost-val">$0 (local)</td>
-              </tr>
-              <tr>
-                <td>CONSOLIDATE</td>
-                <td>Claude Haiku 4.5</td>
-                <td class="cost-val">~$0.003/run</td>
-              </tr>
-              <tr>
-                <td>Doc updates</td>
-                <td>Sonnet 4.6</td>
-                <td class="cost-val">~$0.01/doc</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card animate">
-        <h3>Graceful Degradation</h3>
-        <p style="margin-bottom: 0.75rem;">Multi-tier fallback chain ensures the system never fully stops:</p>
-        <ul class="fallback-list">
-          <li>Gemini 2.5 Flash (primary) &mdash; cheapest capable model</li>
-          <li>Vercel AI Gateway &mdash; automatic provider failover</li>
-          <li>Local MiniLM embeddings &mdash; zero-cost vector generation</li>
-          <li>SQLite fallback &mdash; works fully offline if cloud is down</li>
-          <li>Skip pipeline &mdash; trajectories queue until daemon recovers</li>
-        </ul>
-      </div>
     </div>
   </div>
 </section>
