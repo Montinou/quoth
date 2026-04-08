@@ -143,7 +143,7 @@ The Claude Code plugin system manifest, declaring the MCP server, hooks, command
 ```json
 {
   "name": "quoth",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Universal self-learning and agent coordination for Claude Code...",
   "author": {
     "name": "Montino",

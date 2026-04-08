@@ -42,7 +42,7 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 | [15 — Agent Coordination](./15-agent-coordination.md) | Registry, heartbeats, task assignment, events |
 | [16 — Security Model](./16-security-model.md) | Auth (Clerk + agent keys), rate limiting, OAuth 2.1 |
 
-### Plugin Extensions (v3.3.0)
+### Plugin Extensions (v3.4.0)
 
 | Document | Description |
 |----------|-------------|

@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agents Tools Ecosystem — Quoth + Skill Registry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Fragment+Mono:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME: Raven Nocturne ============ */
+  :root {
+    --font-body: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'Fragment Mono', 'SF Mono', Consolas, monospace;
+    --bg: #0c1117;
+    --surface: #141c26;
+    --surface2: #1a2535;
+    --surface-elevated: #1f2f42;
+    --border: rgba(180, 160, 120, 0.08);
+    --border-bright: rgba(180, 160, 120, 0.18);
+    --text: #e2ddd0;
+    --text-dim: #8a8477;
+    --accent: #d4993a;
+    --accent-dim: rgba(212, 153, 58, 0.08);
+    --teal: #2aa198;
+    --teal-dim: rgba(42, 161, 152, 0.1);
+    --green: #5cb85c;
+    --green-dim: rgba(92, 184, 92, 0.1);
+    --red: #d9534f;
+    --red-dim: rgba(217, 83, 79, 0.1);
+    --blue: #5b9bd5;
+    --blue-dim: rgba(91, 155, 213, 0.1);
+    --purple: #9b6dd7;
+    --purple-dim: rgba(155, 109, 215, 0.1);
+    --code-bg: #080c12;
+    --code-text: #d0ccc0;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f4ee;
+      --surface: #ffffff;
+      --surface2: #f0ebe0;
+      --surface-elevated: #fffdf5;
+      --border: rgba(20, 28, 38, 0.08);
+      --border-bright: rgba(20, 28, 38, 0.16);
+      --text: #1a1814;
+      --text-dim: #6a6458;
+      --accent: #b87a1a;
+      --accent-dim: rgba(184, 122, 26, 0.07);
+      --teal: #1a8a82;
+      --teal-dim: rgba(26, 138, 130, 0.08);
+      --green: #3a8a3a;
+      --green-dim: rgba(58, 138, 58, 0.08);
+      --red: #c0392b;
+      --red-dim: rgba(192, 57, 43, 0.08);
+      --blue: #2a6aa5;
+      --blue-dim: rgba(42, 106, 165, 0.08);
+      --purple: #7b4db7;
+      --purple-dim: rgba(123, 77, 183, 0.08);
+      --code-bg: #2a2520;
+      --code-text: #e2ddd0;
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* ============ DECK ENGINE ============ */
+  .deck {
+    height: 100dvh;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .slide {
+    height: 100dvh;
+    scroll-snap-align: start;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(40px, 6vh, 80px) clamp(40px, 8vw, 120px);
+    isolation: isolate;
+    opacity: 0;
+    transform: translateY(40px) scale(0.98);
+    transition:
+      opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .slide.visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  .slide .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition:
+      opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .slide.visible .reveal { opacity: 1; transform: none; }
+  .slide.visible .reveal:nth-child(1) { transition-delay: 0.1s; }
+  .slide.visible .reveal:nth-child(2) { transition-delay: 0.2s; }
+  .slide.visible .reveal:nth-child(3) { transition-delay: 0.3s; }
+  .slide.visible .reveal:nth-child(4) { transition-delay: 0.4s; }
+  .slide.visible .reveal:nth-child(5) { transition-delay: 0.5s; }
+  .slide.visible .reveal:nth-child(6) { transition-delay: 0.6s; }
+  .slide.visible .reveal:nth-child(7) { transition-delay: 0.7s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slide, .slide .reveal {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+    }
+  }
+
+  /* ============ NAV CHROME ============ */
+  .deck-progress {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: var(--accent); z-index: 100;
+    transition: width 0.3s ease; pointer-events: none;
+  }
+
+  .deck-dots {
+    position: fixed; right: clamp(12px, 2vw, 24px); top: 50%;
+    transform: translateY(-50%); display: flex; flex-direction: column;
+    gap: 6px; z-index: 100; padding: 8px;
+    background: color-mix(in srgb, var(--bg) 60%, transparent 40%);
+    border-radius: 20px;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+
+  .deck-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim); opacity: 0.3; border: none; padding: 0;
+    cursor: pointer; transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .deck-dot:hover { opacity: 0.6; }
+  .deck-dot.active { opacity: 1; transform: scale(1.5); background: var(--accent); }
+
+  .deck-counter {
+    position: fixed; bottom: clamp(12px, 2vh, 24px); right: clamp(12px, 2vw, 24px);
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+    z-index: 100; font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .deck-hints {
+    position: fixed; bottom: clamp(12px, 2vh, 24px); left: 50%;
+    transform: translateX(-50%); font-family: var(--font-mono);
+    font-size: 11px; color: var(--text-dim); opacity: 0.6; z-index: 100;
+    transition: opacity 0.5s ease; white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  .deck-hints.faded { opacity: 0; pointer-events: none; }
+
+  /* ============ SHARED SLIDE ELEMENTS ============ */
+  .slide__display {
+    font-size: clamp(48px, 10vw, 110px);
+    font-weight: 700;
+    letter-spacing: -2px;
+    line-height: 0.95;
+    text-wrap: balance;
+  }
+
+  .slide__heading {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  .slide__body {
+    font-size: clamp(16px, 2.2vw, 22px);
+    line-height: 1.6;
+    color: var(--text-dim);
+    text-wrap: pretty;
+  }
+
+  .slide__subtitle {
+    font-family: var(--font-mono);
+    font-size: clamp(12px, 1.5vw, 18px);
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .slide__label {
+    font-family: var(--font-mono);
+    font-size: clamp(10px, 1.2vw, 13px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .slide__decor {
+    position: absolute;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ============ SLIDE TYPE: TITLE ============ */
+  .slide--title {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background-image: radial-gradient(ellipse at 50% 30%, var(--accent-dim) 0%, transparent 50%);
+  }
+  .slide--title .slide__display { color: var(--accent); }
+
+  /* ============ SLIDE TYPE: DIVIDER ============ */
+  .slide--divider { justify-content: center; }
+  .slide--divider .slide__number {
+    font-size: clamp(100px, 22vw, 260px);
+    font-weight: 200;
+    line-height: 0.85;
+    opacity: 0.05;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -55%);
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  /* ============ SLIDE TYPE: CONTENT ============ */
+  .slide--content .slide__inner {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: clamp(24px, 4vw, 60px);
+    align-items: center;
+    width: 100%;
+  }
+
+  .slide__bullets {
+    list-style: none;
+    padding: 0;
+  }
+
+  .slide__bullets li {
+    padding: 8px 0 8px 24px;
+    position: relative;
+    font-size: clamp(15px, 1.8vw, 20px);
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .slide__bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 17px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .slide__aside {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+  }
+
+  /* ============ SLIDE TYPE: SPLIT ============ */
+  .slide--split { padding: 0; }
+  .slide--split .slide__panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 100%;
+  }
+  .slide--split .slide__panel {
+    padding: clamp(40px, 6vh, 80px) clamp(32px, 4vw, 60px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide--split .slide__panel--primary { background: var(--surface); }
+  .slide--split .slide__panel--secondary {
+    background: var(--surface2);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ============ SLIDE TYPE: DIAGRAM ============ */
+  .slide--diagram {
+    padding: clamp(24px, 4vh, 48px) clamp(24px, 4vw, 60px);
+  }
+  .slide--diagram .slide__heading { margin-bottom: clamp(8px, 1.5vh, 20px); }
+
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: grab;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .mermaid-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  .mermaid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+
+  .zoom-controls {
+    position: absolute; top: 8px; right: 8px;
+    display: flex; gap: 2px; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px;
+  }
+  .zoom-controls button {
+    width: 28px; height: 28px; border: none; background: transparent;
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 14px;
+    cursor: pointer; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+
+  .mermaid .nodeLabel { color: var(--text) !important; }
+  .mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--bg) !important; }
+  .mermaid .edgeLabel rect { fill: var(--bg) !important; }
+  .slide--diagram .mermaid {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+  .slide--diagram .mermaid svg {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    min-height: 300px;
+  }
+  .slide--diagram .mermaid .nodeLabel { font-size: 16px !important; }
+  .slide--diagram .mermaid .edgeLabel { font-family: var(--font-mono) !important; font-size: 13px !important; }
+
+  /* ============ SLIDE TYPE: DASHBOARD ============ */
+  .slide--dashboard .slide__kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(clamp(140px, 20vw, 220px), 1fr));
+    gap: clamp(12px, 2vw, 24px);
+  }
+
+  .slide__kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: clamp(16px, 3vh, 32px) clamp(16px, 2vw, 24px);
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .slide__kpi-val {
+    font-size: clamp(32px, 5.5vw, 56px);
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .slide__kpi-label {
+    font-family: var(--font-mono);
+    font-size: clamp(9px, 1.2vw, 13px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+
+  .slide__kpi-trend {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  /* ============ SLIDE TYPE: TABLE ============ */
+  .slide--table { padding: clamp(24px, 4vh, 48px) clamp(24px, 4vw, 60px); }
+
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+  .table-scroll { overflow-x: auto; }
+
+  .data-table { width: 100%; border-collapse: collapse; }
+
+  .data-table th {
+    background: var(--surface2);
+    font-family: var(--font-mono);
+    font-size: clamp(10px, 1.3vw, 13px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    text-align: left;
+    padding: clamp(8px, 1.2vh, 14px) clamp(12px, 1.8vw, 20px);
+    border-bottom: 2px solid var(--border-bright);
+    white-space: nowrap;
+  }
+
+  .data-table td {
+    padding: clamp(8px, 1.2vh, 14px) clamp(12px, 1.8vw, 20px);
+    border-bottom: 1px solid var(--border);
+    font-size: clamp(13px, 1.6vw, 18px);
+    vertical-align: top;
+  }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  .data-table tbody tr:nth-child(even) { background: var(--surface2); }
+  .data-table tbody tr { transition: background 0.15s; }
+  .data-table tbody tr:hover { background: var(--accent-dim); }
+  .data-table code {
+    font-family: var(--font-mono); font-size: 0.85em;
+    background: var(--accent-dim); color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* ============ SLIDE TYPE: CODE ============ */
+  .slide--code { align-items: center; }
+
+  .slide__code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: clamp(24px, 4vh, 48px) clamp(24px, 4vw, 48px);
+    max-width: 900px;
+    width: 100%;
+    position: relative;
+  }
+
+  .slide__code-filename {
+    position: absolute;
+    top: -12px; left: 24px;
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600;
+    padding: 4px 12px; border-radius: 4px;
+    background: var(--accent); color: var(--bg);
+  }
+
+  .slide__code-block pre { margin: 0; overflow-x: auto; white-space: pre-wrap; }
+  .slide__code-block code {
+    font-family: var(--font-mono);
+    font-size: clamp(13px, 1.5vw, 17px);
+    line-height: 1.7;
+    color: var(--code-text);
+  }
+  .slide__code-block .hl { color: var(--accent); }
+  .slide__code-block .cm { color: var(--text-dim); }
+  .slide__code-block .tl { color: var(--teal); }
+  .slide__code-block .str { color: var(--green); }
+
+  /* ============ SLIDE TYPE: QUOTE ============ */
+  .slide--quote {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: clamp(60px, 10vh, 120px) clamp(60px, 12vw, 200px);
+  }
+
+  .slide__quote-mark {
+    font-size: clamp(80px, 14vw, 180px);
+    line-height: 0.5;
+    opacity: 0.05;
+    font-family: Georgia, serif;
+    pointer-events: none;
+    margin-bottom: -20px;
+    color: var(--accent);
+  }
+
+  .slide--quote blockquote {
+    font-size: clamp(24px, 4vw, 44px);
+    font-weight: 400;
+    line-height: 1.35;
+    font-style: italic;
+  }
+
+  .slide--quote cite {
+    font-family: var(--font-mono);
+    font-size: clamp(11px, 1.4vw, 14px);
+    font-style: normal;
+    margin-top: clamp(16px, 3vh, 32px);
+    display: block;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* ============ SLIDE TYPE: FULL-BLEED ============ */
+  .slide--bleed { padding: 0; justify-content: flex-end; }
+
+  .slide__bg {
+    position: absolute; inset: 0;
+    background-size: cover; background-position: center;
+    z-index: 0;
+  }
+
+  .slide__bg--gradient {
+    background: linear-gradient(135deg, #1a0f2c 0%, #0c1117 40%, #141c26 100%);
+  }
+
+  .slide__scrim {
+    position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 40%, transparent 100%);
+    z-index: 1;
+  }
+
+  .slide--bleed .slide__content {
+    position: relative; z-index: 2;
+    padding: clamp(40px, 6vh, 80px) clamp(40px, 8vw, 120px);
+    color: #ffffff;
+  }
+  .slide--bleed .slide__heading { color: #ffffff; }
+  .slide--bleed .slide__subtitle { color: rgba(255,255,255,0.7); }
+
+  /* ============ FEATURE CARDS ============ */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: clamp(12px, 2vw, 20px);
+    width: 100%;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: clamp(16px, 2.5vh, 28px) clamp(16px, 2vw, 24px);
+    border-left: 3px solid var(--accent);
+  }
+  .feature-card h3 {
+    font-size: clamp(14px, 1.6vw, 18px);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .feature-card p {
+    font-size: clamp(12px, 1.3vw, 15px);
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
+  .feature-card--teal { border-left-color: var(--teal); }
+  .feature-card--teal h3 { color: var(--teal); }
+  .feature-card--blue { border-left-color: var(--blue); }
+  .feature-card--blue h3 { color: var(--blue); }
+  .feature-card--green { border-left-color: var(--green); }
+  .feature-card--green h3 { color: var(--green); }
+  .feature-card--purple { border-left-color: var(--purple); }
+  .feature-card--purple h3 { color: var(--purple); }
+
+  /* ============ PIPELINE VISUAL ============ */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .pipeline-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: clamp(14px, 2vh, 24px) clamp(14px, 2vw, 24px);
+    text-align: center;
+    min-width: 120px;
+  }
+  .pipeline-step h4 {
+    font-family: var(--font-mono);
+    font-size: clamp(11px, 1.3vw, 14px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .pipeline-step p {
+    font-size: clamp(11px, 1.1vw, 13px);
+    color: var(--text-dim);
+    line-height: 1.35;
+  }
+  .pipeline-arrow {
+    font-size: 24px;
+    color: var(--accent);
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  /* ============ BADGE ============ */
+  .badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-left: 6px;
+  }
+  .badge--done { background: var(--green-dim); color: var(--green); }
+  .badge--beta { background: var(--blue-dim); color: var(--blue); }
+  .badge--planned { background: var(--accent-dim); color: var(--accent); }
+  .badge--live { background: var(--teal-dim); color: var(--teal); }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-height: 700px) {
+    .slide { padding: clamp(24px, 4vh, 40px) clamp(32px, 6vw, 80px); }
+    .slide__display { font-size: clamp(36px, 8vw, 72px); }
+    .slide--divider .slide__number { font-size: clamp(80px, 16vw, 160px); }
+  }
+
+  @media (max-height: 600px) {
+    .slide__decor { display: none; }
+    .slide--quote { padding: clamp(32px, 6vh, 60px) clamp(40px, 8vw, 100px); }
+    .slide__quote-mark { display: none; }
+  }
+
+  @media (max-height: 500px) {
+    .slide { padding: clamp(16px, 3vh, 24px) clamp(24px, 5vw, 48px); }
+    .deck-dots { display: none; }
+    .slide__display { font-size: clamp(28px, 7vw, 48px); }
+  }
+
+  @media (max-width: 768px) {
+    .slide--content .slide__inner { grid-template-columns: 1fr; }
+    .slide--content .slide__aside { display: none; }
+    .slide--split .slide__panels { grid-template-columns: 1fr; }
+    .slide--dashboard .slide__kpis { grid-template-columns: repeat(2, 1fr); }
+    .feature-grid { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipeline-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- ========== SLIDE 1: TITLE ========== -->
+  <section class="slide slide--title">
+    <svg class="slide__decor" style="top:0;right:0;" width="120" height="120" viewBox="0 0 120 120">
+      <line x1="120" y1="0" x2="120" y2="40" stroke="var(--accent)" stroke-width="2" opacity="0.12"/>
+      <line x1="80" y1="0" x2="120" y2="0" stroke="var(--accent)" stroke-width="2" opacity="0.12"/>
+    </svg>
+    <svg class="slide__decor" style="bottom:0;left:0;" width="120" height="120" viewBox="0 0 120 120">
+      <line x1="0" y1="80" x2="0" y2="120" stroke="var(--accent)" stroke-width="2" opacity="0.12"/>
+      <line x1="0" y1="120" x2="40" y2="120" stroke="var(--accent)" stroke-width="2" opacity="0.12"/>
+    </svg>
+    <div class="reveal">
+      <p class="slide__subtitle" style="margin-bottom:clamp(16px,2vh,32px);">AI Agent Infrastructure</p>
+    </div>
+    <h1 class="slide__display reveal">Agents Tools</h1>
+    <div class="reveal">
+      <p class="slide__body" style="margin-top:clamp(16px,3vh,32px); max-width: 750px;">Memory, learning, and intelligent skill curation for autonomous AI agents</p>
+    </div>
+    <div class="reveal">
+      <p class="slide__subtitle" style="margin-top:clamp(24px,4vh,48px); opacity: 0.5;">Quoth v3.4.0 &nbsp;&bull;&nbsp; Skill Registry v1.0.0</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 2: PROBLEM DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 80% 60%, var(--red-dim) 0%, transparent 40%);">
+    <span class="slide__number">01</span>
+    <div>
+      <h2 class="slide__heading reveal">The Problem</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">Why AI agents need infrastructure</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 3: PROBLEM CONTENT ========== -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 20% 80%, var(--red-dim) 0%, transparent 45%);">
+    <div class="slide__inner">
+      <div>
+        <p class="slide__label reveal" style="color:var(--red);">Current State</p>
+        <h2 class="slide__heading reveal">Agents Start From Zero, Every Time</h2>
+        <ul class="slide__bullets">
+          <li class="reveal">Every new session erases all learned context and decisions</li>
+          <li class="reveal">Agents repeat the same mistakes across projects and sessions</li>
+          <li class="reveal">Skills are installed manually with no relevance matching</li>
+          <li class="reveal">No feedback loop: successes and failures vanish at session end</li>
+          <li class="reveal">Manual task routing wastes time picking the right agent type</li>
+        </ul>
+      </div>
+      <div class="slide__aside reveal">
+        <svg viewBox="0 0 200 200" width="200" height="200">
+          <circle cx="100" cy="100" r="75" fill="none" stroke="var(--red)" stroke-width="1.5" opacity="0.2" stroke-dasharray="6 4"/>
+          <circle cx="100" cy="100" r="50" fill="none" stroke="var(--red)" stroke-width="1.5" opacity="0.15" stroke-dasharray="4 6"/>
+          <circle cx="100" cy="100" r="25" fill="none" stroke="var(--red)" stroke-width="1.5" opacity="0.1"/>
+          <line x1="55" y1="55" x2="145" y2="145" stroke="var(--red)" stroke-width="2" opacity="0.25"/>
+          <line x1="145" y1="55" x2="55" y2="145" stroke="var(--red)" stroke-width="2" opacity="0.25"/>
+          <text x="100" y="185" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-dim)">CONTEXT LOST EACH SESSION</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 4: ECOSYSTEM DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 30% 40%, var(--accent-dim) 0%, transparent 40%);">
+    <span class="slide__number">02</span>
+    <div>
+      <h2 class="slide__heading reveal">The Ecosystem</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">Two systems, one feedback loop</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 5: ECOSYSTEM OVERVIEW SPLIT ========== -->
+  <section class="slide slide--split">
+    <div class="slide__panels">
+      <div class="slide__panel slide__panel--primary">
+        <p class="slide__label reveal" style="color:var(--accent);">Memory &amp; Learning</p>
+        <h2 class="slide__heading reveal" style="color:var(--accent);">Quoth</h2>
+        <p class="slide__body reveal" style="margin-top:16px;">Self-learning platform that captures agent trajectories, distills patterns, and injects high-confidence knowledge into future sessions.</p>
+        <ul class="slide__bullets" style="margin-top:16px;">
+          <li class="reveal">9 hook bindings, 22 MCP tools</li>
+          <li class="reveal">3-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE)</li>
+          <li class="reveal">Bayesian confidence scoring with Thompson sampling</li>
+          <li class="reveal">Unified injection: patterns + docs ranked together</li>
+        </ul>
+      </div>
+      <div class="slide__panel slide__panel--secondary">
+        <p class="slide__label reveal" style="color:var(--teal);">Knowledge Curation</p>
+        <h2 class="slide__heading reveal" style="color:var(--teal);">Skill Registry</h2>
+        <p class="slide__body reveal" style="margin-top:16px;">Centralized skill management that matches, forks, and AI-rewrites skills per project context.</p>
+        <ul class="slide__bullets" style="margin-top:16px;">
+          <li class="reveal">Semantic search via pgvector (1536d embeddings)</li>
+          <li class="reveal">Per-project fork &amp; AI rewrite pipeline</li>
+          <li class="reveal">MCP server + REST API (Hono)</li>
+          <li class="reveal">Quoth patterns feed optimization queries</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 6: QUOTH DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 70% 50%, var(--accent-dim) 0%, transparent 40%);">
+    <span class="slide__number">03</span>
+    <div>
+      <h2 class="slide__heading reveal">Quoth: Memory &amp; Learning</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">Self-improving agents through pattern extraction</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 7: QUOTH ARCHITECTURE DIAGRAM ========== -->
+  <section class="slide slide--diagram">
+    <h2 class="slide__heading reveal">Quoth Architecture</h2>
+    <div class="mermaid-wrap reveal">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this,1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this,0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset">1:1</button>
+      </div>
+      <div class="mermaid">
+graph TD
+  Hooks["Claude Code Hooks — 9 bindings"]
+  Hooks -->|"trajectory JSONL"| Judge["JUDGE — Gemini 2.5 Flash (batch 30)"]
+  Judge --> Distill["DISTILL — Gemini Flash Lite + MiniLM 384d"]
+  Distill --> Consolidate["CONSOLIDATE — Claude Haiku 4.5"]
+  Consolidate --> DB["SQLite + HNSW — patterns, scores"]
+  DB --> Graph["Intelligence Graph — PageRank"]
+  DB -.->|"inject >= 0.6"| Hooks
+  Graph -.->|"route tasks"| Hooks
+  Consolidate -->|"promote > 0.8"| Cloud["Quoth Cloud — Next.js + Neon"]
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 8: QUOTH LEARNING PIPELINE ========== -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 80% 20%, var(--accent-dim) 0%, transparent 40%);">
+    <div class="slide__inner" style="grid-template-columns: 1fr;">
+      <div>
+        <p class="slide__label reveal">Learning Pipeline</p>
+        <h2 class="slide__heading reveal">From Tool Calls to Confidence Scores</h2>
+        <div class="pipeline reveal" style="margin-top:clamp(24px,4vh,48px);">
+          <div class="pipeline-step">
+            <h4 style="color:var(--accent);">Capture</h4>
+            <p>PostToolUse hook<br/>logs JSONL</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--accent);">Judge</h4>
+            <p>Gemini 2.5 Flash<br/>batch 30</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--teal);">Distill</h4>
+            <p>Gemini 2.5 Flash Lite<br/>+ MiniLM-L6 384d</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--teal);">Consolidate</h4>
+            <p>Claude Haiku 4.5<br/>merge/new</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--green);">Score</h4>
+            <p>Beta(alpha, beta)<br/>Bayesian update</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--green);">Inject</h4>
+            <p>Thompson sampling<br/>patterns + docs</p>
+          </div>
+        </div>
+        <p class="slide__body reveal" style="margin-top:clamp(16px,3vh,32px); text-align:center;">Graded reward signal (0.0 &ndash; 1.0) based on session outcomes, tool mix, and success rate</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 9: SKILL REGISTRY DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 50% 70%, var(--teal-dim) 0%, transparent 40%);">
+    <span class="slide__number">04</span>
+    <div>
+      <h2 class="slide__heading reveal">Skill Registry: Knowledge Curation</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">The right skills for every project</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 10: SKILL REGISTRY FEATURES ========== -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 20% 30%, var(--teal-dim) 0%, transparent 40%);">
+    <div class="slide__inner" style="grid-template-columns: 1fr;">
+      <div>
+        <p class="slide__label reveal" style="color:var(--teal);">Skill Management</p>
+        <h2 class="slide__heading reveal">Centralized, Versioned, Intelligent</h2>
+        <div class="feature-grid reveal" style="margin-top:clamp(16px,3vh,32px);">
+          <div class="feature-card feature-card--teal">
+            <h3>Semantic Search</h3>
+            <p>pgvector HNSW with 1536d embeddings. Find skills by meaning, not just keywords.</p>
+          </div>
+          <div class="feature-card feature-card--teal">
+            <h3>Per-Project Forks</h3>
+            <p>Fork any skill and scope it to a project. AI rewrites content using project context.</p>
+          </div>
+          <div class="feature-card feature-card--blue">
+            <h3>Jinja2 Templates</h3>
+            <p>Skills can be markdown or Jinja2 templates with dynamic variables per agent.</p>
+          </div>
+          <div class="feature-card feature-card--blue">
+            <h3>Drift Detection</h3>
+            <p>Detect when base skills change after fork. Re-optimize without losing customization.</p>
+          </div>
+          <div class="feature-card feature-card--green">
+            <h3>Agent Binding</h3>
+            <p>Skills assigned to agents (OpenClaw, Claude Code, Quoth). Resolved via MCP at runtime.</p>
+          </div>
+          <div class="feature-card feature-card--green">
+            <h3>Skill Groups</h3>
+            <p>Bundle related skills into installable groups. One command, full stack coverage.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 11: OPTIMIZATION PIPELINE ========== -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 70% 80%, var(--teal-dim) 0%, transparent 40%);">
+    <div class="slide__inner" style="grid-template-columns: 1fr;">
+      <div>
+        <p class="slide__label reveal" style="color:var(--teal);">Optimization Pipeline</p>
+        <h2 class="slide__heading reveal">From Package.json to Tailored Skills</h2>
+        <div class="pipeline reveal" style="margin-top:clamp(24px,4vh,48px);">
+          <div class="pipeline-step">
+            <h4 style="color:var(--teal);">Scan</h4>
+            <p>Read package.json<br/>+ CLAUDE.md</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--teal);">Profile</h4>
+            <p>Detect tech stack<br/>framework, type</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--blue);">Search</h4>
+            <p>Semantic queries<br/>+ Quoth patterns</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--blue);">Fork</h4>
+            <p>Copy skill<br/>scoped to project</p>
+          </div>
+          <span class="pipeline-arrow">&rarr;</span>
+          <div class="pipeline-step">
+            <h4 style="color:var(--green);">Rewrite</h4>
+            <p>AI tailors fork<br/>to project context</p>
+          </div>
+        </div>
+        <p class="slide__body reveal" style="margin-top:clamp(16px,3vh,32px); text-align:center;">Quoth patterns are used as additional semantic search queries &mdash; learned behavior informs skill selection</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 12: INTEGRATION DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 60% 40%, var(--purple-dim) 0%, transparent 40%);">
+    <span class="slide__number">05</span>
+    <div>
+      <h2 class="slide__heading reveal">The Feedback Loop</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">How Quoth and Skill Registry reinforce each other</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 13: INTEGRATION DIAGRAM ========== -->
+  <section class="slide slide--diagram">
+    <h2 class="slide__heading reveal">Ecosystem Data Flow</h2>
+    <div class="mermaid-wrap reveal">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this,1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this,0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset">1:1</button>
+      </div>
+      <div class="mermaid">
+graph TD
+  Agent["AI Agent Session"]
+
+  subgraph Quoth["Quoth — Memory & Learning"]
+    Q_Capture["Trajectory Capture"]
+    Q_Daemon["Daemon: JUDGE + DISTILL + CONSOLIDATE"]
+    Q_DB["SQLite + HNSW — Beta(alpha, beta)"]
+    Q_Feedback["Bayesian Feedback"]
+    Q_Capture --> Q_Daemon --> Q_DB
+    Q_Feedback --> Q_DB
+  end
+
+  subgraph SkillReg["Skill Registry — Knowledge Curation"]
+    SR_Opt["Optimizer — semantic search"]
+    SR_DB["Neon Postgres — pgvector"]
+    SR_Skills["Project-Tailored Skills"]
+    SR_Opt --> SR_DB --> SR_Skills
+  end
+
+  Agent -->|"tool calls"| Q_Capture
+  Q_DB -.->|"inject >= 0.6"| Agent
+  Q_DB -->|"high-confidence patterns"| SR_Opt
+  SR_Skills -.->|"MCP resolve"| Agent
+  Agent -->|"session outcome"| Q_Feedback
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 14: TECH STACK TABLE ========== -->
+  <section class="slide slide--table">
+    <h2 class="slide__heading reveal">Tech Stack Comparison</h2>
+    <div class="table-wrap reveal" style="flex:1; min-height:0; margin-top:clamp(8px,1.5vh,16px);">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Layer</th><th>Quoth</th><th>Skill Registry</th></tr></thead>
+          <tbody>
+            <tr><td>Runtime</td><td>Node.js (Claude Code plugin)</td><td>Bun + Hono</td></tr>
+            <tr><td>Database</td><td>SQLite (WAL) + HNSW</td><td>Neon Postgres + pgvector</td></tr>
+            <tr><td>Embeddings</td><td>MiniLM-L6-v2 (384d, local, $0)</td><td>text-embedding-3-small (1536d)</td></tr>
+            <tr><td>LLM Pipeline</td><td>Gemini 2.5 Flash + Lite + Haiku 4.5</td><td>GPT-4o-mini via AI Gateway</td></tr>
+            <tr><td>API</td><td>MCP stdio (22 tools)</td><td>REST (Hono) + MCP stdio (6 tools)</td></tr>
+            <tr><td>Cloud</td><td>Next.js 16 on Vercel</td><td>Bun on Vercel</td></tr>
+            <tr><td>Auth</td><td>Clerk + qth_* API keys</td><td>X-API-Key header</td></tr>
+            <tr><td>Async</td><td>fs.watch + timers</td><td>QStash (Upstash)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 15: MCP + API SURFACE ========== -->
+  <section class="slide slide--table">
+    <h2 class="slide__heading reveal">API &amp; MCP Surface</h2>
+    <div class="table-wrap reveal" style="flex:1; min-height:0; margin-top:clamp(8px,1.5vh,16px);">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>System</th><th>Capability</th><th>Tools / Endpoints</th></tr></thead>
+          <tbody>
+            <tr><td style="color:var(--accent);">Quoth MCP</td><td>Pattern management</td><td><code>log_outcome</code> <code>score_pattern</code> <code>top_patterns</code> <code>search_patterns</code> + 4 more</td></tr>
+            <tr><td style="color:var(--accent);">Quoth MCP</td><td>Intelligence</td><td><code>route_task</code> <code>intelligence_context</code> <code>intelligence_feedback</code> + 3 more</td></tr>
+            <tr><td style="color:var(--accent);">Quoth MCP</td><td>Agents &amp; Skills</td><td><code>agent_register</code> <code>daemon_status</code> <code>extract_skill</code> + 5 more</td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg MCP</td><td>Skill resolution</td><td><code>skill_search</code> <code>skill_get</code> <code>skill_fork</code></td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg MCP</td><td>Agent binding</td><td><code>skill_list_agent</code> <code>skill_render</code> <code>skill_suggest_tags</code></td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg REST</td><td>CRUD + Optimization</td><td><code>/skills</code> <code>/agents</code> <code>/groups</code> <code>/sync</code> <code>/optimize</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 16: CODE EXAMPLE ========== -->
+  <section class="slide slide--code" style="background-image:radial-gradient(ellipse at 50% 80%, var(--teal-dim) 0%, transparent 40%);">
+    <p class="slide__label reveal">Integration Point</p>
+    <h2 class="slide__heading reveal" style="margin-bottom:clamp(16px,3vh,32px);">Quoth Patterns Feed Skill Optimization</h2>
+    <div class="slide__code-block reveal">
+      <span class="slide__code-filename">optimize.ts</span>
+      <pre><code><span class="cm">// Quoth patterns become semantic search queries</span>
+<span class="hl">function</span> <span class="tl">buildSearchQueries</span>(ctx, quothPatterns) {
+  <span class="hl">const</span> queries = []
+
+  <span class="cm">// Tech stack queries</span>
+  <span class="hl">for</span> (<span class="hl">const</span> tech <span class="hl">of</span> ctx.techStack)
+    queries.push(<span class="str">`${tech} best practices`</span>)
+
+  <span class="cm">// Quoth-learned behavior drives discovery</span>
+  <span class="hl">for</span> (<span class="hl">const</span> p <span class="hl">of</span> quothPatterns.slice(<span class="tl">0</span>, <span class="tl">5</span>))
+    queries.push(p.description.slice(<span class="tl">0</span>, <span class="tl">200</span>))
+
+  <span class="hl">return</span> [...<span class="hl">new</span> Set(queries)]
+}</code></pre>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 17: DASHBOARD - KEY METRICS ========== -->
+  <section class="slide slide--dashboard" style="background-image:radial-gradient(ellipse at 60% 70%, var(--accent-dim) 0%, transparent 40%);">
+    <h2 class="slide__heading reveal" style="margin-bottom:clamp(12px,2vh,24px);">Ecosystem At a Glance</h2>
+    <div class="slide__kpis reveal">
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--accent);">22</div>
+        <div class="slide__kpi-label">Quoth MCP Tools</div>
+      </div>
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--teal);">6</div>
+        <div class="slide__kpi-label">Skill Reg MCP Tools</div>
+      </div>
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--green);">9</div>
+        <div class="slide__kpi-label">Hook Bindings</div>
+      </div>
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--blue);">246</div>
+        <div class="slide__kpi-label">Quoth Tests</div>
+      </div>
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--accent);">100+</div>
+        <div class="slide__kpi-label">Skills Indexed</div>
+      </div>
+      <div class="slide__kpi">
+        <div class="slide__kpi-val" style="color:var(--teal);">4</div>
+        <div class="slide__kpi-label">Agent Types</div>
+        <div class="slide__kpi-trend" style="color:var(--text-dim);">openclaw, claude-code, quoth, agentical</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 18: COST MODEL ========== -->
+  <section class="slide slide--table">
+    <h2 class="slide__heading reveal">Cost-Optimized LLM Usage</h2>
+    <div class="table-wrap reveal" style="flex:1; min-height:0; margin-top:clamp(8px,1.5vh,16px);">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Task</th><th>Model</th><th>Cost</th><th>System</th></tr></thead>
+          <tbody>
+            <tr><td>Trajectory judging (batch 30)</td><td><code>Gemini 2.5 Flash</code></td><td style="color:var(--green);">Free tier</td><td>Quoth</td></tr>
+            <tr><td>Pattern distillation</td><td><code>Gemini 2.5 Flash Lite</code></td><td style="color:var(--green);">Free tier</td><td>Quoth</td></tr>
+            <tr><td>Pattern consolidation</td><td><code>Claude Haiku 4.5</code></td><td>$0.80/MTok</td><td>Quoth</td></tr>
+            <tr><td>Local embeddings</td><td><code>MiniLM-L6-v2</code></td><td style="color:var(--green);">$0 (local)</td><td>Quoth</td></tr>
+            <tr><td>Skill search embeddings</td><td><code>text-embedding-3-small</code></td><td>$0.02/MTok</td><td>Skill Reg</td></tr>
+            <tr><td>Skill fork rewriting</td><td><code>GPT-4o-mini</code></td><td>$0.15/MTok</td><td>Skill Reg</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 19: ROADMAP DIVIDER ========== -->
+  <section class="slide slide--divider" style="background-image:radial-gradient(ellipse at 70% 30%, var(--green-dim) 0%, transparent 40%);">
+    <span class="slide__number">06</span>
+    <div>
+      <h2 class="slide__heading reveal">Roadmap</h2>
+      <p class="slide__subtitle reveal" style="margin-top:12px;">What's done, what's next</p>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 20: ROADMAP TABLE ========== -->
+  <section class="slide slide--table">
+    <h2 class="slide__heading reveal">Ecosystem Roadmap</h2>
+    <div class="table-wrap reveal" style="flex:1; min-height:0; margin-top:clamp(8px,1.5vh,16px);">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>System</th><th>Feature</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td style="color:var(--accent);">Quoth</td><td>22 MCP tools, 9 hooks, local + managed daemon</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--accent);">Quoth</td><td>Unified injection (patterns + docs, Thompson sampling)</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--accent);">Quoth</td><td>Graded reward + SNIPS cold-start + doc re-indexing</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg</td><td>REST API + MCP server, semantic search, skill CRUD</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg</td><td>Project optimization pipeline (scan, fork, rewrite)</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--teal);">Skill Reg</td><td>Drift detection, skill groups, Jinja2 rendering</td><td><span class="badge badge--done">Done</span></td></tr>
+            <tr><td style="color:var(--purple);">Ecosystem</td><td>Quoth patterns as Skill Registry search signal</td><td><span class="badge badge--live">Live</span></td></tr>
+            <tr><td style="color:var(--purple);">Ecosystem</td><td>Usage dashboard + tier system</td><td><span class="badge badge--planned">Planned</span></td></tr>
+            <tr><td style="color:var(--purple);">Ecosystem</td><td>Cross-org pattern sharing + skill marketplace</td><td><span class="badge badge--planned">Planned</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SLIDE 21: QUOTE ========== -->
+  <section class="slide slide--quote" style="background-image:radial-gradient(ellipse at 50% 50%, var(--accent-dim) 0%, transparent 35%);">
+    <div class="slide__quote-mark reveal">&ldquo;</div>
+    <blockquote class="reveal">
+      Agents that remember and agents that know &mdash; together they become agents that improve.
+    </blockquote>
+    <cite class="reveal">&mdash; The vision behind Agents Tools</cite>
+  </section>
+
+  <!-- ========== SLIDE 22: FULL-BLEED CTA ========== -->
+  <section class="slide slide--bleed">
+    <div class="slide__bg slide__bg--gradient"></div>
+    <div class="slide__scrim"></div>
+    <div class="slide__content">
+      <p class="slide__label reveal" style="color:rgba(255,255,255,0.5);">Get Started</p>
+      <h2 class="slide__heading reveal" style="font-size:clamp(32px,6vw,64px);">Build Agents That Learn &amp; Know</h2>
+      <p class="slide__subtitle reveal" style="color:rgba(255,255,255,0.6); margin-top:16px;">
+        Quoth &mdash; quoth.triqual.dev &nbsp;&bull;&nbsp;
+        Skill Registry &mdash; Hono + MCP + Neon
+      </p>
+    </div>
+  </section>
+
+</div><!-- /deck -->
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#1a2535' : '#fef6e8',
+      primaryBorderColor: isDark ? '#d4993a' : '#b87a1a',
+      primaryTextColor: isDark ? '#e2ddd0' : '#1a1814',
+      secondaryColor: isDark ? '#141c26' : '#e8f4f3',
+      secondaryBorderColor: isDark ? '#2aa198' : '#1a8a82',
+      secondaryTextColor: isDark ? '#e2ddd0' : '#1a1814',
+      tertiaryColor: isDark ? '#0f2018' : '#f0fdf4',
+      tertiaryBorderColor: isDark ? '#5cb85c' : '#3a8a3a',
+      tertiaryTextColor: isDark ? '#e2ddd0' : '#1a1814',
+      lineColor: isDark ? '#8a8477' : '#6a6458',
+      fontSize: '16px',
+      fontFamily: 'var(--font-body)',
+      noteBkgColor: isDark ? '#1a2535' : '#fef6e8',
+      noteTextColor: isDark ? '#e2ddd0' : '#1a1814',
+      noteBorderColor: isDark ? '#d4993a' : '#b87a1a',
+    }
+  });
+
+  function autoFit() {
+    document.querySelectorAll('.mermaid svg').forEach(function(svg) {
+      svg.removeAttribute('height');
+      svg.style.width = '100%';
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
+      svg.parentElement.style.width = '100%';
+    });
+    document.querySelectorAll('.slide__kpi-val').forEach(function(el) {
+      if (el.scrollWidth > el.clientWidth) {
+        var s = el.clientWidth / el.scrollWidth;
+        el.style.transform = 'scale(' + s + ')';
+        el.style.transformOrigin = 'left top';
+      }
+    });
+  }
+
+  mermaid.run().then(function() {
+    autoFit();
+    new SlideEngine();
+  });
+</script>
+
+<script>
+  // Mermaid zoom controls
+  var INITIAL_ZOOM=1;
+  function zoomDiagram(b,f){var w=b.closest('.mermaid-wrap');var t=w.querySelector('.mermaid');var c=parseFloat(t.dataset.zoom||INITIAL_ZOOM);var n=Math.min(Math.max(c*f,0.5),5);t.dataset.zoom=n;t.style.zoom=n;}
+  function resetZoom(b){var w=b.closest('.mermaid-wrap');var t=w.querySelector('.mermaid');t.dataset.zoom=INITIAL_ZOOM;t.style.zoom=INITIAL_ZOOM;}
+  function openMermaidInNewTab(w){var svg=w.querySelector('.mermaid svg');if(!svg)return;var clone=svg.cloneNode(true);clone.style.zoom='';clone.style.transform='';var styles=getComputedStyle(document.documentElement);var bg=styles.getPropertyValue('--bg').trim()||'#ffffff';var html='<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Diagram</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:'+bg+';padding:40px;box-sizing:border-box}svg{max-width:100%;max-height:90vh;height:auto}</style></head><body>'+clone.outerHTML+'</body></html>';window.open(URL.createObjectURL(new Blob([html],{type:'text/html'})),'_blank');}
+  document.querySelectorAll('.mermaid-wrap').forEach(function(w){w.addEventListener('wheel',function(e){if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();var t=w.querySelector('.mermaid');var c=parseFloat(t.dataset.zoom||INITIAL_ZOOM);var f=e.deltaY<0?1.1:0.9;var n=Math.min(Math.max(c*f,0.5),5);t.dataset.zoom=n;t.style.zoom=n;},{passive:false});var sX,sY,sL,sT,sTime,didPan;w.addEventListener('mousedown',function(e){if(e.target.closest('.zoom-controls'))return;w.classList.add('is-panning');sX=e.clientX;sY=e.clientY;sL=w.scrollLeft;sT=w.scrollTop;sTime=Date.now();didPan=false;});window.addEventListener('mousemove',function(e){if(!w.classList.contains('is-panning'))return;var dx=e.clientX-sX,dy=e.clientY-sY;if(Math.abs(dx)>5||Math.abs(dy)>5)didPan=true;w.scrollLeft=sL-dx;w.scrollTop=sT-dy;});window.addEventListener('mouseup',function(){if(!w.classList.contains('is-panning'))return;w.classList.remove('is-panning');if(!didPan&&Date.now()-sTime<300)openMermaidInNewTab(w);});});
+
+  // SlideEngine
+  function SlideEngine(){
+    this.deck=document.querySelector('.deck');
+    this.slides=[].slice.call(document.querySelectorAll('.slide'));
+    this.current=0;
+    this.total=this.slides.length;
+    this.buildChrome();
+    this.bindEvents();
+    this.observe();
+    this.update();
+  }
+  SlideEngine.prototype.buildChrome=function(){
+    var bar=document.createElement('div');bar.className='deck-progress';document.body.appendChild(bar);this.bar=bar;
+    var dots=document.createElement('div');dots.className='deck-dots';var self=this;
+    this.slides.forEach(function(_,i){var d=document.createElement('button');d.className='deck-dot';d.title='Slide '+(i+1);d.onclick=function(){self.goTo(i);};dots.appendChild(d);});
+    document.body.appendChild(dots);this.dots=[].slice.call(dots.children);
+    var ctr=document.createElement('div');ctr.className='deck-counter';document.body.appendChild(ctr);this.counter=ctr;
+    var hints=document.createElement('div');hints.className='deck-hints';hints.textContent='\u2190 \u2192 or scroll to navigate';document.body.appendChild(hints);this.hints=hints;
+    this.hintTimer=setTimeout(function(){hints.classList.add('faded');},4000);
+  };
+  SlideEngine.prototype.bindEvents=function(){
+    var self=this;
+    document.addEventListener('keydown',function(e){
+      if(e.target.closest('.mermaid-wrap,.table-scroll,.code-scroll,input,textarea,[contenteditable]'))return;
+      if(['ArrowDown','ArrowRight',' ','PageDown'].indexOf(e.key)>-1){e.preventDefault();self.next();}
+      else if(['ArrowUp','ArrowLeft','PageUp'].indexOf(e.key)>-1){e.preventDefault();self.prev();}
+      else if(e.key==='Home'){e.preventDefault();self.goTo(0);}
+      else if(e.key==='End'){e.preventDefault();self.goTo(self.total-1);}
+      self.fadeHints();
+    });
+    var tY;
+    this.deck.addEventListener('touchstart',function(e){tY=e.touches[0].clientY;},{passive:true});
+    this.deck.addEventListener('touchend',function(e){var dy=tY-e.changedTouches[0].clientY;if(Math.abs(dy)>50){dy>0?self.next():self.prev();}});
+  };
+  SlideEngine.prototype.observe=function(){
+    var self=this;
+    var obs=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting){entry.target.classList.add('visible');self.current=self.slides.indexOf(entry.target);self.update();}});},{threshold:0.5});
+    this.slides.forEach(function(s){obs.observe(s);});
+  };
+  SlideEngine.prototype.goTo=function(i){this.slides[Math.max(0,Math.min(i,this.total-1))].scrollIntoView({behavior:'smooth'});};
+  SlideEngine.prototype.next=function(){if(this.current<this.total-1)this.goTo(this.current+1);};
+  SlideEngine.prototype.prev=function(){if(this.current>0)this.goTo(this.current-1);};
+  SlideEngine.prototype.update=function(){
+    this.bar.style.width=((this.current+1)/this.total*100)+'%';
+    var c=this.current;this.dots.forEach(function(d,i){d.classList.toggle('active',i===c);});
+    this.counter.textContent=(this.current+1)+' / '+this.total;
+  };
+  SlideEngine.prototype.fadeHints=function(){clearTimeout(this.hintTimer);this.hints.classList.add('faded');};
+</script>
+
+</body>
+</html>

@@ -123,7 +123,7 @@ if (!settings.permissions.allow.includes('Bash(node .quoth/*)')) {
 }
 ```
 
-### Step 5: Sync Skills to skill-registry (v3.3.0)
+### Step 5: Sync Skills to skill-registry (v3.4.0)
 
 If `~/projects/skill-registry` exists and `bun` is available, the script syncs the plugin's built-in skills to the external skill-registry:
 
@@ -224,7 +224,7 @@ The `.claude-plugin/plugin.json` manifest defines the plugin for the Claude Code
 ```json
 {
   "name": "quoth",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Universal self-learning and agent coordination for Claude Code. Captures trajectories, learns patterns, shares knowledge across projects.",
   "author": {
     "name": "Montino",

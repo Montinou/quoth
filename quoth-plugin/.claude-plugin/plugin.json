@@ -1,6 +1,6 @@
 {
   "name": "quoth",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Universal self-learning and agent coordination for Claude Code. Captures trajectories, learns patterns, shares knowledge across projects.",
   "author": {
     "name": "Montino",

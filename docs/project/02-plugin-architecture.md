@@ -1,4 +1,4 @@
-# Quoth Plugin Architecture (v3.3.0)
+# Quoth Plugin Architecture (v3.4.0)
 
 > Version: 1.0.1 | Last updated: 2026-04-06
 
@@ -6,7 +6,7 @@
 
 quoth-plugin/
 ├── .claude-plugin/
-│   ├── plugin.json              — Plugin manifest v3.3.0
+│   ├── plugin.json              — Plugin manifest v3.4.0
 │   ├── agents/
 │   │   └── learner.md           — quoth:learner agent definition (Haiku trajectory reviewer)
 │   ├── commands/

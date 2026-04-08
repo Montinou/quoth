@@ -1,4 +1,4 @@
-# Quoth v3.3.0 System Overview
+# Quoth v3.4.0 System Overview
 
 ## Two-Part Architecture
 
@@ -210,7 +210,7 @@ See [12 — Embeddings & Search](./12-embeddings-search.md) for model specs, API
 
 | Property | Value |
 |----------|-------|
-| Plugin version | 3.3.0 |
+| Plugin version | 3.4.0 |
 | Package name (SaaS) | quoth-mcp v3.0.0 |
 | MCP protocol version | 2024-11-05 |
 | MCP server name | quoth-learning |

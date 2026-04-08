@@ -83,7 +83,7 @@ export default function MetricsRoadmapSlide() {
 
         {/* Bottom section - two columns */}
         <div className="flex gap-vw-5 flex-1">
-          {/* Done in v3.3.0 */}
+          {/* Done in v3.4.0 */}
           <motion.div {...fadeUp(0.5)} className="flex-1 glass rounded-vw-lg p-vw-5">
             <h3 className="text-vw-lg font-semibold text-green-400 mb-vw-3">
               Done in v3.4.0

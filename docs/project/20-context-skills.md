@@ -1,6 +1,6 @@
-# Context Injection & Built-In Skills (v3.3.0)
+# Context Injection & Built-In Skills (v3.4.0)
 
-Two subsystems added in v3.3.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
+Two subsystems added in v3.3.0 and extended in v3.4.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
 **Version:** 1.0.2 | **Last updated:** 2026-04-08
 
@@ -183,7 +183,7 @@ Initializes project-local Quoth memory with an interactive configuration workflo
 
 1. Check if `.quoth/` already exists
 2. Ask user for: strictness level (blocking/reminder/off), knowledge types (decisions/patterns/errors/knowledge/selectors/api), gates (require_reasoning_before_edit, require_quoth_search, require_error_documentation)
-3. Create `.quoth/config.json` with version 3.3.0 + user choices
+3. Create `.quoth/config.json` with version 3.4.0 + user choices
 4. Create type files (`.quoth/{type}.md`) with formatted templates
 5. Add `.quoth/sessions/` to `.gitignore`
 

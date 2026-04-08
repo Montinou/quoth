@@ -1,4 +1,4 @@
-# Quoth Plugin v3.3.0 (Self-Learning)
+# Quoth Plugin v3.4.0 (Self-Learning)
 
 Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous self-learning, intelligence routing, and agent coordination. Modular architecture: 4 handler modules, 22 MCP tools.
 
@@ -111,13 +111,20 @@ npm run lint
 
 ## Roadmap
 
-### Done in v3.3.0
+### Done in v3.4.0
 - ~~Managed mode~~ — SaaS-ready daemon without user API keys (`POST /api/v1/pipeline/process`)
 - ~~CLI onboarding~~ — `node cli.js init` interactive wizard
 - ~~Batch embeddings~~ — `generateEmbeddingBatch()` for cost optimization (MiniLM local)
 - ~~Distiller quality~~ — batch-only distill with session context, improved prompts
 - ~~Pattern lifecycle~~ — 30d archive for never-exposed, 600 cap, exposure-based decay only
-- ~~Venice.ai skill~~ — embedding model research (BGE-M3, 1024d, compatible with cloud)
+- ~~Unified injection~~ — patterns + docs in single ranked pipeline via `hierarchicalSelect()`
+- ~~V2 Thompson sampling~~ — hierarchical cluster selection with graded reward signal (0.0-1.0)
+- ~~SNIPS cold-start~~ — minimum observations lowered from 3 to 1, ESS-scaled pseudo-trials
+- ~~Doc chunk Thompson priors~~ — alpha/beta columns, Bayesian updates on doc injection
+- ~~Graded reward signal~~ — `sessionOutcomeReward()` returns 7-level scores based on session outcomes
+- ~~Doc re-indexing~~ — fs.watch on docs/project/ (5s debounce) + SIGUSR2 for manual trigger
+- ~~Batch JUDGE~~ — Gemini 2.5 Flash, 30 entries per batch for cost optimization
+- ~~Local MiniLM-L6 embeddings~~ — 384d, $0, replaces voyage-4-lite 1024d
 
 ### Phase 2: Cloud & Monetization
 - **Venice.ai cloud embeddings** — migrate `src/lib/embeddings/gateway.ts` from voyage-4-lite to Venice BGE-M3 ($0 vs $0.02/MTok)
