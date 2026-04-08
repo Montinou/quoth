@@ -113,6 +113,17 @@ process.on('SIGUSR1', async () => {
   processQueue()
 })
 
+process.on('SIGUSR2', async () => {
+  log('info', 'SIGUSR2 received — re-indexing doc chunks')
+  try {
+    const { indexDocs } = require('./lib/doc-chunks.js')
+    const result = await indexDocs(PROJECT_ROOT, db, log)
+    log('info', 'Doc chunks re-indexed (SIGUSR2)', result)
+  } catch (err) {
+    log('error', 'Doc chunk re-index failed', { error: err.message })
+  }
+})
+
 // --- Self-heal ---
 process.on('uncaughtException', (err) => {
   log('error', 'uncaughtException', { message: err.message, stack: err.stack })
@@ -854,11 +865,13 @@ async function updateClusterPosteriors() {
   let updated = 0
   const tx = db.transaction(() => {
     for (const [key, obs] of byCluster.entries()) {
-      if (obs.length < 3) continue  // need minimum data
+      if (obs.length === 0) continue
       const [ns, cid] = key.split('::')
       const estimate = snipsEstimate(obs)
-      // Cap update magnitude: interpret SNIPS estimate as n pseudo-trials.
-      const n = Math.min(obs.length, 10)
+      // Cap update magnitude: fewer pseudo-trials for cold clusters to avoid wild swings
+      const { effectiveSampleSize } = require('./lib/snips.js')
+      const ess = effectiveSampleSize(obs)
+      const n = Math.min(ess, obs.length, obs.length < 3 ? 2 : 10)
       db.prepare(`
         UPDATE cluster_stats SET
           alpha = alpha + ?, beta = beta + ?, attempts = attempts + ?,
@@ -894,6 +907,14 @@ async function rebuildClusters() {
     tx()
     log('info', 'Cluster rebuild', { namespace, K, patterns: patterns.length })
   }
+
+  // Seed synthetic doc cluster for doc_chunks (cluster_id = -1)
+  try {
+    const docCount = db.prepare("SELECT COUNT(*) as c FROM doc_chunks WHERE embedding IS NOT NULL").get().c
+    if (docCount > 0) {
+      db.upsertClusterStats(-1, 'docs', null, docCount)
+    }
+  } catch {}
 }
 
 async function runDeepConsolidate() {
@@ -1475,5 +1496,26 @@ try {
     if (result.indexed > 0) log('info', 'Doc chunk indexing complete', result)
   } catch (err) {
     log('error', 'Doc chunk indexing failed', { error: err.message })
+  }
+})()
+
+// --- Watch docs/project/ for auto re-indexing on file changes ---
+;(() => {
+  const docsDir = path.join(PROJECT_ROOT, 'docs', 'project')
+  if (fs.existsSync(docsDir)) {
+    let docReindexTimer = null
+    fs.watch(docsDir, { persistent: false }, () => {
+      clearTimeout(docReindexTimer)
+      docReindexTimer = setTimeout(async () => {
+        try {
+          const { indexDocs } = require('./lib/doc-chunks.js')
+          const result = await indexDocs(PROJECT_ROOT, db, log)
+          if (result.indexed > 0) log('info', 'Doc chunks re-indexed (file change)', result)
+        } catch (err) {
+          log('error', 'Doc chunk re-index failed', { error: err.message })
+        }
+      }, 5000)
+    })
+    log('info', 'Watching docs/project/ for doc chunk re-indexing')
   }
 })()

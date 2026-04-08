@@ -9,17 +9,43 @@
  */
 
 /**
- * Binary session outcome reward:
- * - any failure event present → 0.0
- * - only successes → 1.0
- * - no events or no outcome fields → 0.5 (null signal)
+ * Graded session outcome reward (v2):
+ *
+ * Priority 1: session_summary event with explicit success_rate (0-1)
+ *   ≥0.8 → 1.0, ≥0.5 → 0.7, >0 → 0.3, 0 → 0.0
+ *
+ * Priority 2: legacy outcome fields (backward compat)
+ *   any failure → 0.0, any success → 1.0
+ *
+ * Priority 3: infer from tool mix
+ *   writes + no errors → 0.8, writes + errors → 0.5,
+ *   errors only → 0.2, unknown → 0.5
  */
 function sessionOutcomeReward(events) {
   if (!events || events.length === 0) return 0.5
+
+  // Priority 1: session_summary with success_rate
+  const summary = events.find(e => e.event === 'session_summary')
+  if (summary && typeof summary.success_rate === 'number') {
+    if (summary.success_rate >= 0.8) return 1.0
+    if (summary.success_rate >= 0.5) return 0.7
+    if (summary.success_rate > 0)    return 0.3
+    return 0.0
+  }
+
+  // Priority 2: legacy outcome fields (backward compat)
   const hasFailure = events.some(e => e.outcome === 'failure' || e.outcome === 'error')
   if (hasFailure) return 0.0
   const hasSuccess = events.some(e => e.outcome === 'success')
   if (hasSuccess) return 1.0
+
+  // Priority 3: infer from tool mix
+  const writes = events.filter(e => ['Write', 'Edit', 'MultiEdit'].includes(e.tool)).length
+  const bashErrors = events.filter(e => e.tool === 'Bash' && e.exit_code > 0).length
+
+  if (writes > 0 && bashErrors === 0) return 0.8
+  if (writes > 0 && bashErrors > 0)   return 0.5
+  if (bashErrors > 0 && writes === 0) return 0.2
   return 0.5
 }
 

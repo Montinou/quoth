@@ -189,15 +189,23 @@ const handlers = {
     })
     const latency = Date.now() - t0
 
+    // Collect all IDs for exposure tracking (patterns + doc chunks)
+    const allIds = (resp.patterns || []).map(p => p.id)
+    const docChunks = resp.doc_chunks || []
+    const relevantDocs = docChunks.filter(c => c.score > 0.2)
+    for (const c of relevantDocs) {
+      if (c.id) allIds.push(c.id)
+    }
+
     // Pattern injection output
     if (resp.patterns && resp.patterns.length > 0) {
       try {
         const { recordExposure } = require('../daemon/lib/scoring.js')
         const { createSessionMemory } = require('./session-memory.js')
         const db = getDb()
-        if (db) recordExposure(db, resp.patterns.map(p => p.id))
+        if (db) recordExposure(db, allIds)
         const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-        sm.recordInjection(resp.patterns.map(p => p.id))
+        sm.recordInjection(allIds)
       } catch {}
 
       const lines = ['[Quoth] Patterns for this prompt:']
@@ -208,15 +216,12 @@ const handlers = {
     }
 
     // Doc chunk injection output
-    if (resp.doc_chunks && resp.doc_chunks.length > 0) {
-      const relevant = resp.doc_chunks.filter(c => c.score > 0.2)
-      if (relevant.length > 0) {
-        const lines = ['[Quoth Docs] Relevant project context:']
-        for (const c of relevant) {
-          lines.push(`  • [${c.title}] ${c.content.slice(0, 250)}`)
-        }
-        console.log(lines.join('\n'))
+    if (relevantDocs.length > 0) {
+      const lines = ['[Quoth Docs] Relevant project context:']
+      for (const c of relevantDocs) {
+        lines.push(`  • [${c.title}] ${(c.content || '').slice(0, 250)}`)
       }
+      console.log(lines.join('\n'))
     }
 
     // Routing output
@@ -344,21 +349,44 @@ const handlers = {
         })
 
         const patterns = resp.patterns || []
-        if (patterns.length > 0) {
+        const allIds = patterns.map(p => p.id)
+
+        // Collect doc chunk IDs for unified tracking
+        const docChunks = resp.doc_chunks || []
+        const relevantDocs = docChunks.filter(c => c.score > 0.2)
+        if (relevantDocs.length > 0) {
+          for (const c of relevantDocs) {
+            if (c.id) allIds.push(c.id)
+          }
+        }
+
+        if (patterns.length > 0 || relevantDocs.length > 0) {
           try {
             const { recordExposure } = require('../daemon/lib/scoring.js')
             const { createSessionMemory } = require('./session-memory.js')
             const db = getDb()
-            if (db) recordExposure(db, patterns.map(p => p.id))
+            if (db) recordExposure(db, allIds)
             const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-            sm.recordInjection(patterns.map(p => p.id))
+            sm.recordInjection(allIds)
           } catch {}
 
-          const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
-          for (const p of patterns) {
-            lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
+          if (patterns.length > 0) {
+            const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
+            for (const p of patterns) {
+              lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
+            }
+            console.log(lines.join('\n'))
           }
-          console.log(lines.join('\n'))
+
+          // Doc chunk injection at session start
+          if (relevantDocs.length > 0) {
+            const docLines = ['[Quoth Docs] Session context:']
+            for (const c of relevantDocs) {
+              const label = (c.doc_file || c.title || '').replace('.md', '').replace(/^\d+-/, '')
+              docLines.push(`  • [${label}] ${(c.content || '').slice(0, 150)}`)
+            }
+            console.log(docLines.join('\n'))
+          }
         }
       }
     } catch {}
@@ -489,6 +517,17 @@ const handlers = {
           // Used patterns get reward=1.0 (strong signal); unused get session outcome
           const patternReward = wasUsed ? 1.0 : reward
           db.updateInjectionOutcome(sessionId, pid, patternReward)
+
+          // Route Bayesian update to correct table
+          if (pid.startsWith('doc:')) {
+            const chunkId = pid.slice(4)
+            if (patternReward >= 0.7) db.updateDocChunkAlphaBeta(chunkId, 'success')
+            else if (patternReward <= 0.3) db.updateDocChunkAlphaBeta(chunkId, 'failure')
+            // 0.3-0.7 = neutral, no Bayesian update (avoid noise)
+          } else {
+            if (patternReward >= 0.7) db.applyBayesianUpdate(pid, 'success')
+            else if (patternReward <= 0.3) db.applyBayesianUpdate(pid, 'failure')
+          }
         }
       } else if (db) {
         // V1 feedback: soft-negative on stale (un-used) injections
@@ -534,7 +573,12 @@ const handlers = {
         // Intelligence graph IDs are prefixed: pat-{realId} for patterns
         const patternId = id.startsWith('pat-') ? id.slice(4) : null
         if (patternId) {
-          db.applyBayesianUpdate(patternId, 'success')
+          // Route doc: IDs to doc_chunks table, regular IDs to patterns table
+          if (patternId.startsWith('doc:')) {
+            db.updateDocChunkAlphaBeta(patternId.slice(4), 'success')
+          } else {
+            db.applyBayesianUpdate(patternId, 'success')
+          }
         }
       }
     }
@@ -563,6 +607,12 @@ const handlers = {
           if (v2) {
             // V2: record as strong reward in injection_log (nightly SNIPS aggregates)
             db.updateInjectionOutcome(sessionId, id, 1.0)
+            // Route Bayesian update to correct table
+            if (id.startsWith('doc:')) {
+              db.updateDocChunkAlphaBeta(id.slice(4), 'success')
+            } else {
+              db.applyBayesianUpdate(id, 'success')
+            }
           } else {
             db.applyBayesianUpdate(id, 'success')
           }
@@ -612,25 +662,41 @@ const handlers = {
       }
 
       const scored = resp.patterns || []
-      if (scored.length === 0) return
+      const docChunks = resp.doc_chunks || []
+      const relevantDocs = docChunks.filter(c => c.score > 0.2)
 
+      if (scored.length === 0 && relevantDocs.length === 0) return
+
+      // Track all injected IDs (patterns + doc chunks)
+      const allIds = [...scored.map(p => p.id), ...relevantDocs.filter(c => c.id).map(c => c.id)]
       try {
         const { recordExposure } = require('../daemon/lib/scoring.js')
         const { createSessionMemory } = require('./session-memory.js')
         const db = getDb()
-        if (db) recordExposure(db, scored.map(p => p.id))
+        if (db) recordExposure(db, allIds)
         const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-        sm.recordInjection(scored.map(p => p.id))
+        sm.recordInjection(allIds)
       } catch {}
 
-      const context = scored.map(p =>
-        `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
-      ).join('\n')
-
-      const output = {
-        additionalContext: `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
+      let additionalContext = ''
+      if (scored.length > 0) {
+        const context = scored.map(p =>
+          `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
+        ).join('\n')
+        additionalContext = `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
       }
-      console.log(JSON.stringify(output))
+
+      // Append doc chunks to additionalContext
+      if (relevantDocs.length > 0) {
+        const docContext = relevantDocs
+          .map(c => `- [doc] ${c.title || ''}: ${(c.content || '').slice(0, 100)}`)
+          .join('\n')
+        additionalContext += `${additionalContext ? '\n\n' : ''}[Quoth Docs] Relevant documentation:\n${docContext}`
+      }
+
+      if (additionalContext) {
+        console.log(JSON.stringify({ additionalContext }))
+      }
     } catch {}
   },
 

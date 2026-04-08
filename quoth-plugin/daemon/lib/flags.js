@@ -16,4 +16,14 @@ function isSubFlag(name) {
   return truthy(process.env[key])
 }
 
-module.exports = { isV2Enabled, isSubFlag }
+function getActiveFlags() {
+  return {
+    master: isV2Enabled(),
+    injection: isSubFlag('injection'),
+    exploration: isSubFlag('exploration'),
+    judge: isSubFlag('judge'),
+    curation: isSubFlag('curation'),
+  }
+}
+
+module.exports = { isV2Enabled, isSubFlag, getActiveFlags }

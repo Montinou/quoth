@@ -9,6 +9,10 @@ const SOFT_NEGATIVE_BETA_DELTA = 0.1
 
 function recordExposure(db, ids) {
   if (!ids || ids.length === 0) return
+  // Filter out doc: prefixed IDs — they don't exist in patterns table.
+  // Doc chunk exposure is tracked via injection_log instead.
+  const patternIds = ids.filter(id => !id.startsWith('doc:'))
+  if (patternIds.length === 0) return
   const stmt = db.prepare(`
     UPDATE patterns
     SET exposure_count = exposure_count + 1,
@@ -18,7 +22,7 @@ function recordExposure(db, ids) {
   const run = db.transaction((batch) => {
     for (const id of batch) stmt.run(id)
   })
-  run(ids)
+  run(patternIds)
 }
 
 function applySoftNegative(db, ids) {

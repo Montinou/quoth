@@ -215,3 +215,44 @@ describe('db', () => {
     expect(p.beta).toBe(2)
   })
 })
+
+describe('doc_chunks Thompson priors', () => {
+  it('doc_chunks table has alpha and beta columns', () => {
+    const cols = db.prepare("PRAGMA table_info(doc_chunks)").all().map(r => r.name)
+    expect(cols).toContain('alpha')
+    expect(cols).toContain('beta')
+  })
+
+  it('upsertDocChunk defaults alpha=1 beta=1', () => {
+    db.upsertDocChunk({ id: 'test::Header', doc_file: 'test.md', section_header: 'Header', content: 'body', embedding: null, content_hash: 'abc' })
+    const row = db.prepare('SELECT alpha, beta FROM doc_chunks WHERE id = ?').get('test::Header')
+    expect(row.alpha).toBe(1)
+    expect(row.beta).toBe(1)
+  })
+
+  it('updateDocChunkAlphaBeta increments alpha on success', () => {
+    db.upsertDocChunk({ id: 'dc1', doc_file: 'a.md', section_header: 'S', content: 'c', embedding: null, content_hash: 'h1' })
+    db.updateDocChunkAlphaBeta('dc1', 'success')
+    const row = db.prepare('SELECT alpha, beta FROM doc_chunks WHERE id = ?').get('dc1')
+    expect(row.alpha).toBe(2)
+    expect(row.beta).toBe(1)
+  })
+
+  it('updateDocChunkAlphaBeta increments beta on failure', () => {
+    db.upsertDocChunk({ id: 'dc2', doc_file: 'a.md', section_header: 'S', content: 'c', embedding: null, content_hash: 'h2' })
+    db.updateDocChunkAlphaBeta('dc2', 'failure')
+    const row = db.prepare('SELECT alpha, beta FROM doc_chunks WHERE id = ?').get('dc2')
+    expect(row.alpha).toBe(1)
+    expect(row.beta).toBe(2)
+  })
+
+  it('getDocChunksWithStats returns confidence field', () => {
+    const emb = JSON.stringify(Array(384).fill(0.1))
+    db.upsertDocChunk({ id: 'dc3', doc_file: 'b.md', section_header: 'S', content: 'c', embedding: emb, content_hash: 'h3' })
+    db.updateDocChunkAlphaBeta('dc3', 'success') // alpha=2, beta=1 → confidence=0.667
+    const results = db.getDocChunksWithStats(Array(384).fill(0.1), 5)
+    expect(results.length).toBe(1)
+    expect(results[0].confidence).toBeCloseTo(2 / 3)
+    expect(results[0]._similarity).toBeGreaterThan(0.9)
+  })
+})

@@ -346,6 +346,10 @@ function createDb(dbPath) {
     `)
   } catch (e) { console.error('[db] doc_chunks create failed:', e.message) }
 
+  // V2: Thompson priors for doc chunk injection selection
+  v2Migrate('add doc_chunks alpha', () => db.exec('ALTER TABLE doc_chunks ADD COLUMN alpha REAL NOT NULL DEFAULT 1'))
+  v2Migrate('add doc_chunks beta', () => db.exec('ALTER TABLE doc_chunks ADD COLUMN beta REAL NOT NULL DEFAULT 1'))
+
   // --- HNSW index state ---
   const hnsw = new HnswIndex(384)
   let hnswHealthy = false
@@ -722,6 +726,23 @@ function createDb(dbPath) {
 
   db.getDocChunkCount = function() {
     return db.prepare('SELECT COUNT(*) as c FROM doc_chunks').get().c
+  }
+
+  db.updateDocChunkAlphaBeta = function(chunkId, outcome) {
+    const col = outcome === 'success' ? 'alpha' : 'beta'
+    db.prepare(`UPDATE doc_chunks SET ${col} = ${col} + 1 WHERE id = ?`).run(chunkId)
+  }
+
+  db.getDocChunksWithStats = function(queryVector, limit = 10) {
+    const rows = db.prepare('SELECT *, alpha/(alpha+beta) as confidence FROM doc_chunks WHERE embedding IS NOT NULL').all()
+    if (rows.length === 0) return []
+    const scored = rows.map(row => {
+      let sim = 0
+      try { sim = cosineSimilarity(queryVector, JSON.parse(row.embedding)) } catch {}
+      return { ...row, _similarity: sim }
+    })
+    scored.sort((a, b) => b._similarity - a._similarity)
+    return scored.slice(0, limit)
   }
 
   db.appendTrajectoryEntry = function(entry) {

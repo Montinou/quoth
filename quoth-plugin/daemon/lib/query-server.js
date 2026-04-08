@@ -159,25 +159,61 @@ async function handleQuery(body, db, log) {
   }
 
   // 3. Pattern injection (if type includes 'inject')
+  const DOC_CLUSTER_ID = -1
   if (type === 'inject' || type === 'route+inject') {
     const ns = project || 'default'
 
     // Check V2 flag
     let patterns = []
+    let docResults = []
     try {
       const { isSubFlag } = require('./flags.js')
       if (isSubFlag('injection') && embedding) {
-        // V2: hierarchical Thompson sampling with clusters
+        // V2: unified ranking — patterns + doc chunks in one hierarchicalSelect pass
         const { hierarchicalSelect } = require('./bandit-v2.js')
         const candidates = db.searchBySimilarity(embedding, 20, tags)
+
+        // Fetch doc chunk candidates and transform to pattern shape
+        const docCandidates = db.getDocChunksWithStats(embedding, 10)
+        const docAsPatterns = docCandidates.map(c => ({
+          id: `doc:${c.id}`,
+          name: c.section_header,
+          action: (c.content || '').slice(0, 200),
+          condition: c.doc_file,
+          confidence: c.confidence || 0.5,
+          alpha: c.alpha || 1,
+          beta: c.beta || 1,
+          cluster_id: DOC_CLUSTER_ID,
+          embedding: typeof c.embedding === 'string' ? JSON.parse(c.embedding) : c.embedding,
+          tags: JSON.stringify([`doc:${(c.doc_file || '').replace('.md', '')}`]),
+          _isDocChunk: true,
+          _similarity: c._similarity || 0,
+        }))
+
+        // Merge candidates
+        const allCandidates = [...candidates, ...docAsPatterns]
+
+        // Build cluster map including synthetic doc cluster
         const clusterMap = new Map()
-        for (const c of candidates) {
-          if (c.cluster_id) {
-            const stats = db.getClusterStats(c.cluster_id, ns)
-            if (stats) clusterMap.set(c.cluster_id, stats)
+        for (const c of allCandidates) {
+          if (c.cluster_id != null) {
+            if (c.cluster_id === DOC_CLUSTER_ID) {
+              if (!clusterMap.has(DOC_CLUSTER_ID)) {
+                clusterMap.set(DOC_CLUSTER_ID, { alpha: 1, beta: 1, attempts: docCandidates.length })
+              }
+            } else {
+              const stats = db.getClusterStats(c.cluster_id, ns)
+              if (stats) clusterMap.set(c.cluster_id, stats)
+            }
           }
         }
-        patterns = hierarchicalSelect(candidates, clusterMap, limit, embedding)
+
+        // Unified hierarchical selection
+        const selected = hierarchicalSelect(allCandidates, clusterMap, limit, embedding)
+
+        // Split back into patterns and doc chunks
+        patterns = selected.filter(s => !s.id.startsWith('doc:'))
+        docResults = selected.filter(s => s.id.startsWith('doc:'))
       } else {
         // V1: Thompson + trigram
         const { rankByThompsonAndTrigram } = require('./injection.js')
@@ -192,7 +228,7 @@ async function handleQuery(body, db, log) {
       patterns = []
     }
 
-    // Log injections
+    // Log pattern injections
     for (let i = 0; i < patterns.length; i++) {
       const p = patterns[i]
       try {
@@ -209,6 +245,22 @@ async function handleQuery(body, db, log) {
       } catch {}
     }
 
+    // Log doc chunk injections
+    for (let i = 0; i < docResults.length; i++) {
+      try {
+        db.logInjection({
+          session_id: session_id || 'daemon-query',
+          namespace: ns,
+          pattern_id: docResults[i].id,
+          cluster_id: DOC_CLUSTER_ID,
+          rank: patterns.length + i + 1,
+          propensity: docResults[i].propensity || 1.0,
+          is_exploration: 0,
+          query_text: (prompt || '').slice(0, 200),
+        })
+      } catch {}
+    }
+
     result.patterns = patterns.map(p => ({
       id: p.id,
       name: p.name,
@@ -220,17 +272,31 @@ async function handleQuery(body, db, log) {
       tags: p.tags || [],
     }))
 
-    // 4. Doc chunk search
-    try {
-      if (embedding) {
-        const chunks = db.searchDocChunks(embedding, 3)
-        result.doc_chunks = chunks.map(c => ({
-          title: c.title || c.doc_path || '',
-          content: (c.content || '').slice(0, 500),
-          score: c._similarity || 0,
-        }))
-      }
-    } catch { result.doc_chunks = [] }
+    // 4. Doc chunks result
+    if (docResults.length > 0) {
+      // V2: doc chunks from unified ranking (already selected + logged)
+      result.doc_chunks = docResults.map(c => ({
+        id: c.id,
+        title: c.name || c.section_header || '',
+        content: (c.action || c.content || '').slice(0, 500),
+        score: c._similarity || c.propensity || 0,
+        doc_file: c.condition || c.doc_file || '',
+      }))
+    } else {
+      // V1 fallback: separate doc chunk search
+      try {
+        if (embedding) {
+          const chunks = db.searchDocChunks(embedding, 3)
+          result.doc_chunks = chunks.map(c => ({
+            id: `doc:${c.id}`,
+            title: c.section_header || c.doc_path || '',
+            content: (c.content || '').slice(0, 500),
+            score: c._similarity || 0,
+            doc_file: c.doc_file || '',
+          }))
+        }
+      } catch { result.doc_chunks = [] }
+    }
   }
 
   result.search_ms = Date.now() - t1
