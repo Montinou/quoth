@@ -109,7 +109,15 @@ async function handle(name, args, db) {
         const lastLog = fs.existsSync(logFile)
           ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).slice(-3).join('\n')
           : 'no log'
-        return { running: true, pid, lastLog }
+        let costSummary = null
+        try {
+          costSummary = {
+            today: db.getCostSummary('today'),
+            week: db.getCostSummary('week'),
+            all_time: db.getCostSummary(),
+          }
+        } catch {}
+        return { running: true, pid, lastLog, costSummary }
       } catch {
         return { running: false, stalePid: pid }
       }
