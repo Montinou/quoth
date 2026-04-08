@@ -28,7 +28,7 @@ quoth-plugin/
 │   │   ├── doc-manifest.js      — Doc manifest scanning and hash tracking
 │   │   ├── doc-update-api.js    — Cloud doc update API client (managed mode)
 │   │   ├── doc-updater.js       — Local doc auto-updater (Sonnet 4.6 CLI)
-│   │   ├── embed.js             — Local MiniLM-L6-v2 embeddings via @xenova/transformers (384d, ONNX)
+│   │   ├── embed.js             — Local MiniLM-L6-v2 embeddings (see doc 12)
 │   │   ├── flags.js             — V2 feature flags (injection, judge, curation)
 │   │   ├── hnsw.js              — Pure JS HNSW approximate nearest neighbor index (384d)
 │   │   ├── injection.js         — Trigram-based pattern injection and matching
@@ -165,16 +165,4 @@ trajectory-capture.js  [matcher: Bash|Write|Edit|MultiEdit|Agent]
 
 Hooks bypass the MCP roundtrip and `require()` handler modules directly. All hooks except `trajectory-capture.js` route through `hook-dispatch.js`.
 
-#### Hook Matchers Reference
-
-| Event | Matcher | Command | Timeout |
-|-------|---------|---------|---------|
-| `PreToolUse` | `Bash` | `pre-bash` | 2 000 ms |
-| `PostToolUse` | `Bash\|Write\|Edit\|MultiEdit\|Agent` | trajectory-capture | 3 000 ms |
-| `PostToolUse` | `Write\|Edit\|MultiEdit` | `post-edit` | 2 000 ms |
-| `UserPromptSubmit` | _(all)_ | `route` | 3 000 ms |
-| `SessionStart` | _(all)_ | `session-restore` | 15 000 ms |
-| `SessionEnd` | _(all)_ | `session-end` | 10 000 ms |
-| `PreCompact` | _(all)_ | `session-end` | 6 000 ms |
-| `SubagentStart` | _(all)_ | `subagent-start` | 3 000 ms |
-| `SubagentStop` | _(all)_ | `post-task` | 5 000 ms |
+For the complete hook events reference (9 bindings across 8 events), see [04 — Hook System](./04-hook-system.md).

@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quoth v3.3.0 — AI Memory & Self-Learning Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700;800&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+  --font-display: 'Sora', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --bg: #0d0d14;
+  --surface: #16162a;
+  --surface-elevated: #222244;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-bright: rgba(255, 255, 255, 0.12);
+  --text: #f0f0ff;
+  --text-dim: #a0a0cc;
+  --accent: #7c1fff;
+  --accent-dim: rgba(124, 31, 255, 0.12);
+  --cyan: #00e5ff;
+  --cyan-dim: rgba(0, 229, 255, 0.12);
+  --green: #34d399;
+  --green-dim: rgba(52, 211, 153, 0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Background effects */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 800px 600px at 15% 10%, rgba(124, 31, 255, 0.08), transparent),
+    radial-gradient(ellipse 600px 500px at 85% 90%, rgba(0, 229, 255, 0.06), transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+/* Animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate {
+  opacity: 0;
+}
+
+.animate.visible {
+  animation: fadeUp 0.6s ease-out forwards;
+}
+
+.animate.visible:nth-child(2) { animation-delay: 0.08s; }
+.animate.visible:nth-child(3) { animation-delay: 0.16s; }
+.animate.visible:nth-child(4) { animation-delay: 0.24s; }
+
+/* Section styling */
+section {
+  padding: 5rem 0;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.75rem;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  line-height: 1.2;
+}
+
+.section-subtitle {
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  max-width: 640px;
+  margin-bottom: 2.5rem;
+}
+
+/* Cards */
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.card-elevated {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.card-hero {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(124, 31, 255, 0.2);
+  padding: 2rem;
+}
+
+.card h3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.card p {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+/* Grids */
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; }
+
+@media (max-width: 900px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid;
+}
+
+.badge-accent { background: var(--accent-dim); border-color: rgba(124, 31, 255, 0.3); color: #c4a0ff; }
+.badge-cyan { background: var(--cyan-dim); border-color: rgba(0, 229, 255, 0.3); color: #7aeeff; }
+.badge-green { background: var(--green-dim); border-color: rgba(52, 211, 153, 0.3); color: var(--green); }
+.badge-red { background: var(--red-dim); border-color: rgba(239, 68, 68, 0.3); color: #f87171; }
+.badge-surface { background: rgba(255,255,255,0.06); border-color: var(--border-bright); color: var(--text-dim); }
+
+/* Icon circles */
+.icon-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  flex-shrink: 0;
+}
+
+.icon-accent { background: var(--accent-dim); color: #c4a0ff; }
+.icon-cyan { background: var(--cyan-dim); color: var(--cyan); }
+.icon-green { background: var(--green-dim); color: var(--green); }
+.icon-red { background: var(--red-dim); color: #f87171; }
+
+/* ===== HERO ===== */
+.hero {
+  padding: 8rem 0 5rem;
+  text-align: center;
+  position: relative;
+}
+
+.hero-orb-1 {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(124, 31, 255, 0.12), transparent 70%);
+  top: -10%;
+  left: -10%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.hero-orb-2 {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.08), transparent 70%);
+  bottom: -15%;
+  right: -5%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: 5rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #7c1fff 0%, #a855f7 30%, #00e5ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.hero-subtitle {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-bottom: 1.5rem;
+}
+
+.hero-badges {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ===== PROBLEM ===== */
+.highlight-stat {
+  text-align: center;
+  margin-top: 2rem;
+  padding: 1.25rem;
+  border-radius: 10px;
+  background: var(--red-dim);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.highlight-stat .number {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: #f87171;
+}
+
+.highlight-stat .label {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+}
+
+/* ===== ARCHITECTURE ===== */
+.arch-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .arch-grid { grid-template-columns: 1fr; gap: 1.5rem; }
+  .arch-connector { display: none; }
+}
+
+.arch-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.5rem;
+  color: var(--text-dim);
+}
+
+.arch-connector .line {
+  width: 80px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--cyan));
+  border-radius: 1px;
+  position: relative;
+}
+
+.arch-connector .line::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid var(--cyan);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.arch-connector span {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.arch-card {
+  padding: 2rem;
+}
+
+.arch-card h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.arch-card ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.arch-card li {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  padding-left: 1.4rem;
+  position: relative;
+}
+
+.arch-card li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.arch-local li::before { background: var(--accent); }
+.arch-cloud li::before { background: var(--cyan); }
+
+/* ===== LEARNING LOOP ===== */
+.loop-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.loop-step {
+  width: 100%;
+  text-align: center;
+  position: relative;
+}
+
+.loop-step .card {
+  position: relative;
+}
+
+.loop-step .step-num {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+
+.loop-step .step-text {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.loop-arrow {
+  width: 2px;
+  height: 32px;
+  background: linear-gradient(180deg, rgba(124, 31, 255, 0.5), rgba(0, 229, 255, 0.3));
+  position: relative;
+}
+
+.loop-arrow::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: -4px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid rgba(0, 229, 255, 0.5);
+}
+
+/* ===== HOOK TABLE ===== */
+.hook-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.9rem;
+}
+
+.hook-table thead th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-bright);
+}
+
+.hook-table tbody td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.hook-table tbody td:first-child {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.hook-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.hook-cat {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
+.hook-cat-lifecycle { background: var(--green); }
+.hook-cat-tool { background: var(--cyan); }
+.hook-cat-subagent { background: #a855f7; }
+.hook-cat-safety { background: var(--red); }
+
+/* ===== PIPELINE ===== */
+.pipeline-flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .pipeline-flow {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .pipeline-arrow { display: none; }
+}
+
+.pipeline-card {
+  text-align: center;
+}
+
+.pipeline-card h3 {
+  font-size: 1rem;
+}
+
+.pipeline-card .model-tag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 0.5rem;
+}
+
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+}
+
+.pipeline-note {
+  margin-top: 1.5rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+/* ===== BAYESIAN ===== */
+.formula-box {
+  text-align: center;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.formula {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.formula .var {
+  color: var(--cyan);
+}
+
+.confidence-bar-container {
+  margin-bottom: 2rem;
+}
+
+.confidence-bar {
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  position: relative;
+  border: 1px solid var(--border-bright);
+}
+
+.confidence-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.zone-archival {
+  flex: 1;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border-right: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.zone-active {
+  flex: 7;
+  background: rgba(124, 31, 255, 0.08);
+  color: #c4a0ff;
+  border-right: 1px solid rgba(124, 31, 255, 0.3);
+}
+
+.zone-promotion {
+  flex: 2;
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--green);
+}
+
+.confidence-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.decay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 700px) {
+  .decay-grid { grid-template-columns: 1fr; }
+}
+
+.decay-card {
+  text-align: center;
+}
+
+.decay-card .decay-tier {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.decay-card .decay-desc {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+/* ===== MCP TOOLS ===== */
+.tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* ===== TECH STACK ===== */
+.tech-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-bottom: 2rem;
+}
+
+.tech-badge {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+}
+
+.search-pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.search-pipeline .step {
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(124, 31, 255, 0.2);
+  color: #c4a0ff;
+}
+
+.search-pipeline .arrow {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+/* ===== SECURITY ===== */
+.auth-layers .card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.security-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  justify-content: center;
+}
+
+.pill {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* ===== COST TABLE ===== */
+.cost-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.88rem;
+  margin-bottom: 1.5rem;
+}
+
+.cost-table thead th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border-bright);
+}
+
+.cost-table tbody td {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.cost-table tbody td:first-child {
+  color: var(--text);
+}
+
+.cost-table .cost-val {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--green);
+}
+
+.fallback-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fallback-list li {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  padding-left: 1.2rem;
+  position: relative;
+}
+
+.fallback-list li::before {
+  content: '\2192';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+/* ===== PRICING ===== */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 1000px) {
+  .pricing-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .pricing-grid { grid-template-columns: 1fr; }
+}
+
+.pricing-card {
+  text-align: center;
+  padding: 2rem 1.5rem;
+}
+
+.pricing-card .tier-name {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
+.pricing-card .tier-price {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.pricing-card .tier-period {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 1.25rem;
+}
+
+.pricing-card ul {
+  list-style: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pricing-card li {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  padding-left: 1.2rem;
+  position: relative;
+}
+
+.pricing-card li::before {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.pricing-featured {
+  border-color: rgba(124, 31, 255, 0.35);
+  background: rgba(124, 31, 255, 0.06);
+  position: relative;
+}
+
+.pricing-featured::before {
+  content: 'POPULAR';
+  position: absolute;
+  top: -0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  background: var(--accent);
+  color: white;
+}
+
+/* ===== METRICS ===== */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .metrics-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 500px) {
+  .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.metric-card {
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+.metric-card .metric-val {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+
+.metric-card .metric-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 0.35rem;
+}
+
+/* ===== FOOTER ===== */
+footer {
+  padding: 3rem 0;
+  text-align: center;
+  border-top: 1px solid var(--border);
+}
+
+footer .footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+footer a {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+footer a:hover { color: var(--text); }
+
+footer .footer-date {
+  font-size: 0.8rem;
+  color: rgba(160, 160, 204, 0.5);
+}
+
+/* Divider */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-bright), transparent);
+  margin: 0;
+}
+
+/* Table wrapper */
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+
+/* Stats row */
+.stats-row {
+  display: flex;
+  justify-content: center;
+  gap: 2.5rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-item .stat-val {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--text);
+}
+
+.stat-item .stat-label {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+</style>
+</head>
+<body>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-orb-1"></div>
+  <div class="hero-orb-2"></div>
+  <div class="container">
+    <div class="animate">
+      <h1 class="hero-title">Quoth</h1>
+      <p class="hero-subtitle">AI Memory & Self-Learning Platform</p>
+      <div class="hero-badges">
+        <span class="badge badge-accent">v3.3.0</span>
+        <span class="badge badge-cyan">quoth.triqual.dev</span>
+        <span class="badge badge-surface">Claude Code Plugin</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== THE PROBLEM ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">The Problem</p>
+      <h2 class="section-title">AI agents forget everything</h2>
+      <p class="section-subtitle">Every session starts from zero. Context is lost, mistakes repeat, and teams can't share what works.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card animate">
+        <div class="icon-circle icon-red">&#x2715;</div>
+        <h3>No Memory Between Sessions</h3>
+        <p>Every conversation begins blank. Previous solutions, preferences, and context are gone.</p>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-red">&#x21BB;</div>
+        <h3>Repeated Mistakes</h3>
+        <p>Same errors resurface over and over. No mechanism to learn from past failures.</p>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-red">&#x2302;</div>
+        <h3>No Cross-Team Learning</h3>
+        <p>Solutions discovered by one developer are invisible to others. Knowledge stays siloed.</p>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-red">&#x2205;</div>
+        <h3>No Feedback Loop</h3>
+        <p>No way to reinforce what works or discard what doesn't. Every session is equally naive.</p>
+      </div>
+    </div>
+    <div class="highlight-stat animate">
+      <div class="number">20-30%</div>
+      <div class="label">of AI interactions wasted re-explaining context that should already be known</div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== ARCHITECTURE ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Architecture</p>
+      <h2 class="section-title">Two-part system</h2>
+      <p class="section-subtitle">A local plugin that captures and learns, connected to a cloud platform for persistence and sharing.</p>
+    </div>
+    <div class="arch-grid animate">
+      <div class="card card-hero arch-card arch-local">
+        <div class="icon-circle icon-accent">&#x2756;</div>
+        <h3>Local Plugin</h3>
+        <ul>
+          <li>9 lifecycle & tool hooks</li>
+          <li>22 MCP tools</li>
+          <li>Background daemon (local/managed)</li>
+          <li>SQLite + HNSW vector index</li>
+          <li>Project-aware namespacing via git remote</li>
+        </ul>
+      </div>
+      <div class="arch-connector">
+        <span>Cloud Promotion</span>
+        <div class="line"></div>
+      </div>
+      <div class="card card-hero arch-card arch-cloud">
+        <div class="icon-circle icon-cyan">&#x2601;</div>
+        <h3>Cloud Platform</h3>
+        <ul>
+          <li>Next.js 16 on Vercel</li>
+          <li>Neon Postgres + pgvector</li>
+          <li>50+ REST API endpoints</li>
+          <li>Hybrid search (vector + FTS + RRF)</li>
+          <li>Agent coordination & org management</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== LEARNING LOOP ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Core Loop</p>
+      <h2 class="section-title">The learning loop</h2>
+      <p class="section-subtitle">Invisible capture, autonomous evaluation, and confidence-driven injection. The agent gets smarter with every session.</p>
+    </div>
+    <div class="loop-flow animate">
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">01</div>
+          <div class="step-text">Developer works with Claude Code</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">02</div>
+          <div class="step-text">Quoth captures every interaction (invisible)</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">03</div>
+          <div class="step-text">Daemon evaluates effectiveness</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">04</div>
+          <div class="step-text">Extract reusable pattern + embedding</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">05</div>
+          <div class="step-text">Store with Bayesian confidence score</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card">
+          <div class="step-num">06</div>
+          <div class="step-text">Next session: inject relevant patterns</div>
+        </div>
+      </div>
+      <div class="loop-arrow"></div>
+      <div class="loop-step">
+        <div class="card" style="border-color: rgba(52, 211, 153, 0.25);">
+          <div class="step-num" style="color: var(--green);">07</div>
+          <div class="step-text">Success? Confidence rises. Promote to cloud.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== HOOK SYSTEM ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Hooks</p>
+      <h2 class="section-title">Hook system</h2>
+      <p class="section-subtitle">Nine hooks intercept the Claude Code lifecycle. Zero API calls in automatic hooks — everything runs locally.</p>
+    </div>
+    <div class="table-wrap animate">
+      <table class="hook-table">
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Handler</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="hook-cat hook-cat-lifecycle"></span>SessionStart</td>
+            <td>session-restore</td>
+            <td>Init intelligence graph, inject max 3 patterns (&ge; 0.6 confidence)</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-lifecycle"></span>SessionEnd</td>
+            <td>session-end</td>
+            <td>Consolidate intelligence graph, recompute PageRank</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-lifecycle"></span>PreCompact</td>
+            <td>session-end</td>
+            <td>Same as SessionEnd (pre-context-compression)</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-lifecycle"></span>UserPromptSubmit</td>
+            <td>route</td>
+            <td>Route task to optimal agent, show relevant patterns (&ge; 0.1)</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-tool"></span>PostToolUse (Write/Edit)</td>
+            <td>post-edit</td>
+            <td>Record edit for intelligence graph</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-tool"></span>PostToolUse (Bash/Write/Edit/Agent)</td>
+            <td>trajectory-capture</td>
+            <td>Capture tool calls to project trajectory JSONL</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-safety"></span>PreToolUse (Bash)</td>
+            <td>pre-bash</td>
+            <td>Block dangerous commands (rm -rf /, fork bombs)</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-subagent"></span>SubagentStart</td>
+            <td>subagent-start</td>
+            <td>Inject domain-relevant patterns via additionalContext</td>
+          </tr>
+          <tr>
+            <td><span class="hook-cat hook-cat-subagent"></span>SubagentStop</td>
+            <td>post-task</td>
+            <td>Implicit positive feedback to intelligence graph</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; justify-content: center;" class="animate">
+      <span style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-dim);"><span class="hook-cat hook-cat-lifecycle"></span>Lifecycle</span>
+      <span style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-dim);"><span class="hook-cat hook-cat-tool"></span>Tool</span>
+      <span style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-dim);"><span class="hook-cat hook-cat-subagent"></span>Subagent</span>
+      <span style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-dim);"><span class="hook-cat hook-cat-safety"></span>Safety</span>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== DAEMON PIPELINE ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Daemon</p>
+      <h2 class="section-title">Processing pipeline</h2>
+      <p class="section-subtitle">Three-stage background pipeline transforms raw trajectories into scored, searchable patterns.</p>
+    </div>
+    <div class="pipeline-flow animate">
+      <div class="card card-elevated pipeline-card">
+        <div class="icon-circle icon-red">&#x2696;</div>
+        <h3>JUDGE</h3>
+        <p>Batch-evaluate 30 entries at once. Classify domain, discard noise, flag useful interactions.</p>
+        <div class="model-tag">Gemini 2.5 Flash</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="card card-elevated pipeline-card">
+        <div class="icon-circle icon-accent">&#x2702;</div>
+        <h3>DISTILL</h3>
+        <p>Extract reusable patterns. Generate embeddings for semantic search.</p>
+        <div class="model-tag">Gemini 2.5 Flash Lite + MiniLM</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="card card-elevated pipeline-card">
+        <div class="icon-circle icon-cyan">&#x2B22;</div>
+        <h3>CONSOLIDATE</h3>
+        <p>Merge duplicates, update confidence scores, archive stale patterns.</p>
+        <div class="model-tag">Claude Haiku 4.5</div>
+      </div>
+    </div>
+    <div class="pipeline-note animate">
+      Entries accumulate &rarr; batch JUDGE every 30 &rarr; only effective entries reach DISTILL &nbsp;|&nbsp; Nightly 3am consolidation
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== BAYESIAN SCORING ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Scoring</p>
+      <h2 class="section-title">Bayesian confidence scoring</h2>
+      <p class="section-subtitle">Every pattern carries a Beta distribution confidence score that updates with real-world outcomes.</p>
+    </div>
+    <div class="card formula-box animate">
+      <div class="formula"><span class="var">confidence</span> = <span class="var">&alpha;</span> / (<span class="var">&alpha;</span> + <span class="var">&beta;</span>)</div>
+      <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-dim);">Beta(alpha, beta) distribution &mdash; alpha tracks successes, beta tracks failures</p>
+    </div>
+    <div class="confidence-bar-container animate">
+      <div class="confidence-bar">
+        <div class="confidence-zone zone-archival">Archival</div>
+        <div class="confidence-zone zone-active">Active</div>
+        <div class="confidence-zone zone-promotion">Promotion</div>
+      </div>
+      <div class="confidence-labels">
+        <span>0.0</span>
+        <span>0.1</span>
+        <span style="margin-left: auto; margin-right: 12%;">0.8</span>
+        <span>1.0</span>
+      </div>
+    </div>
+    <div class="decay-grid animate">
+      <div class="card decay-card">
+        <div class="decay-tier" style="color: var(--green);">Tier 1: Low Conversion</div>
+        <div class="decay-desc">Exposed &ge;5 times with &lt;10% conversion. Alpha decay applied to reduce confidence over time.</div>
+      </div>
+      <div class="card decay-card">
+        <div class="decay-tier" style="color: #c4a0ff;">Tier 2: High Exposure</div>
+        <div class="decay-desc">Exposed &gt;20 times. Very gentle alpha decay to prevent old winners from dominating forever.</div>
+      </div>
+      <div class="card decay-card">
+        <div class="decay-tier" style="color: #f87171;">Tier 3: Archival</div>
+        <div class="decay-desc">Never-exposed patterns older than 30 days, or &ge;10 exposures with &lt;5% conversion and confidence &lt;0.1.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== MCP TOOLS ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">MCP Tools</p>
+      <h2 class="section-title">22 tools via quoth-learning server</h2>
+      <p class="section-subtitle">Full programmatic control over the learning system, exposed as MCP tools for Claude Code and agents.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card animate">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+          <div class="icon-circle icon-accent" style="margin-bottom: 0; width: 32px; height: 32px; font-size: 0.85rem;">&#x25C8;</div>
+          <h3 style="margin-bottom: 0;">Patterns <span class="badge badge-accent" style="margin-left: 0.5rem;">8</span></h3>
+        </div>
+        <div class="tool-list">
+          <span class="tool-name">quoth_log_outcome</span>
+          <span class="tool-name">quoth_score_pattern</span>
+          <span class="tool-name">quoth_top_patterns</span>
+          <span class="tool-name">quoth_search_patterns</span>
+          <span class="tool-name">quoth_project_patterns</span>
+          <span class="tool-name">quoth_promote_global</span>
+          <span class="tool-name">quoth_seed_from_exolar</span>
+          <span class="tool-name">quoth_propose_update</span>
+        </div>
+      </div>
+      <div class="card animate">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+          <div class="icon-circle icon-cyan" style="margin-bottom: 0; width: 32px; height: 32px; font-size: 0.85rem;">&#x269B;</div>
+          <h3 style="margin-bottom: 0;">Intelligence <span class="badge badge-cyan" style="margin-left: 0.5rem;">6</span></h3>
+        </div>
+        <div class="tool-list">
+          <span class="tool-name">quoth_route_task</span>
+          <span class="tool-name">quoth_intelligence_init</span>
+          <span class="tool-name">quoth_intelligence_context</span>
+          <span class="tool-name">quoth_intelligence_consolidate</span>
+          <span class="tool-name">quoth_intelligence_stats</span>
+          <span class="tool-name">quoth_intelligence_feedback</span>
+        </div>
+      </div>
+      <div class="card animate">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+          <div class="icon-circle icon-green" style="margin-bottom: 0; width: 32px; height: 32px; font-size: 0.85rem;">&#x2726;</div>
+          <h3 style="margin-bottom: 0;">Agents <span class="badge badge-green" style="margin-left: 0.5rem;">6</span></h3>
+        </div>
+        <div class="tool-list">
+          <span class="tool-name">quoth_daemon_status</span>
+          <span class="tool-name">quoth_ingest_trajectory</span>
+          <span class="tool-name">quoth_agent_register</span>
+          <span class="tool-name">quoth_agent_heartbeat</span>
+          <span class="tool-name">quoth_agent_list</span>
+          <span class="tool-name">quoth_assign_task</span>
+        </div>
+      </div>
+      <div class="card animate">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+          <div class="icon-circle icon-red" style="margin-bottom: 0; width: 32px; height: 32px; font-size: 0.85rem;">&#x2605;</div>
+          <h3 style="margin-bottom: 0;">Skills <span class="badge badge-surface" style="margin-left: 0.5rem;">2</span></h3>
+        </div>
+        <div class="tool-list">
+          <span class="tool-name">quoth_extract_skill</span>
+          <span class="tool-name">quoth_list_skills</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== CLOUD PLATFORM ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Cloud Platform</p>
+      <h2 class="section-title">Tech stack</h2>
+      <p class="section-subtitle">Production-grade infrastructure for pattern persistence, search, and multi-org coordination.</p>
+    </div>
+    <div class="tech-badges animate">
+      <span class="tech-badge">Next.js 16</span>
+      <span class="tech-badge">Neon Postgres</span>
+      <span class="tech-badge">Clerk Auth</span>
+      <span class="tech-badge">Vercel AI Gateway</span>
+      <span class="tech-badge">Upstash Redis</span>
+    </div>
+    <div class="stats-row animate">
+      <div class="stat-item">
+        <div class="stat-val">6</div>
+        <div class="stat-label">Schemas</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val">26</div>
+        <div class="stat-label">Tables</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val">50+</div>
+        <div class="stat-label">Endpoints</div>
+      </div>
+    </div>
+    <div class="search-pipeline animate" style="margin-top: 2rem;">
+      <span style="font-size: 0.78rem; color: var(--text-dim); margin-right: 0.5rem;">Search pipeline:</span>
+      <span class="step">Query</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">Embedding</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">Vector + FTS</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">RRF Fusion</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">Reranking</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">Results</span>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== SECURITY ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Security</p>
+      <h2 class="section-title">Four authentication layers</h2>
+      <p class="section-subtitle">Defense in depth: every access path has its own authentication and authorization mechanism.</p>
+    </div>
+    <div class="grid-4 auth-layers">
+      <div class="card animate">
+        <div class="icon-circle icon-green">&#x263A;</div>
+        <h3>Web Users</h3>
+        <p>Clerk session-based auth with JWT claims. Dashboard, settings, pattern browsing.</p>
+        <div style="margin-top: 0.75rem;"><span class="badge badge-green">Clerk</span></div>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-accent">&#x26BF;</div>
+        <h3>Agent API</h3>
+        <p>qth_* prefixed API keys with org scoping. Bearer token authentication for all REST endpoints.</p>
+        <div style="margin-top: 0.75rem;"><span class="badge badge-accent">qth_* keys</span></div>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-cyan">&#x21C4;</div>
+        <h3>MCP Transport</h3>
+        <p>OAuth 2.1 PKCE flow for MCP server connections. Token refresh and scope validation.</p>
+        <div style="margin-top: 0.75rem;"><span class="badge badge-cyan">OAuth 2.1</span></div>
+      </div>
+      <div class="card animate">
+        <div class="icon-circle icon-red">&#x2709;</div>
+        <h3>Messages</h3>
+        <p>Ed25519 signature verification for inter-agent messages. Tamper-proof communication.</p>
+        <div style="margin-top: 0.75rem;"><span class="badge badge-red">Ed25519</span></div>
+      </div>
+    </div>
+    <div class="security-pills animate">
+      <span class="pill">RBAC per org</span>
+      <span class="pill">Row-level security</span>
+      <span class="pill">Rate limiting (Upstash)</span>
+      <span class="pill">Input validation (Zod)</span>
+      <span class="pill">CORS whitelist</span>
+      <span class="pill">Audit logging</span>
+      <span class="pill">Secret rotation</span>
+      <span class="pill">CSP headers</span>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== COST OPTIMIZATION ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Cost</p>
+      <h2 class="section-title">Cost optimization</h2>
+      <p class="section-subtitle">Aggressive cost control through model selection, batching, and graceful degradation.</p>
+    </div>
+    <div class="grid-2">
+      <div class="animate">
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Model</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>JUDGE</td>
+                <td>Gemini 2.5 Flash</td>
+                <td class="cost-val">~$0.001/eval</td>
+              </tr>
+              <tr>
+                <td>DISTILL</td>
+                <td>Gemini 2.5 Flash Lite</td>
+                <td class="cost-val">~$0.002/pattern</td>
+              </tr>
+              <tr>
+                <td>Embeddings</td>
+                <td>MiniLM (local)</td>
+                <td class="cost-val">$0 (local)</td>
+              </tr>
+              <tr>
+                <td>CONSOLIDATE</td>
+                <td>Claude Haiku 4.5</td>
+                <td class="cost-val">~$0.003/run</td>
+              </tr>
+              <tr>
+                <td>Doc updates</td>
+                <td>Sonnet 4.6</td>
+                <td class="cost-val">~$0.01/doc</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card animate">
+        <h3>Graceful Degradation</h3>
+        <p style="margin-bottom: 0.75rem;">Multi-tier fallback chain ensures the system never fully stops:</p>
+        <ul class="fallback-list">
+          <li>Gemini 2.5 Flash (primary) &mdash; cheapest capable model</li>
+          <li>Vercel AI Gateway &mdash; automatic provider failover</li>
+          <li>Local MiniLM embeddings &mdash; zero-cost vector generation</li>
+          <li>SQLite fallback &mdash; works fully offline if cloud is down</li>
+          <li>Skip pipeline &mdash; trajectories queue until daemon recovers</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== PRICING ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">Pricing</p>
+      <h2 class="section-title">Plans for every team size</h2>
+      <p class="section-subtitle">Start free. Scale as your team's collective intelligence grows.</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="card pricing-card animate">
+        <div class="tier-name">Free</div>
+        <div class="tier-price">$0</div>
+        <div class="tier-period">forever</div>
+        <ul>
+          <li>50 pipeline calls/day</li>
+          <li>500 patterns max</li>
+          <li>Local daemon only</li>
+          <li>1 project</li>
+          <li>Community support</li>
+        </ul>
+      </div>
+      <div class="card pricing-card animate">
+        <div class="tier-name">Pro</div>
+        <div class="tier-price">$19</div>
+        <div class="tier-period">per user / month</div>
+        <ul>
+          <li>Unlimited pipeline calls</li>
+          <li>5,000 patterns</li>
+          <li>Cloud sync & promotion</li>
+          <li>Unlimited projects</li>
+          <li>Priority support</li>
+        </ul>
+      </div>
+      <div class="card pricing-card pricing-featured animate">
+        <div class="tier-name">Team</div>
+        <div class="tier-price">$49</div>
+        <div class="tier-period">per user / month</div>
+        <ul>
+          <li>Everything in Pro</li>
+          <li>Cross-team pattern sharing</li>
+          <li>Org-level dashboards</li>
+          <li>RBAC & audit logs</li>
+          <li>SSO (SAML)</li>
+        </ul>
+      </div>
+      <div class="card pricing-card animate">
+        <div class="tier-name">Enterprise</div>
+        <div class="tier-price">Custom</div>
+        <div class="tier-period">contact us</div>
+        <ul>
+          <li>Everything in Team</li>
+          <li>Self-hosted option</li>
+          <li>Custom model routing</li>
+          <li>Dedicated support</li>
+          <li>SLA guarantee</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ===== KEY METRICS ===== -->
+<section>
+  <div class="container">
+    <div class="animate">
+      <p class="section-label">At a Glance</p>
+      <h2 class="section-title">Key metrics</h2>
+    </div>
+    <div class="metrics-grid animate">
+      <div class="card metric-card">
+        <div class="metric-val">v3.3.0</div>
+        <div class="metric-label">Version</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-val">22</div>
+        <div class="metric-label">MCP Tools</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-val">26</div>
+        <div class="metric-label">Tables</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-val">9</div>
+        <div class="metric-label">Hooks</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-val">181+</div>
+        <div class="metric-label">Tests</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-val">5</div>
+        <div class="metric-label">Skills</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FOOTER ===== -->
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://quoth.triqual.dev">quoth.triqual.dev</a>
+      <a href="https://github.com/Montinou/quoth">github.com/Montinou/quoth</a>
+    </div>
+    <div class="footer-date">April 2026</div>
+  </div>
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.animate').forEach((el) => observer.observe(el));
+});
+</script>
+</body>
+</html>

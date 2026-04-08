@@ -35,7 +35,7 @@ Primary storage for learned and distilled patterns, scored using Bayesian confid
 | `success_count` | INTEGER | 0 | Total recorded successes |
 | `failure_count` | INTEGER | 0 | Total recorded failures |
 | `decay_rate` | REAL | 0.005 | Hourly decay rate applied to alpha |
-| `embedding` | TEXT | NULL | JSON-serialized float array (384-dim MiniLM-L6-v2 local embeddings) |
+| `embedding` | TEXT | NULL | JSON-serialized float array (local MiniLM-L6-v2 embeddings; see [12 — Embeddings & Search](./12-embeddings-search.md)) |
 | `version` | INTEGER | 1 | Schema version for forward compatibility |
 | `tags` | TEXT | `'[]'` | JSON array of tag strings |
 | `source` | TEXT | `'distilled'` | Origin: `distilled`, `exolar-seeded`, `healer-learned`, `attributed`, `skill-derived` |
@@ -225,7 +225,7 @@ Chunked project documentation with embeddings for semantic search during session
 | `doc_file` | TEXT NOT NULL | -- | Source documentation file path |
 | `section_header` | TEXT NOT NULL | -- | Section heading the chunk belongs to |
 | `content` | TEXT NOT NULL | -- | Chunk text content |
-| `embedding` | TEXT | NULL | JSON-serialized 384-dim embedding |
+| `embedding` | TEXT | NULL | JSON-serialized embedding (see [doc 12](./12-embeddings-search.md)) |
 | `content_hash` | TEXT | NULL | Hash of content for change detection |
 | `updated_at` | INTEGER | epoch ms | Last update timestamp |
 
@@ -315,7 +315,7 @@ The `createDb()` factory attaches all data access methods directly to the better
 
 ### HNSW Index Operations
 
-The database instance manages an in-memory `HnswIndex(384)` (from `daemon/lib/hnsw.js`, 384-dim MiniLM-L6-v2) alongside SQLite.
+The database instance manages an in-memory HNSW index (from `daemon/lib/hnsw.js`; see [12 — Embeddings & Search](./12-embeddings-search.md) for dimensions and model) alongside SQLite.
 
 **`initHnsw()`** -- Loads from `~/.quoth/hnsw.index.json` if it exists, otherwise builds from all active patterns with embeddings in the database. Sets `hnswHealthy = true` on success or `false` on any error (fallback to linear scan remains functional).
 
@@ -357,7 +357,7 @@ The `createDb()` constructor runs multiple migration blocks on every startup, ea
 5. **V2 hierarchical Thompson columns:** `cluster_id`, `cluster_rank_score`, `effective_exposures`, `distinctiveness`, `retired_at`, `retired_reason`, `idx_patterns_cluster` index -- via a `v2Migrate()` helper that suppresses "duplicate column / already exists" errors only, re-throwing all others.
 6. **Beta repair (one-time):** Resets `alpha = 1, beta = 1, confidence = 0.5` for never-exposed active patterns where `beta > 2.0` (caused by an earlier aggressive decay that incremented beta hourly).
 7. **Trigram backfill (one-time):** Generates `pattern_trigrams` for any active pattern where the column is NULL.
-8. **MiniLM-L6 migration:** If the first stored embedding has length > 384, all embeddings are nulled out (migration from voyage-4-lite 1536d to MiniLM-L6 384d) and `hnsw.index.json` is deleted.
+8. **MiniLM-L6 migration:** If the first stored embedding has a dimension mismatch, all embeddings are nulled out (migration from the previous cloud model to local MiniLM-L6-v2; see [12 — Embeddings & Search](./12-embeddings-search.md)) and `hnsw.index.json` is deleted.
 
 This approach allows the schema to evolve without a formal migration framework.
 

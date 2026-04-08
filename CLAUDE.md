@@ -11,7 +11,12 @@ Auto-detects `claude` CLI → sets mode (local/managed), writes `~/.quoth/.env`,
 
 ## What It Does
 - Logs all agent trajectories to `~/.quoth/trajectories/{repo-name}-{date}.jsonl`
-- Background daemon processes trajectories using Haiku subagents (JUDGE → DISTILL → CONSOLIDATE)
+- Background daemon processes trajectories via 3-stage pipeline (JUDGE → DISTILL → CONSOLIDATE)
+- JUDGE: batch-evaluates 30 entries at once via Gemini 2.5 Flash, classifies domain (8 canonical agent types)
+- DISTILL: extracts patterns via Gemini 2.5 Flash Lite, generates MiniLM embeddings
+- CONSOLIDATE: merges duplicates via Claude Haiku 4.5 (`claude -p`)
+- Patterns carry `agent:<type>` tags from JUDGE domain classification
+- Pipeline costs tracked per stage in `pipeline_costs` table
 - Maintains confidence-scored pattern library in `~/.quoth/memory.db` (SQLite + HNSW)
 - Injects high-confidence patterns (>= 0.6) at session start — max 3, not noise
 - Routes tasks to optimal agents using keyword matching + PageRank intelligence
@@ -27,8 +32,9 @@ Quoth is configured once globally — no per-project setup needed:
 - Project segregation is automatic via `CLAUDE_PROJECT_DIR` → git remote name
 
 ## Daemon Modes
-- **Local** (`QUOTH_MODE=local`): Full local pipeline — JUDGE/DISTILL via AI Gateway, CONSOLIDATE via `claude -p` Haiku, doc-updater via Sonnet 4.6. Requires own API keys.
+- **Local** (`QUOTH_MODE=local`): Full local pipeline — JUDGE (Gemini 2.5 Flash, batch 30) / DISTILL (Gemini 2.5 Flash Lite) via Vercel AI Gateway, CONSOLIDATE via `claude -p` Haiku 4.5, doc-updater via Sonnet 4.6. Requires own API keys.
 - **Managed** (`QUOTH_MODE=managed`): Cloud pipeline — daemon sends trajectories to `POST /api/v1/pipeline/process`, server runs JUDGE→DISTILL→CONSOLIDATE. Only needs `QUOTH_API_KEY`.
+- Canonical agent types defined in `mcp/lib/routing.js` AGENT_TYPES (8 roles)
 - Auto-starts via `session-start` hook or `cli.js init`
 - PID: `~/.quoth/daemon.pid`, Log: `~/.quoth/daemon.log`
 - Debug: `QUOTH_DEBUG=true`

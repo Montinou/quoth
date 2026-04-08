@@ -57,7 +57,7 @@ Tests the SQLite database layer (`daemon/db.js`).
 **Key details:**
 - Uses an in-memory SQLite database (`:memory:`) for test isolation.
 - Tests the full schema creation including all tables:
-  - `patterns` — includes `pattern_type` (default `code-pattern`), `description`, `success_count`, `failure_count`, `decay_rate`, `embedding` (384d MiniLM-L6), `version`, `tags`, `source`, `status`, `last_matched_at`; v2 columns: `alpha`, `beta`, `namespace`, `exposure_count`, `last_exposed_at`, `ignored_count`, `embedding_text`, `pattern_trigrams`, `quality_history`, `cluster_id`, `cluster_rank_score`, `effective_exposures`, `distinctiveness`, `retired_at`, `retired_reason`; promotion columns: `promoted_at`, `cloud_document_id`, `promoted_confidence`, `applicability`
+  - `patterns` — includes `pattern_type` (default `code-pattern`), `description`, `success_count`, `failure_count`, `decay_rate`, `embedding` (MiniLM-L6-v2), `version`, `tags`, `source`, `status`, `last_matched_at`; v2 columns: `alpha`, `beta`, `namespace`, `exposure_count`, `last_exposed_at`, `ignored_count`, `embedding_text`, `pattern_trigrams`, `quality_history`, `cluster_id`, `cluster_rank_score`, `effective_exposures`, `distinctiveness`, `retired_at`, `retired_reason`; promotion columns: `promoted_at`, `cloud_document_id`, `promoted_confidence`, `applicability`
   - `trajectories` — includes `context`, `total_steps`, `total_reward`, `ended_at`, `extracted_pattern_id` (FK to `patterns`)
   - `trajectory_steps` — includes auto-increment `id`, `reward`, `metadata`
   - `memory_entries` — includes `id`, `metadata`, `access_count`, `status`, `last_accessed_at`; unique on `(namespace, key)`
@@ -66,7 +66,7 @@ Tests the SQLite database layer (`daemon/db.js`).
   - `cluster_stats` — compound PK `(cluster_id, namespace)`; Thompson sampling state per cluster: `alpha`, `beta`, `attempts`, `centroid_embedding`, `member_count`
   - `injection_log` — per-injection record: `session_id`, `namespace`, `pattern_id`, `cluster_id`, `rank`, `propensity`, `is_exploration`, `query_text`, `injected_at`, `outcome_at`, `reward`; indexes on `session_id`, `pattern_id`, pending outcomes
   - `judge_queue` — pairwise pattern comparison jobs: `session_id`, `pattern_a_id`, `pattern_b_id`, `trajectory_summary`, `priority`, `status`, `verdict`, `judged_at`, `cost_cents`
-  - `doc_chunks` — project documentation chunks for semantic search: `doc_file`, `section_header`, `content`, `embedding` (384d), `content_hash`
+  - `doc_chunks` — project documentation chunks for semantic search: `doc_file`, `section_header`, `content`, `embedding`, `content_hash`
 - Validates WAL mode and foreign key constraints are enabled.
 
 ---
@@ -155,7 +155,7 @@ Tests the cloud promotion pipeline (`daemon/lib/promote.js`).
 - Authentication via `QUOTH_API_KEY` header
 - Error handling for network failures and API errors
 - Skip behavior when `QUOTH_API_KEY` is not set
-- Correct embedding format for MiniLM-L6 (384 dimensions)
+- Correct embedding format for MiniLM-L6 (see [12 — Embeddings & Search](./12-embeddings-search.md))
 
 **Mocking:** HTTP calls are mocked -- no real API requests are made.
 

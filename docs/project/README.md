@@ -47,12 +47,13 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 | Document | Description |
 |----------|-------------|
 | [20 — Context Injection & Skills](./20-context-skills.md) | Project context files, session-start injection, 9 built-in skills |
+| [21 — V2 Subsystems](./21-v2-subsystems.md) | Thompson sampling, clustering, propensity, SNIPS, curation, attribution |
 
 ### Reference
 
 | Document | Description |
 |----------|-------------|
-| [17 — API Reference](./17-api-reference.md) | All REST endpoints, MCP tools, cron jobs |
+| [17 — API Reference](./17-api-reference.md) | REST API endpoints, cron jobs (MCP tools → doc 06) |
 | [18 — Configuration](./18-configuration.md) | Environment variables, plugin.json, hooks.json |
 | [19 — Testing](./19-testing.md) | Test suite, Vitest config, coverage |
 

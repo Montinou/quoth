@@ -11,7 +11,7 @@ The plugin runs entirely on the developer's machine as a Claude Code extension. 
 - **Hooks** (9 bindings across 8 events) that intercept Claude Code lifecycle events (session start/end, tool use, subagent start/stop, prompt submit, context compaction). All hooks route through a single unified dispatcher (`hook-dispatch.js`) except trajectory capture which has its own handler.
 - **Daemon** (background process) that watches trajectory JSONL files. Processes session summaries via batch distill (Haiku CLI) + consolidate pipeline to extract reusable patterns. Includes V2 subsystems: hierarchical Thompson sampling, LLM-as-judge pairwise ranking, clustering, curation, and doc auto-update.
 - **MCP Server** (`quoth-learning`) exposing 22 tools over stdio JSON-RPC for pattern management, agent coordination, intelligence routing, and skill extraction.
-- **SQLite Database** (`~/.quoth/memory.db`) with WAL mode, storing patterns, trajectories, trajectory steps, memory entries, agent registry, events, cluster stats, injection log, and judge queue. Includes a pure-JS HNSW vector index for approximate nearest neighbor search over 384-dimensional pattern embeddings (MiniLM-L6-v2).
+- **SQLite Database** (`~/.quoth/memory.db`) with WAL mode, storing patterns, trajectories, trajectory steps, memory entries, agent registry, events, cluster stats, injection log, and judge queue. Includes a pure-JS HNSW vector index for approximate nearest neighbor search over local MiniLM-L6-v2 pattern embeddings (see [12 — Embeddings & Search](./12-embeddings-search.md)).
 
 ### CLOUD: src/
 
@@ -87,7 +87,7 @@ Individual `tool_use` entries are marked as processed immediately without LLM ca
 
 **Local mode (`QUOTH_MODE=local`):**
 
-1. **DISTILL-BATCH** (`pipeline/distill-batch.js`) — Extracts 1-3 reusable patterns from the entire session context using Claude Haiku 4.5 via `claude -p` CLI. Collects up to 30 recent tool entries, user intents, and LLM reasoning into a single prompt. Quality rules enforce technique/strategy descriptions, never raw file paths or tool calls. Also computes 384-dim embeddings via local MiniLM-L6-v2 (@xenova/transformers). Includes pre-insert dedup check (embedding similarity >= 0.92 via HNSW, or name prefix match) to strengthen existing patterns.
+1. **DISTILL-BATCH** (`pipeline/distill-batch.js`) — Extracts 1-3 reusable patterns from the entire session context using Claude Haiku 4.5 via `claude -p` CLI. Collects up to 30 recent tool entries, user intents, and LLM reasoning into a single prompt. Quality rules enforce technique/strategy descriptions, never raw file paths or tool calls. Also computes embeddings via local MiniLM-L6-v2. Includes pre-insert dedup check (embedding similarity >= 0.92 via HNSW, or name prefix match) to strengthen existing patterns.
 
 2. **CONSOLIDATE** (`pipeline/consolidate.js`) — Uses Claude Haiku 4.5 via `claude -p` CLI to decide whether a distilled pattern should merge into an existing pattern ("strengthen") or be stored as new. Merging triggers a Bayesian success update on the target pattern.
 
@@ -106,11 +106,11 @@ Individual `tool_use` entries are marked as processed immediately without LLM ca
 
 ### 8. Patterns Stored in SQLite with HNSW
 
-Patterns are stored in the `patterns` table with base columns: id, name, pattern_type, condition, action, description, confidence (0.0-1.0), success_count, failure_count, decay_rate, embedding (JSON-serialized 384-dim vector), version, tags, source, status, timestamps, last_matched_at. Runtime migrations add: alpha, beta (Bayesian scoring), namespace, promoted_at, cloud_document_id, promoted_confidence, applicability, exposure_count, last_exposed_at, ignored_count, embedding_text, pattern_trigrams, quality_history, cluster_id, cluster_rank_score, effective_exposures, distinctiveness, retired_at, retired_reason.
+Patterns are stored in the `patterns` table with base columns: id, name, pattern_type, condition, action, description, confidence (0.0-1.0), success_count, failure_count, decay_rate, embedding (JSON-serialized vector), version, tags, source, status, timestamps, last_matched_at. Runtime migrations add: alpha, beta (Bayesian scoring), namespace, promoted_at, cloud_document_id, promoted_confidence, applicability, exposure_count, last_exposed_at, ignored_count, embedding_text, pattern_trigrams, quality_history, cluster_id, cluster_rank_score, effective_exposures, distinctiveness, retired_at, retired_reason.
 
 Additional V2 tables: `cluster_stats` (hierarchical Thompson sampling), `injection_log` (pattern exposure tracking), `judge_queue` (LLM-as-judge pairwise comparisons), `events` (event sourcing).
 
-The pure-JS HNSW index (`lib/hnsw.js`) provides O(log n) approximate nearest neighbor search over 384-dim embeddings (MiniLM-L6-v2). It is initialized on daemon startup (`db.initHnsw()`) and saved to disk every 30 minutes.
+The pure-JS HNSW index (`lib/hnsw.js`) provides O(log n) approximate nearest neighbor search over local MiniLM-L6-v2 embeddings (see [12 — Embeddings & Search](./12-embeddings-search.md)). It is initialized on daemon startup (`db.initHnsw()`) and saved to disk every 30 minutes.
 
 ### 9. Nightly Deep Processing (3am)
 
@@ -180,15 +180,10 @@ Legacy: Kimi K2.5 via Moonshot API is retained as a last-resort fallback in `llm
 
 ### Embeddings
 
-**Local plugin:**
-- **Model:** `Xenova/all-MiniLM-L6-v2` via @xenova/transformers (ONNX, quantized)
-- **Dimensions:** 384
-- **Cost:** Zero (runs locally, ~5ms per embedding after warmup)
-- **Used for:** Pattern similarity (local HNSW), dedup detection
+- **Local plugin:** MiniLM-L6-v2 (384d, local inference) for pattern similarity and dedup
+- **Cloud SaaS:** voyage-4-lite (1024d, pgvector) for document and memory search
 
-**Cloud SaaS:**
-- **Model:** Provider-dependent (pgvector 1024-dim in Neon Postgres)
-- **Used for:** Document chunk search, memory search, cross-project semantic search
+See [12 — Embeddings & Search](./12-embeddings-search.md) for model specs, API, and HNSW configuration.
 
 ### Authentication
 

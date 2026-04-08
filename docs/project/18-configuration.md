@@ -474,8 +474,7 @@ PRAGMA foreign_keys = ON;
 
 The HNSW (Hierarchical Navigable Small World) index is stored at `~/.quoth/hnsw.index.json` and managed by `daemon/lib/hnsw.js`. It provides approximate nearest neighbor search for pattern embeddings.
 
-- **Embedding model:** `MiniLM-L6-v2` (local, no API call required)
-- **Dimensions:** 384
+- **Embedding model:** Local MiniLM-L6-v2 (see [12 — Embeddings & Search](./12-embeddings-search.md) for full specs)
 - **Similarity metric:** Cosine similarity
 - **Index format:** JSON-serialized graph with multiple navigation layers
 

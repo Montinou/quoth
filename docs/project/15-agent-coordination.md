@@ -17,22 +17,7 @@ Source: `quoth-plugin/mcp/handlers/agents.js` and `quoth-plugin/daemon/db.js`
 
 ### Agent Registry (SQLite)
 
-Agents register via the `quoth_agent_register` MCP tool. Schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS agent_registry (
-  agent_id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,
-  project TEXT,
-  platform TEXT,
-  status TEXT DEFAULT 'online',
-  capabilities TEXT DEFAULT '[]',
-  last_heartbeat INTEGER,
-  registered_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
-  metadata TEXT DEFAULT '{}'
-);
-```
+Agents register via the `quoth_agent_register` MCP tool. For the full SQLite agent_registry schema, see [10 — Local Database](./10-local-database.md#agent-registry).
 
 Registration fields:
 
@@ -327,7 +312,7 @@ Per-agent key-value memory with vector embeddings:
 | `key` | Memory key (unique per agent + namespace) |
 | `value` | Memory content (text) |
 | `namespace` | Namespace (default: `'default'`) |
-| `embedding` | 1024-dimension vector (voyage-4-lite) |
+| `embedding` | 1024-dimension vector (see [12 — Embeddings & Search](./12-embeddings-search.md)) |
 | `tier` | `working` or `persistent` |
 | `relevanceScore` | Decaying relevance (default 1.0) |
 | `accessCount` | Read counter |
@@ -348,5 +333,5 @@ HNSW index on embeddings with `m=16, ef_construction=200` using `vector_cosine_o
 | Task management | Events table | Structured tasks with status workflow |
 | Webhooks | Not supported | Full delivery + retry system |
 | Multi-tenancy | Single user | org_id on all tables |
-| Memory | Patterns + HNSW | Per-agent vector memory (1024d) |
+| Memory | Patterns + HNSW | Per-agent vector memory (see [doc 12](./12-embeddings-search.md)) |
 | Heartbeats | 5-minute timeout | lastSeenAt timestamp |

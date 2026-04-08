@@ -212,7 +212,7 @@ The prompt includes examples of good vs bad patterns:
 **Post-processing:**
 
 1. Generate a unique ID by SHA-1 hashing the pattern text and taking the first 12 hex characters.
-2. Generate a 384-dim embedding vector via local MiniLM-L6-v2 (see [Embeddings Library](#embeddings-libembed-js)). Returns `null` on failure (graceful degradation).
+2. Generate an embedding vector via local MiniLM-L6-v2 (see [12 — Embeddings & Search](./12-embeddings-search.md)). Returns `null` on failure (graceful degradation).
 3. Set `source: 'distilled'`.
 
 **Fallback behavior:** If the LLM fails, the fallback strips file paths from the task description (removes `/home/...`, `/tmp/...`, `~/...` paths) to extract the intent. If the cleaned text is too short (<10 chars), it defaults to `"{agent}: task execution"`. Tags are empty and applicability is `narrow`. The `fallback: true` flag is set on the result.
@@ -545,22 +545,13 @@ Provides the `callLLM(prompt, maxTokens, model?)` function for daemon LLM calls 
 
 ### Embeddings Library (`lib/embed.js`)
 
-Provides `generateEmbedding(text)` and `generateEmbeddingBatch(texts)` for creating vector embeddings locally.
-
-| Property | Value |
-|----------|-------|
-| Model | `Xenova/all-MiniLM-L6-v2` via @xenova/transformers (ONNX, quantized) |
-| Dimensions | 384 |
-| Cost | Zero (runs locally, ~5ms per embedding after warmup) |
-| Dependencies | `@xenova/transformers` (ONNX runtime) |
+Provides `generateEmbedding(text)` and `generateEmbeddingBatch(texts)` for creating vector embeddings locally using MiniLM-L6-v2. See [12 — Embeddings & Search](./12-embeddings-search.md) for full model specs, API reference, and batch/queue details.
 
 **Batch embedding:** Accumulates texts in a queue with a threshold of 8 entries and a 2-second flush delay. When the threshold is reached or the timer fires, all queued texts are embedded in a single batch call for efficiency.
 
 **Input preprocessing:** Replaces multiple newlines with spaces and trims whitespace.
 
 **Graceful degradation:** Returns `null` on any failure. All callers handle `null` embeddings by falling back to non-semantic methods.
-
-**History:** Previously used `voyage/voyage-4-lite` via Vercel AI Gateway (1024d, $0.02/MTok). Migrated to local MiniLM-L6-v2 for zero-cost operation.
 
 ### Attribution Library (`lib/attribute.js`)
 
@@ -650,7 +641,7 @@ Pure JavaScript implementation of the Hierarchical Navigable Small World (HNSW) 
 
 | Property | Value |
 |----------|-------|
-| Default dimensions | 384 (matching MiniLM-L6-v2 local) |
+| Default dimensions | 384 (see [12 — Embeddings & Search](./12-embeddings-search.md)) |
 | M (max neighbors per layer) | 16 |
 | M0 (max neighbors at layer 0) | 32 (2 * M) |
 | efConstruction | 200 |

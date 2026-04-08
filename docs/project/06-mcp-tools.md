@@ -169,7 +169,7 @@ Get top-N patterns by confidence score, with optional semantic search and rerank
 
 **Behavior:**
 
-1. If `query` is provided, generate an embedding via local MiniLM-L6-v2 (384d) and search by cosine similarity using `db.searchBySimilarity(queryVec, limit, tags)`.
+1. If `query` is provided, generate an embedding via local MiniLM-L6-v2 and search by cosine similarity using `db.searchBySimilarity(queryVec, limit, tags)`.
 2. If embedding generation fails or no query, fall back to `db.getTopPatterns(limit, tags)` which returns patterns sorted by confidence.
 3. If `query` is provided and `JINA_API_KEY` env var is set and results exist, apply Jina reranking via `rerankPatterns(query, patterns)`.
 
@@ -199,7 +199,7 @@ Semantic search across local patterns. This is the primary discovery tool for fi
 
 **Behavior:**
 
-1. Generate embedding for the query via local MiniLM-L6-v2 (384d).
+1. Generate embedding for the query via local MiniLM-L6-v2 (see [12 — Embeddings & Search](./12-embeddings-search.md)).
 2. If embedding succeeds, search by cosine similarity via `db.searchBySimilarity()`.
 3. If embedding fails or returns no results, fall back to keyword matching:
    - Fetch `limit * 2` top patterns from the database.
