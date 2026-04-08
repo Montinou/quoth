@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-**Version:** 1.0.1 — 2026-04-07
+**Version:** 1.0.2 — 2026-04-08
 
 Quoth exposes 22 MCP tools through a single server (`quoth-learning`) using the JSON-RPC 2.0 protocol over stdio. Tools are organized into 4 handler modules: Patterns, Intelligence, Agents, and Skills.
 
@@ -717,9 +717,16 @@ Check if the Quoth learning daemon is running and retrieve recent log output.
 {
   "running": true,
   "pid": 12345,
-  "lastLog": "{\"ts\":\"...\",\"level\":\"info\",\"msg\":\"Enqueued 2 new entries\"}\n..."
+  "lastLog": "{\"ts\":\"...\",\"level\":\"info\",\"msg\":\"Enqueued 2 new entries\"}\n...",
+  "costSummary": {
+    "today": { "total_calls": 5, "total_cost_usd": 0.012, "by_stage": { "JUDGE": { "calls": 3, "cost": 0.008, "input_tokens": 4200, "output_tokens": 1100, "model": "haiku" }, "DISTILL": { "calls": 2, "cost": 0.004, "input_tokens": 2800, "output_tokens": 900, "model": "haiku" } } },
+    "week": { "total_calls": 28, "total_cost_usd": 0.067, "by_stage": { "..." : "..." } },
+    "all_time": { "total_calls": 142, "total_cost_usd": 0.31, "by_stage": { "..." : "..." } }
+  }
 }
 ```
+
+The `costSummary` field contains pipeline LLM cost breakdowns across three time ranges (`today`, `week`, `all_time`). Each range is produced by `db.getCostSummary(range?)` and contains `total_calls`, `total_cost_usd`, and a `by_stage` map keyed by pipeline stage name (e.g., `JUDGE`, `DISTILL`, `CONSOLIDATE`). Each stage entry includes `calls`, `cost` (USD), `input_tokens`, `output_tokens`, and `model`. The field is `null` if cost tracking data is unavailable.
 
 **Response (not running):**
 

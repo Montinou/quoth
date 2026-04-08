@@ -1,10 +1,10 @@
-<!-- version: 1.0.0 | updated: 2026-04-08 -->
+<!-- version: 1.1.0 | updated: 2026-04-08 -->
 
 # V2 Subsystems: Bandit-Based Learning Pipeline
 
 The V2 subsystem replaces V1's simple Bayesian update + trigram matching with a hierarchical Thompson sampling bandit, pattern clustering, propensity-scored injection, and counterfactual off-policy evaluation via SNIPS. These components work together to make pattern selection statistically principled: patterns are grouped into clusters, clusters compete via Thompson sampling, injection slots carry propensity scores for debiased reward estimation, and a curation pipeline maintains knowledge base quality.
 
-**Version:** 1.0.0 | **Last updated:** 2026-04-08
+**Version:** 1.1.0 | **Last updated:** 2026-04-08
 
 Source files:
 - `quoth-plugin/daemon/lib/flags.js` -- V2 feature flag infrastructure
@@ -322,6 +322,29 @@ When the `injection` feature flag is enabled, the injection pipeline switches to
 3. **Exploration injection** via `replaceWithExploration()` from `propensity.js` (if `exploration` flag is also set) -- 10% chance of replacing a slot with a random candidate for counterfactual data
 4. **Log to `injection_log`** with session ID, pattern IDs, propensities, and `is_exploration` flags
 5. **Nightly SNIPS aggregation** reads these logs to update cluster posteriors
+
+### Tag-Filtered Injection
+
+Both V1 and V2 injection paths support tag-based filtering to select patterns relevant to a specific agent role. Tags are propagated from the hook layer through the daemon query server into the injection functions.
+
+**Tag format:** Tags follow an `agent:<type>` convention (e.g., `agent:coder`, `agent:tester`, `agent:reviewer`). Patterns are tagged during distillation or manual curation, stored as a JSON array in the `tags` column of the `patterns` table.
+
+**V1 path (`rankByThompson`):** The `tags` array parameter in `opts` adds SQL `WHERE` clauses to filter the candidate pool before Thompson sampling:
+
+```sql
+-- For tags = ['agent:tester']:
+WHERE status = 'active'
+  AND (namespace = ? OR namespace = 'global')
+  AND confidence >= ?
+  AND (last_exposed_at IS NULL OR last_exposed_at < ?)
+  AND (tags LIKE '%"agent:tester"%')
+```
+
+Each tag generates a `tags LIKE ?` clause with the pattern `%"<tag>"%`, performing a JSON-array-contains check against the serialized `tags` column. Multiple tags are joined with `OR` (any tag matches).
+
+**V2 path (`query-server.js`):** The `tags` array from the request body is forwarded to `db.searchBySimilarity(embedding, 20, tags)` for the hierarchical selection path. The same tags are also passed through to `rankByThompsonAndTrigram()` in the V1 fallback path within `handleQuery()`.
+
+**Hook integration:** The `subagent-start` handler in `hook-dispatch.js` extracts `hookInput.agent_type`, converts it to `['agent:<type>']` format, and passes it as the `tags` parameter in the `queryDaemon()` call. If tagged results return fewer than 2 patterns, the handler retries without tags as a fallback.
 
 ### Trigram Implementation
 

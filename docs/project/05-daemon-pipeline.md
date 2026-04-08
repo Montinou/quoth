@@ -2,7 +2,7 @@
 
 The Quoth daemon is a long-running Node.js process that watches trajectory files, processes them through batch-level LLM distillation (DISTILL + CONSOLIDATE per session), and maintains the pattern database. Individual tool-use entries are accumulated and processed in batch when a session summary arrives. It also manages periodic maintenance tasks including confidence decay, HNSW index persistence, agent cleanup, cloud sync, and nightly deep consolidation with cloud promotion.
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-07
+**Version:** 1.0.2 | **Last updated:** 2026-04-08
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@ The Quoth daemon is a long-running Node.js process that watches trajectory files
 - [Timers and Scheduled Tasks](#timers-and-scheduled-tasks)
 - [Deep Consolidation](#deep-consolidation)
 - [Daemon Libraries](#daemon-libraries)
+- [Pipeline Cost Tracking](#pipeline-cost-tracking)
 - [Signal Handling](#signal-handling)
 - [Self-Healing](#self-healing)
 
@@ -120,48 +121,60 @@ while (jobQueue.length > 0) {
 
 `processEntry()` dispatches based on entry type:
 
-- **`tool_use` entries:** Marked as processed immediately — no LLM calls. These entries are accumulated in the JSONL file and consumed later as context by the batch distiller when the session summary arrives.
-- **`session_summary` entries:** Delegated to `processSessionBatch()`, which runs batch DISTILL + CONSOLIDATE for the entire session.
+- **`tool_use` entries:** Pushed onto the `pendingJudge` in-memory queue. When the queue reaches `JUDGE_BATCH_SIZE` (default 30), `flushJudgeQueue()` runs batch JUDGE via a single LLM call. Entries judged effective are held in `judgedEffective`; ineffective entries are marked as processed immediately. No individual LLM calls per entry.
+- **`session_summary` entries:** Delegated to `processSessionBatch()`, which runs batch DISTILL + CONSOLIDATE for the entire session (consuming the `judgedEffective` entries as context).
 
-The three-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE) described below applies to the **batch distill path only** — not to individual tool-use entries.
+The three-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE) described below processes entries through: batch JUDGE on `tool_use` arrival, then batch DISTILL + CONSOLIDATE when the `session_summary` arrives.
 
-### Stage 1: JUDGE (`pipeline/judge.js`)
+### Stage 1: Batch JUDGE (`pipeline/batch-judge.js`)
 
-Evaluates whether an agent action was effective and worth learning from.
+Evaluates a batch of `tool_use` entries for effectiveness and domain classification in a single LLM call. This is the primary judge path — all `tool_use` entries flow through the batch JUDGE before reaching DISTILL.
 
 | Property | Value |
 |----------|-------|
-| LLM | `callLLM()` — default: `google/gemini-2.5-flash-lite` via Vercel AI Gateway (legacy fallback: Kimi K2.5 via Moonshot) |
-| Max tokens | 150 |
+| File | `daemon/pipeline/batch-judge.js` |
+| LLM | `google/gemini-2.5-flash` via Vercel AI Gateway (`callLLMWithUsage()`) |
+| Max tokens | `50 + entries.length * 40` (dynamic) |
 | Temperature | 0.3 |
+| Batch size | Up to 30 entries per call (`JUDGE_BATCH_SIZE`, env `QUOTH_JUDGE_BATCH_SIZE`) |
 
-**Note:** Judge is primarily used by the V2 pairwise judge system, not the main batch distill path.
+**Queue mechanism:**
+
+When `processEntry()` encounters a `tool_use` entry, it pushes it onto the `pendingJudge` in-memory queue (along with its file path, line, and detected project). When the queue reaches `JUDGE_BATCH_SIZE` (default 30), `flushJudgeQueue()` is called automatically. The queue is also flushed on `SIGUSR1` (before processing sessions) and during session batch processing.
 
 **Input template:**
 
+Each entry is formatted as a numbered line:
+
 ```
-Agent: {entry.agent}
-Task: {entry.task}
-Outcome: {entry.outcome}
-Attempts: {entry.attempts || 1}
-Tools used: {entry.tool_calls || 0}
+[0] Agent: coder | Task: refactor auth module | Outcome: success | Tools: 5
+[1] Agent: tester | Task: write unit tests | Outcome: failure | Tools: 3
 ```
 
-**Output schema:**
+**Output schema (per entry):**
 
 ```json
 {
+  "index": 0,
   "effective": true,
-  "reason": "Task completed successfully with single attempt",
-  "category": "general"
+  "domain": "coder",
+  "reason": "Task completed successfully"
 }
 ```
 
-**Categories:** `selector`, `wait`, `auth`, `data`, `env`, `general`
+**Valid domains:** `coder`, `tester`, `reviewer`, `researcher`, `architect`, `backend-dev`, `frontend-dev`, `devops` (from `AGENT_TYPES` in `routing.js`).
 
-**Fallback behavior:** If the LLM is unavailable (no API key, timeout, parse error), the judge falls back to using `entry.outcome === 'success'` as the effectiveness signal with reason `"fallback: llm unavailable"` and category `"general"`.
+**Domain normalization:** If the LLM returns an unrecognized domain, `normalizeDomain()` falls back to keyword-based `routeTask()` to determine the correct agent type.
 
-**Early exit:** If the judge determines the entry is not effective, the entry is marked as processed and skipped (no distillation or consolidation).
+**Fallback behavior:** If the LLM is unavailable (no API key, timeout, parse error), all entries receive fallback judgments: `effective` is set to `entry.outcome === 'success'`, domain is determined by `routeTask()`, and reason is `"fallback: llm unavailable"`. Individual entries missing from the LLM response also get fallback judgments.
+
+**Post-judge routing:**
+- Entries judged `effective` are pushed to the `judgedEffective` queue with their assigned `domain` tag, awaiting DISTILL when the session summary arrives.
+- Entries judged not effective are marked as processed immediately and skipped (no distillation or consolidation).
+
+**Cost tracking:** Each batch judge call records its LLM usage via `db.recordPipelineCost()` with stage `'judge-batch'`.
+
+**Note:** The legacy single-entry judge (`pipeline/judge.js`) is still used by the V2 pairwise judge system (Phase F of the nightly pipeline). The batch JUDGE described here is the primary path for all `tool_use` entries.
 
 ### Stage 2: DISTILL (`pipeline/distill.js`)
 
@@ -513,7 +526,7 @@ Currently logs the number of eligible patterns for cross-validation. Full implem
 | Phase | Name | Description |
 |-------|------|-------------|
 | A | Deep consolidation | `runDeepConsolidate()` — garbage archival, name dedup, LLM merge/archive, rebalancing, capacity pruning, cloud/global promotion |
-| B | Doc auto-update | `runDocUpdate()` — hash-based stale doc detection, LLM update via `claude -p`, git commit + push (spawned as detached process) |
+| B | Doc auto-update | **DISABLED** — replaced by scheduled remote agent `quoth-doc-autoupdate` running daily at 09:00 UTC via claude.ai/code/scheduled |
 | C | Cloud pull | `syncFromCloud(db, log)` — pull updated patterns from Quoth cloud; `pullSharedPatterns(db, log)` — pull shared cross-org patterns |
 | D | Cluster rebuild | `rebuildClusters()` — k-means clustering of active pattern embeddings per namespace (feature-flagged: `injection`) |
 | E | SNIPS posteriors | `updateClusterPosteriors()` — update cluster Beta posteriors using SNIPS off-policy estimator from last 7 days of injection logs (feature-flagged: `injection`) |
@@ -538,6 +551,8 @@ Provides the `callLLM(prompt, maxTokens, model?)` function for daemon LLM calls 
 | Legacy auth | `MOONSHOT_API_KEY` env var or `~/.openclaw/credentials/moonshot-api-key` |
 | Temperature | 0.3 |
 | Timeout | 30,000ms |
+
+**`callLLMWithUsage(prompt, maxTokens, model?)`:** Like `callLLM()` but returns structured usage info including token counts and cost estimate. Returns `{ content, model, input_tokens, output_tokens, estimated_cost_usd }`. Used by the batch JUDGE stage to track per-call costs. Cost is estimated via `estimateCost()` using `MODEL_PRICING` lookup tables.
 
 **Post-processing:** Strips markdown code block wrappers (` ```json ` ... ` ``` `) from responses before returning the text.
 
@@ -665,6 +680,41 @@ Pure JavaScript implementation of the Hierarchical Navigable Small World (HNSW) 
 2. **Insertion:** Greedy descent from the top layer to `nodeLayer + 1`, then ef-bounded search and neighbor selection at each layer from `nodeLayer` down to 0. Bidirectional edges are added, and over-capacity neighbors are pruned.
 3. **Search:** Greedy descent from top layer to layer 1, then ef-bounded search at layer 0.
 4. **Distance metric:** Cosine distance (`1 - cosineSimilarity`).
+
+---
+
+## Pipeline Cost Tracking
+
+The daemon records LLM costs for each pipeline call in the `pipeline_costs` SQLite table.
+
+**Table schema (`pipeline_costs`):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Auto-incrementing primary key |
+| `stage` | TEXT | Pipeline stage name (e.g., `'judge-batch'`, `'distill'`, `'consolidate'`) |
+| `model` | TEXT | Model identifier (e.g., `google/gemini-2.5-flash`) |
+| `input_tokens` | INTEGER | Prompt tokens consumed |
+| `output_tokens` | INTEGER | Completion tokens consumed |
+| `estimated_cost_usd` | REAL | Estimated cost in USD (calculated via `estimateCost()` in `lib/llm.js`) |
+| `batch_size` | INTEGER | Number of entries in the batch (default 1) |
+| `session_id` | TEXT | Session ID (nullable) |
+| `project` | TEXT | Project namespace (nullable) |
+| `created_at` | INTEGER | Millisecond timestamp |
+
+**Methods:**
+
+- `db.recordPipelineCost({ stage, model, input_tokens, output_tokens, estimated_cost_usd, batch_size, session_id, project })` — inserts a cost record. Called by `flushJudgeQueue()` after each batch judge call.
+- `db.getCostSummary(range?)` — returns aggregated costs grouped by stage. Accepts optional `range` parameter: `'today'` (since midnight local), `'week'` (last 7 days), or omitted (all time). Returns `{ by_stage: { [stage]: { calls, cost, input_tokens, output_tokens, model } }, total_calls, total_cost_usd }`.
+
+**Exposure:** Cost summary data is included in the `quoth_daemon_status` MCP tool response for operational visibility.
+
+**Cost estimation:** Uses per-million-token pricing from `MODEL_PRICING` in `lib/llm.js`:
+
+| Model | Input ($/MTok) | Output ($/MTok) |
+|-------|----------------|-----------------|
+| `google/gemini-2.5-flash-lite` | $0.10 | $0.40 |
+| `google/gemini-2.5-flash` | $0.30 | $2.50 |
 
 ---
 

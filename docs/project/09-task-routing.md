@@ -2,7 +2,7 @@
 
 Quoth's task routing system classifies incoming tasks by keyword matching and recommends the optimal agent type for execution. It is a lightweight, zero-latency classifier that runs entirely in-process with no API calls or model inference.
 
-<!-- v1.0.1 — Last updated: 2026-04-07 -->
+<!-- v1.0.2 — Last updated: 2026-04-08 -->
 
 Source files:
 - `quoth-plugin/mcp/lib/routing.js` -- agent definitions, pattern matching, alternative selection
@@ -24,7 +24,14 @@ Eight agent types are defined, each with a set of capability tags:
 | `frontend-dev` | ui, react, css, components |
 | `devops` | ci-cd, docker, deployment, infrastructure |
 
-These are defined in `AGENT_CAPABILITIES` and exported for external use (e.g., by `quoth_assign_task` for capability matching).
+These are defined in `AGENT_CAPABILITIES`. The derived constant `AGENT_TYPES = Object.keys(AGENT_CAPABILITIES)` is the canonical single source of truth for agent role types across the system:
+
+- **Task routing** (`routeTask`) -- determines which agent types can be recommended
+- **Batch JUDGE domain classification** -- the daemon's JUDGE stage classifies trajectories into these types
+- **Pattern `agent:<type>` tags** -- distilled patterns are tagged with `agent:coder`, `agent:tester`, etc.
+- **Injection tag filtering** -- session-start and subagent-start hooks filter patterns by these tags
+
+Note: these are *domain role* types (coder, tester, reviewer, etc.), not *platform/runtime* types. MCP `agent_register` uses a separate taxonomy (`claude-code`, `openclaw`, `daemon`, `worker`) that classifies the agent's runtime, not its domain role.
 
 ## Routing Algorithm
 
@@ -274,4 +281,5 @@ The following limitations from v3.2.0 have been addressed:
 | `routeTask(task)` | Function | Returns `{ agent, confidence, reason }` |
 | `getAlternatives(primaryAgent)` | Function | Returns array of 2 alternatives |
 | `AGENT_CAPABILITIES` | Object | Map of agent name to capability tags |
+| `AGENT_TYPES` | Array | `Object.keys(AGENT_CAPABILITIES)` -- canonical list of domain role types |
 | `TASK_PATTERNS` | Array | Array of `[RegExp, agentType, confidence?]` tuples, tested in order |

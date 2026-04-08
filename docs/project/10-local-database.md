@@ -1,6 +1,6 @@
 # Local Database (SQLite)
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-07
+**Version:** 1.0.2 | **Last updated:** 2026-04-08
 
 The Quoth plugin maintains a local SQLite database for pattern storage, trajectory tracking, agent coordination, and event sourcing. All data is stored on the user's machine at `~/.quoth/memory.db`.
 
@@ -17,7 +17,7 @@ The database is created and migrated on first access via the `createDb(dbPath)` 
 
 ## Tables
 
-The schema defines 6 core tables plus 4 V2 auxiliary tables, all created via `CREATE TABLE IF NOT EXISTS` on every startup.
+The schema defines 6 core tables plus 5 V2 auxiliary tables, all created via `CREATE TABLE IF NOT EXISTS` on every startup.
 
 ### patterns
 
@@ -231,6 +231,27 @@ Chunked project documentation with embeddings for semantic search during session
 
 **Indexes:** `idx_doc_chunks_file` on `doc_file`
 
+### pipeline_costs
+
+LLM cost tracking for daemon pipeline stages (JUDGE, DISTILL, CONSOLIDATE). Records token usage and estimated USD cost per invocation.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | INTEGER PK | AUTOINCREMENT | Sequential cost entry ID |
+| `stage` | TEXT NOT NULL | -- | Pipeline stage name (e.g., `JUDGE`, `DISTILL`, `CONSOLIDATE`) |
+| `model` | TEXT NOT NULL | -- | Model identifier used for the call |
+| `input_tokens` | INTEGER | 0 | Input token count |
+| `output_tokens` | INTEGER | 0 | Output token count |
+| `estimated_cost_usd` | REAL | 0 | Estimated cost in USD for this call |
+| `batch_size` | INTEGER | 1 | Number of items processed in this call |
+| `session_id` | TEXT | NULL | Associated session identifier |
+| `project` | TEXT | NULL | Associated project namespace |
+| `created_at` | INTEGER | `strftime('%s','now') * 1000` | Creation timestamp (epoch ms) |
+
+**Indexes:**
+- `idx_costs_stage` on `stage` -- filter by pipeline stage
+- `idx_costs_created` on `created_at DESC` -- reverse chronological queries
+
 ## Key Methods
 
 The `createDb()` factory attaches all data access methods directly to the better-sqlite3 database instance.
@@ -280,6 +301,17 @@ The `createDb()` factory attaches all data access methods directly to the better
 **`getPromotionCandidates()`** -- Find patterns eligible for cloud promotion: `confidence > 0.8`, `(success_count + failure_count) > 10`, `status = 'active'`, `source = 'distilled'`.
 
 **`markPromoted(id, cloudDocumentId, confidence)`** -- Record promotion metadata: sets `promoted_at`, `cloud_document_id`, and `promoted_confidence` snapshot.
+
+### Pipeline Cost Operations
+
+**`recordPipelineCost(entry)`** -- Insert a cost record for a pipeline stage invocation. Accepts `{ stage, model, input_tokens, output_tokens, estimated_cost_usd, batch_size, session_id, project }`. All fields except `stage` and `model` have sensible defaults (tokens default to 0, batch_size to 1, session_id and project to NULL).
+
+**`getCostSummary(range?)`** -- Aggregate cost data grouped by stage. Optional `range` parameter:
+- `'today'` -- rows where `created_at >= start of current day (local midnight)`
+- `'week'` -- rows where `created_at >= 7 days ago`
+- omitted/undefined -- all rows (all time)
+
+Returns `{ total_calls, total_cost_usd, by_stage }` where `by_stage` is a map keyed by stage name, each containing `{ calls, cost, input_tokens, output_tokens, model }`.
 
 ### Doc Chunk Operations
 

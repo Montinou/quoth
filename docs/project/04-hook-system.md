@@ -1,4 +1,4 @@
-# Hook System <!-- v1.0.1 | 2026-04-07 -->
+# Hook System <!-- v1.0.2 | 2026-04-08 -->
 
 Quoth's hook system integrates with Claude Code's lifecycle events to provide intelligence routing, trajectory capture, pattern injection, and command safety checks. All hooks are declared in `hooks/hooks.json` and execute via two entry points: the unified dispatcher (`hook-dispatch.js`) and the standalone trajectory capture script (`trajectory-capture.js`).
 
@@ -468,21 +468,30 @@ Checks shell commands against a blocklist of dangerous operations.
 
 ### `subagent-start` (SubagentStart)
 
-Injects domain-relevant patterns from the SQLite database into the subagent's context.
+Injects domain-relevant patterns from the SQLite database into the subagent's context, with tag-based filtering to select patterns matching the subagent's role.
 
 **Execution flow:**
 
-1. Resolve the project name from `CLAUDE_PROJECT_DIR`.
-2. Build a `queryText` from the subagent's task description (`hookInput.prompt || hookInput.description`) and agent type.
-3. Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: queryText || 'subagent task', project, session_id, limit: 5 })`. The daemon performs V1/V2 injection path selection server-side.
-4. If no patterns in `resp.patterns`, return silently.
-5. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
-6. Output JSON with `additionalContext` field for Claude Code to inject:
+1. **Extract agent type:** Read `hookInput.agent_type` (e.g., `'coder'`, `'tester'`, `'reviewer'`). This field is set by Claude Code based on the subagent's declared role.
+2. Resolve the project name from `CLAUDE_PROJECT_DIR`.
+3. **Convert to tag format:** If `agentType` is non-empty, construct an `agentTag` array containing a single element in `agent:<type>` format (e.g., `['agent:coder']`, `['agent:tester']`). If no agent type is provided, `agentTag` is an empty array.
+4. **Tag-filtered daemon query:** Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: taskText || 'subagent task', project, session_id, limit: 5, tags: agentTag })`. The `tags` parameter is forwarded by the daemon to both V1 (`rankByThompsonAndTrigram`) and V2 (`hierarchicalSelect`) injection paths, filtering patterns whose `tags` JSON column contains the specified tag string.
+5. **Fallback on sparse results:** If `agentTag` was non-empty but the daemon returned fewer than 2 patterns, retry the query without tags (`tags: []`). This ensures subagents always receive useful context even when few patterns carry role-specific tags:
+   ```javascript
+   if (agentTag.length > 0 && (resp.patterns || []).length < 2) {
+     resp = await queryDaemon({ ...sameParams, tags: [] })
+   }
+   ```
+6. If no patterns in `resp.patterns`, return silently.
+7. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
+8. Output JSON with `additionalContext` field for Claude Code to inject:
    ```json
    {
      "additionalContext": "[Quoth] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
    }
    ```
+
+**Tag filtering enables domain-relevant injection:** A tester subagent receives testing-related patterns (tagged `agent:tester`), a coder subagent receives implementation patterns (`agent:coder`), etc. The fallback mechanism prevents empty injections when the tag vocabulary is still sparse.
 
 ### `stats`
 
