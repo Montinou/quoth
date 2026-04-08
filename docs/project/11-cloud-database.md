@@ -158,7 +158,7 @@ API key management for agent authentication. Keys are stored as SHA-256 hashes; 
 | `agent_id` | uuid | FK -> registry, CASCADE, NOT NULL | |
 | `org_id` | uuid | FK -> organizations, CASCADE, NOT NULL | |
 | `key_hash` | text | UNIQUE, NOT NULL | SHA-256 hash of the full key |
-| `key_prefix` | text | NOT NULL | First 7 chars for identification (e.g., `"qth_abc"`) |
+| `key_prefix` | text | NOT NULL | First 12 chars for identification (e.g., `"qth_abcd1234"`) |
 | `label` | text | | Human-readable key label |
 | `scopes` | text[] | DEFAULT `{read, write}` | Permission scopes array |
 | `project_ids` | uuid[] | | Restrict key to specific projects |

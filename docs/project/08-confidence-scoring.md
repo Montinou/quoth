@@ -143,16 +143,7 @@ Three MCP tools allow explicit feedback:
 
 **`quoth_log_outcome(patternId, outcome)`** -- Direct Bayesian update with `'success'` or `'failure'` outcome. This is the only mechanism that allows explicit failure recording via Bayesian update.
 
-**`quoth_score_pattern(patternId, delta)`** -- Applies a raw confidence delta via `db.applyConfidenceDelta(id, delta)`:
-```sql
-UPDATE patterns SET
-  confidence = MIN(1.0, MAX(0.0, confidence + delta)),
-  success_count = CASE WHEN delta > 0 THEN success_count + 1 ELSE success_count END,
-  failure_count = CASE WHEN delta < 0 THEN failure_count + 1 ELSE failure_count END,
-  last_matched_at = NOW()
-WHERE id = ?
-```
-Note: this bypasses the Bayesian alpha/beta system and directly modifies `confidence`. It also updates success/failure counts. Use `quoth_log_outcome` for proper Bayesian updates.
+**`quoth_score_pattern(patternId, delta)`** -- Routes through the Bayesian system: `delta > 0` calls `db.applyBayesianUpdate(id, 'success')`, `delta < 0` calls `db.applyBayesianUpdate(id, 'failure')`. This ensures all scoring goes through the proper Beta distribution update path.
 
 **`quoth_intelligence_feedback(success)`** -- Updates the intelligence graph JSON entries only (not SQLite). Applies +0.05 for success, -0.02 for failure to entries in `last-matched.json`.
 
@@ -345,7 +336,7 @@ The intelligence graph in `handlers/intelligence.js` maintains its own confidenc
 | Floor | alpha >= 0.1, confidence >= 0.05 | confidence >= 0.0 (clamped), node confidence >= 0.05 |
 | Scope | Pattern entries only | All entries (memory, patterns, insights) |
 | Feedback trigger | `quoth_log_outcome`, `post-task` hook, daemon CONSOLIDATE | `quoth_intelligence_feedback`, `post-task` hook |
-| Archival | Yes, when exposure ≥10 with <5% conversion, or never exposed after 90 days | No archival mechanism |
+| Archival | Yes, when exposure ≥10 with <5% conversion, or never exposed after 30 days | No archival mechanism |
 
 ### Bridge: post-task Hook
 

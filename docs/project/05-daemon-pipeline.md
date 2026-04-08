@@ -131,9 +131,11 @@ Evaluates whether an agent action was effective and worth learning from.
 
 | Property | Value |
 |----------|-------|
-| LLM | Kimi K2.5 via Moonshot API |
+| LLM | `callLLM()` — default: `google/gemini-2.5-flash-lite` via Vercel AI Gateway (legacy fallback: Kimi K2.5 via Moonshot) |
 | Max tokens | 150 |
-| Temperature | 0.6 |
+| Temperature | 0.3 |
+
+**Note:** Judge is primarily used by the V2 pairwise judge system, not the main batch distill path.
 
 **Input template:**
 
@@ -167,9 +169,11 @@ Extracts a reusable, generalizable pattern from an effective agent action.
 
 | Property | Value |
 |----------|-------|
-| LLM | Kimi K2.5 via Moonshot API |
+| LLM | `callLLM()` — default: `google/gemini-2.5-flash-lite` via Vercel AI Gateway (legacy fallback: Kimi K2.5 via Moonshot) |
 | Max tokens | 200 |
-| Temperature | 0.6 |
+| Temperature | 0.3 |
+
+**Note:** Per-entry distill is a fallback path. The primary flow uses `distill-batch.js` (Claude Haiku 4.5 via CLI).
 
 **Input template:**
 
@@ -181,7 +185,7 @@ Conversation context: {recent user messages + LLM reasoning, if available}
 Pattern used: {entry.pattern_used || 'none'}
 ```
 
-**Prompt rules (v3.2.1):**
+**Prompt rules:**
 
 The DISTILL prompt includes explicit quality rules to prevent raw tool calls as pattern names:
 - Pattern name MUST describe the TECHNIQUE or STRATEGY, not the specific file/command
@@ -208,7 +212,7 @@ The prompt includes examples of good vs bad patterns:
 **Post-processing:**
 
 1. Generate a unique ID by SHA-1 hashing the pattern text and taking the first 12 hex characters.
-2. Generate an embedding vector via `voyage-4-lite` (see [Embeddings Library](#embeddings-libembed-js)). Returns `null` on failure (graceful degradation).
+2. Generate a 384-dim embedding vector via local MiniLM-L6-v2 (see [Embeddings Library](#embeddings-libembed-js)). Returns `null` on failure (graceful degradation).
 3. Set `source: 'distilled'`.
 
 **Fallback behavior:** If the LLM fails, the fallback strips file paths from the task description (removes `/home/...`, `/tmp/...`, `~/...` paths) to extract the intent. If the cleaned text is too short (<10 chars), it defaults to `"{agent}: task execution"`. Tags are empty and applicability is `narrow`. The `fallback: true` flag is set on the result.
@@ -219,10 +223,10 @@ Decides whether to merge the new pattern into an existing one or create a distin
 
 | Property | Value |
 |----------|-------|
-| LLM | Kimi K2.5 via Moonshot API |
-| Max tokens | 300 |
-| Temperature | 0.6 |
-| Invocation | `callLLM()` (async) |
+| LLM | Claude Haiku 4.5 via `claude -p` CLI (`claude-haiku-4-5-20251001`) |
+| Max tokens | Not explicitly limited (CLI default) |
+| Timeout | 60,000ms |
+| Invocation | `execSync('claude -p ...')` (synchronous) |
 
 **Input:**
 
@@ -280,7 +284,7 @@ If no duplicate exists, insert the new pattern:
    - `pattern_type`: `'code-pattern'`
    - `condition`: The original task description
    - `action`: The full distilled pattern text
-   - `confidence`: `0.5` (neutral starting point for Bayesian scoring)
+   - `confidence`: `0.55` (slightly above neutral, reflecting validated batch extraction)
    - `tags`: Distilled tags plus `project:{name}` if not default
    - `source`: `'distilled'` (or from entry source)
    - `embedding`: JSON-stringified vector if available
@@ -370,7 +374,7 @@ When the daemon encounters a `session_summary` entry (written by the `session-en
 
 1. **Detect session_summary:** When `processEntry()` encounters `entry.event === 'session_summary'`, it delegates to `processSessionBatch()`.
 2. **Gather session entries:** Read all unprocessed `tool_use` entries from the same JSONL file that match the session ID.
-3. **Batch DISTILL:** Send a single LLM call (Kimi K2.5, 400 max tokens) with the full session context:
+3. **Batch DISTILL:** Send a single LLM call (Claude Haiku 4.5 via `claude -p` CLI) with the full session context:
    - Project name, tool call summary, success rate, overall outcome
    - User intents collected during the session (from `user_intent` fields)
    - Key actions with LLM reasoning (last 30 tool entries, each with tool name, task, reasoning, and failure flag)
@@ -522,19 +526,18 @@ Currently logs the number of eligible patterns for cross-validation. Full implem
 
 ### LLM Library (`lib/llm.js`)
 
-Provides the `callLLM(prompt, maxTokens)` function for Kimi K2.5 inference.
+Provides the `callLLM(prompt, maxTokens, model?)` function for daemon LLM calls via Vercel AI Gateway.
 
 | Property | Value |
 |----------|-------|
-| Model | `kimi-k2.5` |
-| API endpoint | `https://api.moonshot.ai/v1/chat/completions` |
-| Protocol | OpenAI-compatible chat completions API |
-| Auth | `MOONSHOT_API_KEY` env var, falls back to reading `~/.openclaw/credentials/moonshot-api-key` |
-| Default max tokens | 200 |
-| Temperature | 0.6 |
-| Thinking | Disabled (`{ type: 'disabled' }`) |
+| Default model | `google/gemini-2.5-flash-lite` (fast, cheap, supports JSON mode) |
+| Override | `QUOTH_LLM_MODEL` env var |
+| Primary endpoint | `https://ai-gateway.vercel.sh/v1/chat/completions` (Vercel AI Gateway) |
+| Primary auth | `AI_GATEWAY_API_KEY` env var (vck_* key) |
+| Legacy fallback | `https://api.moonshot.ai/v1/chat/completions` (Kimi K2.5 via Moonshot, only if `AI_GATEWAY_API_KEY` not set) |
+| Legacy auth | `MOONSHOT_API_KEY` env var or `~/.openclaw/credentials/moonshot-api-key` |
+| Temperature | 0.3 |
 | Timeout | 30,000ms |
-| Cost | $0.50/MTok input, $2.80/MTok output |
 
 **Post-processing:** Strips markdown code block wrappers (` ```json ` ... ` ``` `) from responses before returning the text.
 
@@ -542,20 +545,22 @@ Provides the `callLLM(prompt, maxTokens)` function for Kimi K2.5 inference.
 
 ### Embeddings Library (`lib/embed.js`)
 
-Provides `generateEmbedding(text)` for creating vector embeddings.
+Provides `generateEmbedding(text)` and `generateEmbeddingBatch(texts)` for creating vector embeddings locally.
 
 | Property | Value |
 |----------|-------|
-| Model | `voyage/voyage-4-lite` |
-| API endpoint | `https://ai-gateway.vercel.sh/v1/embeddings` |
-| Auth | `AI_GATEWAY_API_KEY` env var (vck_* key) |
-| Timeout | 10,000ms |
-| Cost | $0.02/MTok (6.5x cheaper than text-embedding-3-large) |
-| Dimensions | Model-determined (used with HNSW index at 1536 dimensions) |
+| Model | `Xenova/all-MiniLM-L6-v2` via @xenova/transformers (ONNX, quantized) |
+| Dimensions | 384 |
+| Cost | Zero (runs locally, ~5ms per embedding after warmup) |
+| Dependencies | `@xenova/transformers` (ONNX runtime) |
+
+**Batch embedding:** Accumulates texts in a queue with a threshold of 8 entries and a 2-second flush delay. When the threshold is reached or the timer fires, all queued texts are embedded in a single batch call for efficiency.
 
 **Input preprocessing:** Replaces multiple newlines with spaces and trims whitespace.
 
-**Graceful degradation:** Returns `null` on any failure (missing API key, timeout, parse error). All callers handle `null` embeddings by falling back to non-semantic methods.
+**Graceful degradation:** Returns `null` on any failure. All callers handle `null` embeddings by falling back to non-semantic methods.
+
+**History:** Previously used `voyage/voyage-4-lite` via Vercel AI Gateway (1024d, $0.02/MTok). Migrated to local MiniLM-L6-v2 for zero-cost operation.
 
 ### Attribution Library (`lib/attribute.js`)
 
@@ -645,7 +650,7 @@ Pure JavaScript implementation of the Hierarchical Navigable Small World (HNSW) 
 
 | Property | Value |
 |----------|-------|
-| Default dimensions | 1536 (matching text-embedding-3-small) |
+| Default dimensions | 384 (matching MiniLM-L6-v2 local) |
 | M (max neighbors per layer) | 16 |
 | M0 (max neighbors at layer 0) | 32 (2 * M) |
 | efConstruction | 200 |

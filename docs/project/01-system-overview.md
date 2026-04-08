@@ -1,4 +1,4 @@
-# Quoth v3.2.0 System Overview
+# Quoth v3.3.0 System Overview
 
 ## Two-Part Architecture
 
@@ -9,9 +9,9 @@ Quoth is a self-learning knowledge system split into two independent but connect
 The plugin runs entirely on the developer's machine as a Claude Code extension. It provides:
 
 - **Hooks** (9 bindings across 8 events) that intercept Claude Code lifecycle events (session start/end, tool use, subagent start/stop, prompt submit, context compaction). All hooks route through a single unified dispatcher (`hook-dispatch.js`) except trajectory capture which has its own handler.
-- **Daemon** (background process) that watches trajectory JSONL files and runs a 3-stage LLM pipeline (JUDGE, DISTILL, CONSOLIDATE) to extract reusable patterns from agent behavior.
+- **Daemon** (background process) that watches trajectory JSONL files. Processes session summaries via batch distill (Haiku CLI) + consolidate pipeline to extract reusable patterns. Includes V2 subsystems: hierarchical Thompson sampling, LLM-as-judge pairwise ranking, clustering, curation, and doc auto-update.
 - **MCP Server** (`quoth-learning`) exposing 22 tools over stdio JSON-RPC for pattern management, agent coordination, intelligence routing, and skill extraction.
-- **SQLite Database** (`~/.quoth/memory.db`) with WAL mode, storing patterns, trajectories, trajectory steps, memory entries, agent registry, skills, and intelligence graph state. Includes a pure-JS HNSW vector index for approximate nearest neighbor search over pattern embeddings.
+- **SQLite Database** (`~/.quoth/memory.db`) with WAL mode, storing patterns, trajectories, trajectory steps, memory entries, agent registry, events, cluster stats, injection log, and judge queue. Includes a pure-JS HNSW vector index for approximate nearest neighbor search over 384-dimensional pattern embeddings (MiniLM-L6-v2).
 
 ### CLOUD: src/
 
@@ -44,12 +44,13 @@ On every `PostToolUse` event for Bash, Write, Edit, MultiEdit, or Agent tools, t
 - Captures sanitized tool input and output (API keys, tokens, JWTs, UUIDs redacted).
 - Appends a JSONL line to `~/.quoth/trajectories/{repo-name}-{date}.jsonl`.
 - Each line contains: timestamp, tool name, sanitized tool input/output, outcome, user_intent, conversation_context (last 3 prompts), llm_reasoning, session ID, project name.
+- Additionally, `session-memory.js` provides in-session topic/file tracking (session-scoped, not persisted across sessions).
 
 ### 3. UserPromptSubmit Routes Task
 
 When the user submits a prompt, the `route` command in `hook-dispatch.js`:
 - Parses the prompt text.
-- Matches against ~20 keyword pattern groups in `routing.js` (8 agent types: coder, tester, reviewer, researcher, architect, backend-dev, frontend-dev, devops). Supports both English and Spanish (Argentine voseo) task descriptions. Intent patterns (fix/debug/refactor) take priority over domain patterns (api/frontend/deploy).
+- Matches against ~26 keyword pattern groups in `routing.js` (8 agent types: coder, tester, reviewer, researcher, architect, backend-dev, frontend-dev, devops). Supports both English and Spanish (Argentine voseo) task descriptions. Intent patterns (fix/debug/refactor) take priority over domain patterns (api/frontend/deploy). Conversational/question patterns route to researcher at 0.6 confidence.
 - Returns the optimal agent type with confidence score and reasoning.
 - Also queries patterns with score >= 0.1 relevant to the task for injection.
 
@@ -78,38 +79,72 @@ Write/Edit/MultiEdit events additionally trigger the `post-edit` command, which:
 
 The daemon (`daemon.js`) runs as a persistent background process:
 
-**File Watching:** Uses `fs.watch` on `~/.quoth/trajectories/` for new/modified JSONL files.
+**File Watching:** Uses `fs.watch` on `~/.quoth/trajectories/` for new/modified JSONL files (500ms debounce).
 
-**Pipeline (per trajectory batch):**
+**Pipeline (session-based batch processing):**
 
-1. **JUDGE** (`pipeline/judge.js`) — Evaluates trajectory effectiveness using Kimi K2.5 via Moonshot API. Assigns a verdict: effective, partially-effective, or ineffective. Only effective trajectories proceed.
+Individual `tool_use` entries are marked as processed immediately without LLM calls — they serve as context. The actual pipeline triggers on `session_summary` entries generated at session end:
 
-2. **DISTILL** (`pipeline/distill.js`) — Extracts reusable patterns from effective trajectories using Kimi K2.5. The prompt enforces quality rules: pattern names must describe techniques/strategies, never raw file paths or tool calls. Generates: pattern name (max 80 chars), tags, applicability (broad/narrow). Also computes a 1024-dim embedding via voyage-4-lite. Includes pre-insert dedup check (embedding similarity >= 0.92 via HNSW, or name prefix match >= 80%) to strengthen existing patterns instead of creating duplicates.
+**Local mode (`QUOTH_MODE=local`):**
 
-3. **CONSOLIDATE** (`pipeline/consolidate.js`) — Uses Kimi K2.5 to decide whether the distilled pattern should merge into an existing pattern (if semantically similar enough via HNSW lookup) or be stored as new. Merging updates confidence, increments version, and blends embeddings.
+1. **DISTILL-BATCH** (`pipeline/distill-batch.js`) — Extracts 1-3 reusable patterns from the entire session context using Claude Haiku 4.5 via `claude -p` CLI. Collects up to 30 recent tool entries, user intents, and LLM reasoning into a single prompt. Quality rules enforce technique/strategy descriptions, never raw file paths or tool calls. Also computes 384-dim embeddings via local MiniLM-L6-v2 (@xenova/transformers). Includes pre-insert dedup check (embedding similarity >= 0.92 via HNSW, or name prefix match) to strengthen existing patterns.
 
-**Attribution** (`lib/attribute.js`) — Uses Haiku to trace which patterns contributed to successful outcomes, updating their Bayesian confidence scores.
+2. **CONSOLIDATE** (`pipeline/consolidate.js`) — Uses Claude Haiku 4.5 via `claude -p` CLI to decide whether a distilled pattern should merge into an existing pattern ("strengthen") or be stored as new. Merging triggers a Bayesian success update on the target pattern.
+
+**Managed mode (`QUOTH_MODE=managed`):** Sends session data to `POST /api/v1/pipeline/process` for cloud processing. Falls back to local mode if the cloud returns no results.
+
+**Individual pipeline modules (used in V2 pairwise judge system):**
+
+- **JUDGE** (`pipeline/judge.js`) — Evaluates trajectory effectiveness using `callLLM()` (default: `google/gemini-2.5-flash-lite` via Vercel AI Gateway, legacy fallback: Kimi K2.5 via Moonshot). Used by V2 pairwise judge batch, not per-entry processing.
+- **DISTILL** (`pipeline/distill.js`) — Per-entry pattern extraction using `callLLM()`. Used as a fallback path; batch distill is the primary flow.
+
+**Attribution** (`lib/attribute.js`) — Uses Claude Haiku 4.5 via `claude -p` CLI to trace which patterns contributed to successful outcomes, updating their Bayesian confidence scores.
+
+**Query Server** — Unix socket server (`daemon.sock`) for zero-latency daemon queries from hooks (routing, pattern injection) without spawning new processes.
+
+**Stale Session Detector** — Every 10 minutes, scans for orphaned sessions (30-minute stale threshold) and generates synthetic session summaries to trigger batch distill.
 
 ### 8. Patterns Stored in SQLite with HNSW
 
-Patterns are stored in the `patterns` table with columns: id, name, pattern_type, condition, action, description, confidence (0.0-1.0), success_count, failure_count, decay_rate, embedding (JSON-serialized 1024-dim vector), version, tags, source, status, timestamps, last_matched_at.
+Patterns are stored in the `patterns` table with base columns: id, name, pattern_type, condition, action, description, confidence (0.0-1.0), success_count, failure_count, decay_rate, embedding (JSON-serialized 384-dim vector), version, tags, source, status, timestamps, last_matched_at. Runtime migrations add: alpha, beta (Bayesian scoring), namespace, promoted_at, cloud_document_id, promoted_confidence, applicability, exposure_count, last_exposed_at, ignored_count, embedding_text, pattern_trigrams, quality_history, cluster_id, cluster_rank_score, effective_exposures, distinctiveness, retired_at, retired_reason.
 
-The pure-JS HNSW index (`lib/hnsw.js`) provides O(log n) approximate nearest neighbor search over pattern embeddings. It is initialized on daemon startup (`db.initHnsw()`) and periodically saved to disk.
+Additional V2 tables: `cluster_stats` (hierarchical Thompson sampling), `injection_log` (pattern exposure tracking), `judge_queue` (LLM-as-judge pairwise comparisons), `events` (event sourcing).
+
+The pure-JS HNSW index (`lib/hnsw.js`) provides O(log n) approximate nearest neighbor search over 384-dim embeddings (MiniLM-L6-v2). It is initialized on daemon startup (`db.initHnsw()`) and saved to disk every 30 minutes.
 
 ### 9. Nightly Deep Processing (3am)
 
-At 3am (scheduled via `setInterval` in the daemon):
+Scheduled at 3am ART (06:00 UTC) via `setTimeout` + 24h `setInterval`. Also runs at startup if >24h since last execution (catch-up for daemon restarts).
 
-- **Deep consolidation:** Phase 0: archive garbage patterns (raw tool-call names). Phase 1: name-based dedup (normalize + prefix match). Phase 2: LLM-assisted dedup of top 20 patterns.
-- **Confidence decay:** Three-tier system: never-matched patterns decay aggressively (beta += 0.1/hr), inactive >7 days moderately (beta += 0.05/hr), inactive >30 days strongly (beta += 0.15/hr, stacking).
-- **Cloud promotion:** High-confidence patterns (>0.8 confidence, >10 uses) are promoted to the Quoth cloud API via `lib/promote.js`. This sends the pattern data to `POST /api/v1/patterns/promote` with the agent's `QUOTH_API_KEY`.
-- **HNSW save:** Persists the in-memory HNSW index to disk.
-- **Agent cleanup:** Removes stale agent registrations that haven't heartbeated.
+**Phase A: Deep Consolidation**
+- Phase 0: Archive garbage patterns (raw tool-call names like "claude-code: Bash ...").
+- Phase 1: Name-based dedup (normalize + 50-char prefix match).
+- Phase 2: LLM-assisted review of top 20 patterns via Claude Haiku 4.5 CLI (MERGE/ARCHIVE actions).
+
+**Phase B: Doc Auto-Update** — Updates project documentation from source code changes. Local mode uses Sonnet 4.6 via CLI; managed mode uses cloud API.
+
+**Phase C: Cloud Pull** — Syncs patterns from Quoth cloud + pulls shared cross-org patterns.
+
+**Phase D: V2 Cluster Rebuild** (feature-flagged) — Rebuilds pattern clusters for hierarchical Thompson sampling.
+
+**Phase E: V2 SNIPS Posteriors** (feature-flagged) — Updates cluster posterior distributions.
+
+**Phase F: V2 LLM-as-Judge** (feature-flagged) — Enqueues and runs pairwise pattern comparisons on uncertain clusters.
+
+**Phase G: V2 Curation** (feature-flagged) — Backfills distinctiveness scores. Weekly (Sunday): dedup near-duplicates (>0.92 similarity) and retire poor-performing patterns.
+
+**Recurring timers (separate from nightly):**
+- Hourly: exposure-based confidence decay (exposed patterns with high failure rate: beta += 0.05/hr; high-exposure patterns: alpha *= 0.9995/hr for recency). Never-exposed patterns have NO decay. Also archives weak patterns and prunes young unused ones.
+- Every 30 minutes: HNSW index save to disk.
+- Every 5 minutes: Agent cleanup (stale registrations >5min without heartbeat).
+- Every 2 hours: V2 mini-pipeline (clusters + SNIPS + judge batch, feature-flagged).
+- Every 6 hours: Cloud pull sync.
+- Every 10 minutes: Stale session detector.
 
 ### 10. Cloud Stores Promoted Patterns
 
 The SaaS platform receives promoted patterns and:
-- Stores them in Neon Postgres with pgvector 1024-dim embeddings.
+- Stores them in Neon Postgres with pgvector embeddings.
 - Makes them available for cross-project semantic search via `/api/v1/search`.
 - Indexes them in the `docs.chunks` table with HNSW cosine similarity index for fast vector retrieval.
 - Records the promotion in `analytics.activity` for usage tracking.
@@ -132,18 +167,28 @@ The SaaS platform receives promoted patterns and:
 
 | Use Case | Model | Provider | Cost Profile |
 |----------|-------|----------|-------------|
-| Trajectory judging | Kimi K2.5 | Moonshot (OpenAI-compat API) | Low cost, high throughput |
-| Pattern distillation | Kimi K2.5 | Moonshot | Low cost |
-| Pattern consolidation | Kimi K2.5 | Moonshot | Unified with JUDGE/DISTILL — single provider |
-| Pattern attribution | Claude Haiku 4.5 | Anthropic (via Vercel AI Gateway) | Low cost |
-| Skill extraction | Claude Sonnet 4.6 | Anthropic (via Vercel AI Gateway) | Higher cost, used sparingly |
+| Batch distillation (primary) | Claude Haiku 4.5 | Anthropic via `claude -p` CLI | Low cost, session-level |
+| Pattern consolidation | Claude Haiku 4.5 | Anthropic via `claude -p` CLI | Low cost |
+| Deep consolidation (nightly) | Claude Haiku 4.5 | Anthropic via `claude -p` CLI | Low cost |
+| Pattern attribution | Claude Haiku 4.5 | Anthropic via `claude -p` CLI | Low cost |
+| V2 pairwise judging | Gemini 2.5 Flash Lite | Google via Vercel AI Gateway | Very low cost |
+| Per-entry distillation (fallback) | Gemini 2.5 Flash Lite | Google via Vercel AI Gateway | Very low cost |
+| Skill extraction | Claude Sonnet 4.6 | Anthropic via `claude -p` CLI | Higher cost, used sparingly |
+| Doc auto-update (local mode) | Claude Sonnet 4.6 | Anthropic via `claude -p` CLI | Higher cost, nightly only |
+
+Legacy: Kimi K2.5 via Moonshot API is retained as a last-resort fallback in `llm.js` when `AI_GATEWAY_API_KEY` is not set.
 
 ### Embeddings
 
-- **Model:** `voyage/voyage-4-lite` via Vercel AI Gateway
-- **Dimensions:** 1024
-- **Cost:** ~$0.02 per million tokens
-- **Used for:** Pattern similarity (local HNSW), document chunk search (cloud pgvector), memory search (cloud pgvector)
+**Local plugin:**
+- **Model:** `Xenova/all-MiniLM-L6-v2` via @xenova/transformers (ONNX, quantized)
+- **Dimensions:** 384
+- **Cost:** Zero (runs locally, ~5ms per embedding after warmup)
+- **Used for:** Pattern similarity (local HNSW), dedup detection
+
+**Cloud SaaS:**
+- **Model:** Provider-dependent (pgvector 1024-dim in Neon Postgres)
+- **Used for:** Document chunk search, memory search, cross-project semantic search
 
 ### Authentication
 
@@ -161,7 +206,7 @@ The SaaS platform receives promoted patterns and:
 | Vercel | SaaS hosting, serverless functions, cron jobs |
 | Neon | Managed Postgres with pgvector extension |
 | Upstash | Redis for rate limiting (@upstash/ratelimit), QStash for async job scheduling |
-| Vercel AI Gateway | Unified proxy to AI providers (Anthropic, Voyage) |
+| Vercel AI Gateway | Unified proxy to AI providers (Google Gemini for daemon LLM calls) |
 | Clerk | Identity and authentication platform |
 
 ---
@@ -170,7 +215,7 @@ The SaaS platform receives promoted patterns and:
 
 | Property | Value |
 |----------|-------|
-| Plugin version | 3.2.0 |
+| Plugin version | 3.3.0 |
 | Package name (SaaS) | quoth-mcp v3.0.0 |
 | MCP protocol version | 2024-11-05 |
 | MCP server name | quoth-learning |
@@ -222,11 +267,17 @@ Session ends (or context compaction)
 [SessionEnd / PreCompact hook] --> consolidate graph, write session_summary, SIGUSR1 daemon
   |
   v
-[Daemon] --> watches JSONL --> session_summary? batch distill : per-entry JUDGE→DISTILL→CONSOLIDATE
+[Daemon] --> watches JSONL --> tool_use entries: mark processed (context only)
+  |                        --> session_summary: batch distill (Haiku CLI) → consolidate → store
   |                        --> stale session detector (10min) generates synthetic summaries
   |
   v
-[Nightly 3am] --> deep consolidation, dedup, decay, cloud promotion
+[Timers] --> hourly: exposure-based decay + prune
+         --> 2h: V2 mini-pipeline (clusters + judge batch)
+         --> 6h: cloud pull sync
+  |
+  v
+[Nightly 3am] --> deep consolidation, dedup, doc auto-update, cloud pull, V2 curation
   |
   v
 [Cloud API] --> Neon Postgres + pgvector --> cross-team search

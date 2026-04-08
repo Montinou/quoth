@@ -208,14 +208,14 @@ Note: The plugin hooks.json has shorter timeouts for some events compared to the
 | `QUOTH_HOME` | No | `~/.quoth` | Override the Quoth data directory |
 | `QUOTH_DEBUG` | No | `false` | Enable verbose debug logging to stderr |
 | `QUOTH_PLUGIN_DIR` | No | *(auto-detected)* | Override the plugin root directory |
-| `AI_GATEWAY_API_KEY` | Yes* | - | Vercel AI Gateway key (`vck_*`) for embedding generation via `voyage-4-lite` |
-| `MOONSHOT_API_KEY` | Yes* | - | Moonshot API key for Kimi K2.5 LLM calls in daemon pipeline |
+| `AI_GATEWAY_API_KEY` | Yes* | - | Vercel AI Gateway key (`vck_*`) for daemon LLM calls (gemini-2.5-flash-lite). Local embeddings use MiniLM-L6-v2 (no API key needed). |
+| `MOONSHOT_API_KEY` | No* | - | Legacy fallback: Moonshot API key for Kimi K2.5 LLM calls (only used if `AI_GATEWAY_API_KEY` not set) |
 | `QUOTH_API_KEY` | No | - | Cloud sync API key (`qth_*` prefix) for pattern promotion |
 | `QUOTH_API_URL` | No | `https://quoth.triqual.dev` | Quoth SaaS API base URL |
 | `QUOTH_PROJECT_ID` | No | *(auto from git remote)* | Override project ID for cloud operations |
 | `JINA_API_KEY` | No | - | Jina AI key for reranking search results |
 
-*Graceful degradation: Without `AI_GATEWAY_API_KEY`, embeddings return `null` and search falls back to keyword matching. Without `MOONSHOT_API_KEY`, the JUDGE/DISTILL/CONSOLIDATE daemon pipeline stages fail with logged errors but the daemon continues running.
+*Graceful degradation: Local embeddings (MiniLM-L6-v2) require no API key and always work. Without `AI_GATEWAY_API_KEY`, daemon LLM calls (JUDGE/DISTILL via `callLLM()`) fall back to `MOONSHOT_API_KEY` (Kimi K2.5). Without either key, those pipeline stages fail with logged errors but the daemon continues running. The batch distill and consolidation paths use `claude -p` CLI (Claude Haiku 4.5) and require no daemon API keys.
 
 ---
 
@@ -229,12 +229,12 @@ Note: The plugin hooks.json has shorter timeouts for some events compared to the
 | `AI_GATEWAY_API_KEY` | Yes | - | Vercel AI Gateway key for server-side embeddings |
 | `OPENAI_API_KEY` | Alt | - | Alternative to AI Gateway for embeddings |
 | `JINA_API_KEY` | No | - | Jina reranking for search results |
-| `UPSTASH_REDIS_REST_URL` | No | - | Upstash Redis URL for rate limiting |
-| `UPSTASH_REDIS_REST_TOKEN` | No | - | Upstash Redis auth token |
+| `KV_REST_API_URL` | No | - | Upstash Redis URL for rate limiting |
+| `KV_REST_API_TOKEN` | No | - | Upstash Redis auth token |
 | `QSTASH_TOKEN` | No | - | QStash token for background job scheduling |
 | `RESEND_API_KEY` | No | - | Resend API key for transactional emails |
 
-When `UPSTASH_REDIS_REST_URL` is not set, rate limiting is disabled (requests pass through). When `JINA_API_KEY` is not set, reranking is skipped and results are returned in vector-similarity order.
+When `KV_REST_API_URL` is not set, rate limiting is disabled (requests pass through). When `JINA_API_KEY` is not set, reranking is skipped and results are returned in vector-similarity order.
 
 ---
 

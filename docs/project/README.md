@@ -1,6 +1,6 @@
 # Quoth — Technical Documentation
 
-> Version 3.2.0 | Last updated: 2026-04-04
+> Version 3.3.0 | Last updated: 2026-04-08
 
 Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that provides autonomous self-learning, intelligence routing, and agent coordination locally, and a **SaaS platform** (`src/`) deployed on Vercel that serves as the cloud knowledge base, agent registry, and search API.
 
@@ -31,7 +31,7 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 |----------|-------------|
 | [10 — Local Database (SQLite)](./10-local-database.md) | Schema, HNSW index, pattern lifecycle |
 | [11 — Cloud Database (Neon)](./11-cloud-database.md) | 6 Postgres schemas, Drizzle ORM, vector search |
-| [12 — Embeddings & Search](./12-embeddings-search.md) | voyage-4-lite, HNSW, cosine similarity, reranking |
+| [12 — Embeddings & Search](./12-embeddings-search.md) | Local MiniLM-L6-v2 (384d), cloud voyage-4-lite (1024d), HNSW, cosine similarity |
 
 ### Operations
 
@@ -42,11 +42,11 @@ Quoth is a two-part system: a **Claude Code plugin** (`quoth-plugin/`) that prov
 | [15 — Agent Coordination](./15-agent-coordination.md) | Registry, heartbeats, task assignment, events |
 | [16 — Security Model](./16-security-model.md) | Auth (Clerk + agent keys), rate limiting, OAuth 2.1 |
 
-### Plugin Extensions (v3.2.0)
+### Plugin Extensions (v3.3.0)
 
 | Document | Description |
 |----------|-------------|
-| [20 — Context Injection & Skills](./20-context-skills.md) | Project context files, session-start injection, 5 built-in skills |
+| [20 — Context Injection & Skills](./20-context-skills.md) | Project context files, session-start injection, 9 built-in skills |
 
 ### Reference
 

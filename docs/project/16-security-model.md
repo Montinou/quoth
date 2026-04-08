@@ -15,7 +15,7 @@ Quoth uses three independent authentication mechanisms, each protecting differen
 **Middleware**: `src/middleware.ts` intercepts all requests via `clerkMiddleware()`. The matcher excludes static assets:
 
 ```typescript
-matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+matcher: ['/((?!_next/static|_next/image|favicon.ico|sitemap\\.xml|robots\\.txt|manifest\\.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
 ```
 
 **Public routes** (no auth required):
@@ -43,7 +43,7 @@ matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gi
 **Behavior**:
 - Authenticated users visiting `/` are redirected to `/dashboard`
 - Protected routes call `auth.protect()` which returns 401 if no valid session
-- Protected pages get `X-Robots-Tag: noindex, nofollow` header
+- Paths starting with `/dashboard`, `/api/`, `/auth/`, or `/invitations/` get `X-Robots-Tag: noindex, nofollow` header
 - Public marketing pages get `Cache-Control: public, max-age=3600, stale-while-revalidate=86400`
 
 **AI crawler tracking**: User agents matching `GPTBot`, `ClaudeBot`, `CCBot`, `Perplexity`, `OAI-SearchBot`, `Google-Extended` are logged for GEO analytics.
@@ -247,13 +247,13 @@ The check is case-insensitive (`cmd.toLowerCase()`).
   - `CLERK_SECRET_KEY` -- Clerk authentication
   - `KV_REST_API_URL`, `KV_REST_API_TOKEN` -- Upstash Redis for rate limiting
   - `DATABASE_URL` -- Neon Postgres connection
-  - `AI_GATEWAY_API_KEY` -- Vercel AI Gateway for embeddings
+  - `AI_GATEWAY_API_KEY` -- Vercel AI Gateway for LLM calls and cloud embeddings
 
 ### Plugin (Local)
 
 - `QUOTH_API_KEY` -- Cloud sync API key (qth_* format)
-- `MOONSHOT_API_KEY` -- Referenced via `file:~/.openclaw/credentials/moonshot.key`
-- `AI_GATEWAY_API_KEY` -- For embedding generation
+- `AI_GATEWAY_API_KEY` -- Primary: for daemon LLM calls (gemini-2.5-flash-lite via Vercel AI Gateway)
+- `MOONSHOT_API_KEY` -- Legacy fallback: for daemon LLM calls (Kimi K2.5 via Moonshot, only if AI_GATEWAY_API_KEY not set). Referenced via `file:~/.openclaw/credentials/moonshot-api-key`
 - No secrets in source code (enforced by CLAUDE.md rules)
 - No `.env` files committed
 

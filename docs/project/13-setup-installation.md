@@ -13,7 +13,7 @@ Complete guide to installing and configuring the Quoth plugin for Claude Code.
 
 Optional for cloud sync:
 - `QUOTH_API_KEY` environment variable (qth_* format key from quoth.triqual.dev)
-- `MOONSHOT_API_KEY` or `AI_GATEWAY_API_KEY` for embedding generation in the daemon pipeline
+- `AI_GATEWAY_API_KEY` for LLM calls (JUDGE/DISTILL) in the daemon pipeline (local embeddings use MiniLM-L6-v2, no API key needed)
 
 ## Running setup.sh
 
@@ -95,10 +95,10 @@ Uses an inline Node.js script for reliable JSON manipulation (not sed/awk). Inje
 
 | Hook Event | Matcher | Command | Timeout |
 |---|---|---|---|
-| `PreToolUse` | `Bash` | `hook-dispatch.js pre-bash` | 2000ms |
-| `PostToolUse` | `Write\|Edit\|MultiEdit` | `hook-dispatch.js post-edit` | 2000ms |
+| `PreToolUse` | `Bash` | `hook-dispatch.js pre-bash` | 5000ms |
+| `PostToolUse` | `Write\|Edit\|MultiEdit` | `hook-dispatch.js post-edit` | 10000ms |
 | `PostToolUse` | `Bash\|Write\|Edit\|MultiEdit\|Agent` | `trajectory-capture.js` | 3000ms |
-| `UserPromptSubmit` | (all) | `hook-dispatch.js route` | 3000ms |
+| `UserPromptSubmit` | (all) | `hook-dispatch.js route` | 10000ms |
 | `SessionStart` | (all) | `hook-dispatch.js session-restore` | 15000ms |
 | `SessionEnd` | (all) | `hook-dispatch.js session-end` | 10000ms |
 | `PreCompact` | (all) | `hook-dispatch.js session-end` | 6000ms |
@@ -123,7 +123,7 @@ if (!settings.permissions.allow.includes('Bash(node .quoth/*)')) {
 }
 ```
 
-### Step 5: Sync Skills to skill-registry (v3.2.0)
+### Step 5: Sync Skills to skill-registry (v3.3.0)
 
 If `~/projects/skill-registry` exists and `bun` is available, the script syncs the plugin's built-in skills to the external skill-registry:
 

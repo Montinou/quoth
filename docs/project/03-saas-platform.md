@@ -12,6 +12,7 @@ The `(app)` route group wraps all authenticated pages behind Clerk middleware.
 |-------|---------|
 | `/dashboard` | Main dashboard — project overview, recent activity |
 | `/dashboard/[projectSlug]` | Per-project dashboard with project-specific metrics |
+| `/dashboard/[projectSlug]/team` | Per-project team management |
 | `/dashboard/analytics` | Usage analytics: searches, embeddings, generations, costs |
 | `/dashboard/api-keys` | Manage agent API keys (generate, revoke, scope) |
 | `/dashboard/settings` | Organization and project settings |
@@ -42,14 +43,21 @@ The `(app)` route group wraps all authenticated pages behind Clerk middleware.
 | `/` (`page.tsx`) | Root page (redirects or renders landing) |
 | `/landing` | Marketing landing page |
 | `/pricing` | Pricing tiers: free, pro, team, enterprise |
+| `/docs` | Documentation index |
 | `/docs/[...slug]` | Documentation pages (catch-all for nested docs) |
 | `/blog` | Blog listing |
 | `/blog/[slug]` | Individual blog post |
 | `/changelog` | Product changelog |
+| `/compare` | Comparison landing page |
+| `/compare/[slug]` | Individual comparison page |
 | `/manifesto` | Product philosophy and manifesto |
 | `/protocol` | Quoth protocol specification |
 | `/terms` | Terms of service |
+| `/glossary` | Glossary index |
+| `/glossary/[term]` | Individual glossary term page |
 | `/guide` | Getting started guide |
+| `/integrations` | Integration directory |
+| `/integrations/[slug]` | Individual integration page |
 | `/onboarding` | New user onboarding flow |
 | `/invitations/accept` | Team invitation acceptance page |
 
@@ -109,6 +117,12 @@ These routes are used by the plugin daemon, agents, and external integrations. A
 | POST | `/api/v1/daemon/agents` | Bulk agent status update from daemon |
 | POST | `/api/v1/daemon/events` | Ingest daemon events (heartbeats, alerts) |
 
+#### Doc Updates
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/v1/docs/update` | Cloud doc auto-update endpoint (managed mode) |
+
 #### Documents
 
 | Method | Route | Purpose |
@@ -149,6 +163,7 @@ These routes are used by the plugin daemon, agents, and external integrations. A
 | Method | Route | Purpose |
 |--------|-------|---------|
 | POST | `/api/v1/patterns/promote` | Receive promoted patterns from local daemon |
+| GET | `/api/v1/patterns/shared` | Retrieve shared cross-org patterns |
 
 #### Profile
 
@@ -176,6 +191,12 @@ These routes are used by the plugin daemon, agents, and external integrations. A
 | Method | Route | Purpose |
 |--------|-------|---------|
 | POST | `/api/v1/trajectories/ingest` | Ingest trajectory data from daemon |
+
+#### Pipeline
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/v1/pipeline/process` | Cloud LLM pipeline for managed mode (JUDGE→DISTILL→CONSOLIDATE) |
 
 #### Admin
 

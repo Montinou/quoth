@@ -169,7 +169,7 @@ Get top-N patterns by confidence score, with optional semantic search and rerank
 
 **Behavior:**
 
-1. If `query` is provided, generate an embedding via `voyage-4-lite` and search by cosine similarity using `db.searchBySimilarity(queryVec, limit, tags)`.
+1. If `query` is provided, generate an embedding via local MiniLM-L6-v2 (384d) and search by cosine similarity using `db.searchBySimilarity(queryVec, limit, tags)`.
 2. If embedding generation fails or no query, fall back to `db.getTopPatterns(limit, tags)` which returns patterns sorted by confidence.
 3. If `query` is provided and `JINA_API_KEY` env var is set and results exist, apply Jina reranking via `rerankPatterns(query, patterns)`.
 
@@ -199,7 +199,7 @@ Semantic search across local patterns. This is the primary discovery tool for fi
 
 **Behavior:**
 
-1. Generate embedding for the query via `voyage-4-lite`.
+1. Generate embedding for the query via local MiniLM-L6-v2 (384d).
 2. If embedding succeeds, search by cosine similarity via `db.searchBySimilarity()`.
 3. If embedding fails or returns no results, fall back to keyword matching:
    - Fetch `limit * 2` top patterns from the database.
@@ -369,7 +369,7 @@ Manually promote a local pattern to the Quoth cloud without waiting for the nigh
 
 The intelligence tools depend on a graph library providing:
 
-- **`tokenize(text)`**: Lowercase, strip non-alphanumeric, remove stop words (60+ English stop words), filter words shorter than 3 characters.
+- **`tokenize(text)`**: Lowercase, strip non-alphanumeric, remove stop words (79 English stop words), filter words shorter than 3 characters.
 - **`trigrams(words)`**: Generate character-level trigrams from each word. Returns a `Set`.
 - **`jaccardSimilarity(setA, setB)`**: Compute Jaccard index (intersection / union) between two trigram sets.
 - **`computePageRank(nodes, edges, damping, maxIter)`**: Standard PageRank with dangling node handling. Damping factor 0.85, max 30 iterations, convergence threshold 1e-6.
@@ -409,8 +409,8 @@ The routing system uses keyword matching against 28 ordered patterns (first matc
 | `(?:base.?de.?datos\|migracion\|consulta\|semilla)` | `backend-dev` | Spanish voseo |
 | `\b(?:ui\|frontend\|component\|react\|css\|style\|layout\|responsive\|tailwind\|shadcn\|animation\|modal\|form\|button\|page\|view\|route\|navigation\|theme\|dark.?mode)\b` | `frontend-dev` | Domain match |
 | `(?:interfaz\|estilo\|pantalla\|formulario\|boton\|navegacion\|tema)` | `frontend-dev` | Spanish voseo |
-| `^(?:what\|how\|why\|when\|where\|who\|which\|can you\|could you\|tell me\|show me\|explain\|check\|verify\|status\|list\|help)\b` | `researcher` | Conversational/questions — **0.6 confidence** |
-| `^(?:que\|como\|por ?que\|cuando\|donde\|podes\|podrias\|decime\|explica\|chequea\|hay\|tenemos\|ayuda)` | `researcher` | Spanish conversational — **0.6 confidence** |
+| `^(?:what\|how\|why\|when\|where\|who\|which\|can you\|could you\|tell me\|show me\|explain\|describe\|check\|verify\|status\|is there\|are there\|do we\|does it\|list\|help)\b` | `researcher` | Conversational/questions — **0.6 confidence** |
+| `^(?:que\|como\|por ?que\|cuando\|donde\|quien\|cual\|podes\|podrias\|decime\|mostrame\|explica\|describi\|chequea\|verifica\|hay\|tenemos\|ayuda)[\s?]` | `researcher` | Spanish conversational — **0.6 confidence** |
 
 Default (no match): `coder` at 0.5 confidence.
 

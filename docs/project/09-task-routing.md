@@ -59,7 +59,7 @@ Implemented in `routing.js: routeTask(task)`.
 | 11 | implement, create, build, add, develop, scaffold, generate, write code, code, make, new file, new function, new class, new module | `coder` | "implement user auth", "create a new endpoint" |
 | 12 | api, endpoint, backend, database, migration, postgres, sqlite, prisma, drizzle, query, sql, seed, orm, graphql, rest, webhook, middleware, auth, jwt, oauth, session | `backend-dev` | "database migration", "new API endpoint" |
 | 13 | ui, frontend, component, react, css, style, layout, responsive, tailwind, shadcn, animation, modal, form, button, page, view, route, navigation, theme, dark mode | `frontend-dev` | "update the UI", "fix CSS" |
-| 14 | what, how, why, when, where, who, can you, explain, describe, check, status, list, help (prompt-start only) | `researcher` (0.6) | "what does this do?", "how does auth work?" |
+| 14 | what, how, why, when, where, who, which, can you, could you, tell me, show me, explain, describe, check, verify, status, is there, are there, do we, does it, list, help (prompt-start only) | `researcher` (0.6) | "what does this do?", "how does auth work?" |
 
 **Spanish patterns (accent-stripped input via `stripAccents()`):**
 
@@ -78,7 +78,7 @@ Implemented in `routing.js: routeTask(task)`.
 | 11 | implementa, crea, construi, agrega, desarrolla, genera, hace, programa | `coder` |
 | 12 | base de datos, migracion, consulta, semilla | `backend-dev` |
 | 13 | interfaz, estilo, pantalla, formulario, boton, navegacion, tema | `frontend-dev` |
-| 14 | que, como, por que, cuando, donde, quien, cual, podes, podrias, decime, mostrame, explica, ayuda (prompt-start only) | `researcher` (0.6) |
+| 14 | que, como, por que, cuando, donde, quien, cual, podes, podrias, decime, mostrame, explica, describi, chequea, verifica, hay, tenemos, ayuda (prompt-start only) | `researcher` (0.6) |
 
 ### Pattern Priority and Conflicts
 
@@ -256,7 +256,7 @@ User Prompt
 
 6. **Hardcoded metrics**: The success probability, duration, and complexity in the hook output are static values that provide no real information.
 
-### Improvements in v3.2.1
+### Improvements in v3.3.0
 
 The following limitations from v3.2.0 have been addressed:
 

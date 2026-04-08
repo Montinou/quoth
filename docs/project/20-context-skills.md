@@ -1,8 +1,8 @@
-# Context Injection & Built-In Skills (v3.2.0)
+# Context Injection & Built-In Skills (v3.3.0)
 
-Two subsystems added in v3.2.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
+Two subsystems added in v3.3.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-07
+**Version:** 1.0.1 | **Last updated:** 2026-04-07
 
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart
@@ -120,7 +120,7 @@ The project name is resolved via `resolveProjectName()` in `hook-dispatch.js`, w
 
 ### Overview
 
-`quoth-plugin/skills/` contains five skill definitions that ship with the plugin. These are `.claude-plugin`-style skills in YAML-fronted markdown — each has a `SKILL.md` with metadata and instructions.
+`quoth-plugin/skills/` contains nine skill definitions that ship with the plugin. These are `.claude-plugin`-style skills in YAML-fronted markdown — each has a `SKILL.md` with metadata and instructions.
 
 On setup, if `~/projects/skill-registry` exists and `bun` is available, `setup.sh` runs `bun run sync:quoth` to publish these skills to the external skill-registry, making them available globally via Stitch MCP.
 
@@ -128,9 +128,13 @@ On setup, if `~/projects/skill-registry` exists and `bun` is available, `setup.s
 
 | Skill | Name | Trigger | Purpose |
 |-------|------|---------|---------|
-| `quoth-genesis/` | `quoth-genesis` | User-invocable | Deep codebase analyzer that generates complete technical documentation in `docs/project/` |
+| `bayesian-confidence/` | `bayesian-confidence` | User-invocable | Beta-Bernoulli confidence tracking with empirical Bayes cold-start and exponential forgetting |
+| `contextual-bandits/` | `contextual-bandits` | User-invocable | Hierarchical Thompson sampling with cluster-level posteriors + SNIPS counterfactual updates |
+| `knowledge-base-curation/` | `knowledge-base-curation` | User-invocable | Anti-bloat curation for learned knowledge bases — quality gates, dedup, retirement, staleness |
 | `learn/` | `learn` | `/quoth:learn` | Trigger immediate pattern consolidation — sends SIGUSR1 to daemon, shows updated patterns |
+| `llm-as-judge/` | `llm-as-judge` | User-invocable | Pairwise LLM-as-judge evaluation with position randomization and active learning |
 | `patterns/` | `patterns` | `/quoth:patterns` | Browse the confidence-scored pattern library, highlight promotion candidates |
+| `quoth-genesis/` | `quoth-genesis` | User-invocable | Deep codebase analyzer that generates complete technical documentation in `docs/project/` |
 | `quoth-help/` | `quoth-help` | `/quoth-help [topic]` | In-session documentation for all quoth subsystems (tools, hooks, daemon, cloud, troubleshooting) |
 | `quoth-init/` | `quoth-init` | User-invocable | Initialize project-local Quoth memory (`.quoth/` folder with config.json and type files) |
 
@@ -179,7 +183,7 @@ Initializes project-local Quoth memory with an interactive configuration workflo
 
 1. Check if `.quoth/` already exists
 2. Ask user for: strictness level (blocking/reminder/off), knowledge types (decisions/patterns/errors/knowledge/selectors/api), gates (require_reasoning_before_edit, require_quoth_search, require_error_documentation)
-3. Create `.quoth/config.json` with version 3.2.0 + user choices
+3. Create `.quoth/config.json` with version 3.3.0 + user choices
 4. Create type files (`.quoth/{type}.md`) with formatted templates
 5. Add `.quoth/sessions/` to `.gitignore`
 
@@ -193,7 +197,7 @@ The `setup.sh` step 5 runs:
 QUOTH_SKILLS_DIR="$PLUGIN_DIR/skills" bun run sync:quoth
 ```
 
-From within `~/projects/skill-registry`. This publishes or updates the five skills in the registry so they are accessible via Stitch MCP in any Claude Code session or OpenClaw workspace.
+From within `~/projects/skill-registry`. This publishes or updates the nine skills in the registry so they are accessible via Stitch MCP in any Claude Code session or OpenClaw workspace.
 
 If skill-registry is not present or bun is unavailable, setup continues without error and prints the manual sync command.
 

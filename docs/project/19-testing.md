@@ -12,7 +12,7 @@ Quoth has two independent test suites:
 
 | Suite | Location | Framework | Language | Tests | Runner |
 |-------|----------|-----------|----------|-------|--------|
-| Plugin | `quoth-plugin/tests/` | Vitest | JavaScript (CommonJS) | 9 files | `npm test` from `quoth-plugin/` |
+| Plugin | `quoth-plugin/tests/` | Vitest | JavaScript (CommonJS) | 31 test files + 2 shell integration tests | `npm test` from `quoth-plugin/` |
 | SaaS | `tests/` | Vitest | TypeScript | 14 files, 181 tests | `npm test` from root |
 
 Both suites use **Vitest** but with different configurations. The SaaS suite uses TypeScript with path aliases (`@/` -> `src/`), global test APIs, and a setup file. The plugin suite uses plain JavaScript with no globals.
