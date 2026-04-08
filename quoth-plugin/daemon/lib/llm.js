@@ -18,6 +18,17 @@ const path = require('path')
 const os = require('os')
 
 const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite'
+
+// Per-million-token pricing (USD)
+const MODEL_PRICING = {
+  'google/gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
+  'google/gemini-2.5-flash': { input: 0.30, output: 2.50 },
+}
+
+function estimateCost(model, inputTokens, outputTokens) {
+  const pricing = MODEL_PRICING[model] || MODEL_PRICING[DEFAULT_MODEL]
+  return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output
+}
 const GATEWAY_HOST = 'ai-gateway.vercel.sh'
 const GATEWAY_PATH = '/v1/chat/completions'
 
@@ -112,6 +123,56 @@ async function callMoonshot(prompt, maxTokens) {
 }
 
 /**
+ * Like callGateway but returns structured usage info + cost estimate.
+ */
+async function callLLMWithUsage(prompt, maxTokens, model) {
+  const apiKey = getGatewayKey()
+  if (!apiKey) throw new Error('No AI_GATEWAY_API_KEY')
+  const resolvedModel = model || getModel()
+  const body = JSON.stringify({
+    model: resolvedModel,
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: maxTokens,
+    temperature: 0.3,
+  })
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: GATEWAY_HOST, path: GATEWAY_PATH, method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+      timeout: 30000,
+    }, (res) => {
+      let chunks = ''
+      res.on('data', c => { chunks += c })
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(chunks)
+          if (data.error) { reject(new Error(data.error.message || JSON.stringify(data.error))); return }
+          let content = data.choices?.[0]?.message?.content || ''
+          content = content.replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim()
+          const usage = data.usage || {}
+          const input_tokens = usage.prompt_tokens || 0
+          const output_tokens = usage.completion_tokens || 0
+          resolve({
+            content,
+            model: data.model || resolvedModel,
+            input_tokens,
+            output_tokens,
+            estimated_cost_usd: estimateCost(resolvedModel, input_tokens, output_tokens),
+          })
+        } catch { reject(new Error('Invalid JSON response')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
+    req.write(body); req.end()
+  })
+}
+
+/**
  * Call the configured LLM. Prefers AI Gateway (Gemini Flash Lite default),
  * falls back to Moonshot Kimi if only MOONSHOT_API_KEY is set.
  */
@@ -121,4 +182,4 @@ async function callLLM(prompt, maxTokens = 200) {
   throw new Error('No LLM credentials (AI_GATEWAY_API_KEY or MOONSHOT_API_KEY)')
 }
 
-module.exports = { callLLM, callGateway, callMoonshot, getModel, DEFAULT_MODEL }
+module.exports = { callLLM, callGateway, callMoonshot, callLLMWithUsage, getModel, estimateCost, MODEL_PRICING, DEFAULT_MODEL }

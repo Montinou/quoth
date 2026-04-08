@@ -310,6 +310,26 @@ function createDb(dbPath) {
     }
   })
 
+  // --- pipeline_costs table for LLM cost tracking ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pipeline_costs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stage TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        estimated_cost_usd REAL DEFAULT 0,
+        batch_size INTEGER DEFAULT 1,
+        session_id TEXT,
+        project TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_costs_stage ON pipeline_costs(stage);
+      CREATE INDEX IF NOT EXISTS idx_costs_created ON pipeline_costs(created_at DESC);
+    `)
+  } catch (e) { console.error('[db v2] pipeline_costs create failed:', e.message); throw e }
+
   // --- doc_chunks table for project documentation semantic search ---
   try {
     db.exec(`
@@ -893,6 +913,60 @@ function createDb(dbPath) {
       UPDATE agent_registry SET status = 'offline'
       WHERE status = 'online' AND last_heartbeat < ? AND last_heartbeat IS NOT NULL
     `).run(cutoff)
+  }
+
+  // --- Pipeline Cost Tracking ---
+
+  db.recordPipelineCost = function({ stage, model, input_tokens, output_tokens, estimated_cost_usd, batch_size, session_id, project }) {
+    return db.prepare(`
+      INSERT INTO pipeline_costs (stage, model, input_tokens, output_tokens, estimated_cost_usd, batch_size, session_id, project)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      stage, model,
+      input_tokens || 0, output_tokens || 0,
+      estimated_cost_usd || 0, batch_size || 1,
+      session_id || null, project || null
+    )
+  }
+
+  db.getCostSummary = function(range) {
+    let whereClause = ''
+    const params = []
+    if (range === 'today') {
+      const startOfDay = new Date()
+      startOfDay.setHours(0, 0, 0, 0)
+      whereClause = ' WHERE created_at >= ?'
+      params.push(startOfDay.getTime())
+    } else if (range === 'week') {
+      whereClause = ' WHERE created_at >= ?'
+      params.push(Date.now() - 7 * 86400000)
+    }
+
+    const rows = db.prepare(`
+      SELECT stage, model,
+        COUNT(*) as calls,
+        SUM(estimated_cost_usd) as cost,
+        SUM(input_tokens) as input_tokens,
+        SUM(output_tokens) as output_tokens
+      FROM pipeline_costs${whereClause}
+      GROUP BY stage
+    `).all(...params)
+
+    const by_stage = {}
+    let total_calls = 0
+    let total_cost_usd = 0
+    for (const row of rows) {
+      by_stage[row.stage] = {
+        calls: row.calls,
+        cost: row.cost,
+        input_tokens: row.input_tokens,
+        output_tokens: row.output_tokens,
+        model: row.model,
+      }
+      total_calls += row.calls
+      total_cost_usd += row.cost
+    }
+    return { total_calls, total_cost_usd, by_stage }
   }
 
   // --- Event Sourcing ---
