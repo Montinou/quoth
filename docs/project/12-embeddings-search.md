@@ -1,6 +1,6 @@
 # Embeddings & Search
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-07
+**Version:** 1.0.2 | **Last updated:** 2026-04-08
 
 Quoth uses local embeddings for semantic pattern search, with a pure-JS HNSW index for approximate nearest-neighbor retrieval.
 

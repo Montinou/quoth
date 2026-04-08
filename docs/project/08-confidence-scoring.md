@@ -1,4 +1,4 @@
-<!-- version: 1.0.1 | updated: 2026-04-07 -->
+<!-- version: 1.0.2 | updated: 2026-04-08 -->
 
 # Confidence Scoring
 

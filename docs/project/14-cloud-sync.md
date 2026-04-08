@@ -1,6 +1,6 @@
 # Cloud Sync & Promotion
 
-*Version: 1.0.1 — Last updated: 2026-04-06*
+*Version: 1.0.2 — Last updated: 2026-04-08*
 
 Documentation of the pattern promotion and cloud synchronization system that bridges the local SQLite-based learning daemon with the Quoth cloud platform (quoth.triqual.dev).
 
@@ -36,7 +36,7 @@ WHERE confidence > 0.8
   AND source = 'distilled'
 ### Nightly Promotion (3am Daily)
 
-The daemon schedules deep consolidation at 3am local time via `scheduleDeepConsolidate()`. This is a multi-phase process:
+The daemon schedules deep consolidation at 06:00 UTC (03:00 ART) via `scheduleNightlyPipeline()`. This is a multi-phase process:
 
 **Phase 1: LLM-Powered Deduplication**
 1. Fetches top 20 patterns by confidence

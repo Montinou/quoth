@@ -1,6 +1,6 @@
 # Intelligence Graph
 
-<!-- version: 1.0.1 | last updated: 2026-04-06 -->
+<!-- version: 1.0.2 | last updated: 2026-04-08 -->
 
 The intelligence graph is Quoth's in-session knowledge retrieval system. It builds a weighted, directed graph from memory files and pattern entries, computes PageRank over the graph, and uses trigram-based text matching to surface relevant context at query time. All state is persisted as JSON files in `~/.quoth/intelligence/`.
 

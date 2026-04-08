@@ -2,7 +2,7 @@
 
 Two subsystems added in v3.3.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-07
+**Version:** 1.0.2 | **Last updated:** 2026-04-08
 
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart

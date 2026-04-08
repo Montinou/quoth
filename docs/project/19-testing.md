@@ -2,7 +2,7 @@
 
 Complete reference for the test suites, testing infrastructure, mock strategy, and conventions used across the Quoth system.
 
-**Version:** 1.0.1 | **Last updated:** 2026-04-07
+**Version:** 1.0.2 | **Last updated:** 2026-04-08
 
 ---
 

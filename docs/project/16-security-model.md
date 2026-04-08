@@ -1,6 +1,6 @@
 # Security Model
 
-**Version:** 1.0.1 | **Updated:** 2026-04-07
+**Version:** 1.0.2 | **Updated:** 2026-04-08
 
 Complete documentation of the Quoth security architecture across both the local plugin and the cloud SaaS platform.
 
