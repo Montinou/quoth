@@ -586,20 +586,9 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase A (consolidation) failed', { error: err.message, stack: err.stack })
   }
 
-  // Phase B: Doc auto-update
-  if (QUOTH_MODE === 'managed') {
-    try {
-      await runDocUpdateManaged()
-    } catch (err) {
-      log('error', 'Nightly Phase B (managed doc update) failed', { error: err.message, stack: err.stack })
-    }
-  } else {
-    try {
-      await runDocUpdate()
-    } catch (err) {
-      log('error', 'Nightly Phase B (doc update) failed', { error: err.message, stack: err.stack })
-    }
-  }
+  // Phase B: Doc auto-update — DISABLED (replaced by Claude Code scheduled trigger)
+  // Remote agent `quoth-doc-autoupdate` runs daily at 09:00 UTC via claude.ai/code/scheduled
+  log('info', 'Phase B skipped (doc updates handled by scheduled remote agent)')
 
   // Phase C: Cloud pull
   try {
