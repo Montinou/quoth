@@ -1,14 +1,11 @@
 'use strict'
 
 const { callLLMWithUsage } = require('../lib/llm.js')
-const { routeTask } = require('../../mcp/lib/routing.js')
+const { routeTask, AGENT_TYPES } = require('../../mcp/lib/routing.js')
 
 const MODEL = 'google/gemini-2.5-flash'
 
-const VALID_DOMAINS = new Set([
-  'coder', 'tester', 'reviewer', 'researcher',
-  'architect', 'backend-dev', 'frontend-dev', 'devops',
-])
+const VALID_DOMAINS = new Set(AGENT_TYPES)
 
 function buildPrompt(entries) {
   const lines = entries.map((e, i) =>

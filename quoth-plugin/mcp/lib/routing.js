@@ -13,6 +13,18 @@ const AGENT_CAPABILITIES = {
   devops: ['ci-cd', 'docker', 'deployment', 'infrastructure'],
 }
 
+/**
+ * Canonical agent role types. Single source of truth for:
+ * - Task routing (routeTask)
+ * - Batch JUDGE domain classification
+ * - Pattern agent:<type> tags
+ * - Injection tag filtering
+ *
+ * NOT the same as MCP agent_register types (claude-code, openclaw, daemon, worker)
+ * which classify the platform/runtime, not the domain role.
+ */
+const AGENT_TYPES = Object.keys(AGENT_CAPABILITIES)
+
 // Order matters: first match wins. Specific intent patterns before broad domain ones.
 // Use word boundaries (\b) on short/ambiguous keywords to avoid false positives.
 const TASK_PATTERNS = [
@@ -85,4 +97,4 @@ function getAlternatives(primaryAgent) {
   }))
 }
 
-module.exports = { routeTask, getAlternatives, AGENT_CAPABILITIES, TASK_PATTERNS }
+module.exports = { routeTask, getAlternatives, AGENT_CAPABILITIES, AGENT_TYPES, TASK_PATTERNS }
