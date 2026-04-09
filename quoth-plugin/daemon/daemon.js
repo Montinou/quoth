@@ -77,9 +77,30 @@ function log(level, msg, data) {
   if (process.env.QUOTH_DEBUG) process.stderr.write(line)
 }
 
-// --- PID management ---
-fs.writeFileSync(PID_FILE, String(process.pid))
+// --- PID management (single-instance guard) ---
 const SOCK_PATH = path.join(QUOTH_HOME, 'daemon.sock')
+if (fs.existsSync(PID_FILE)) {
+  try {
+    const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim())
+    if (existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0) // throws if process doesn't exist
+        // Process is alive — exit to avoid duplicates
+        log('info', 'Another daemon already running', { existingPid })
+        process.exit(0)
+      } catch {
+        // Process is dead — clean up stale files
+        log('info', 'Cleaned stale daemon', { stalePid: existingPid })
+        try { fs.unlinkSync(PID_FILE) } catch {}
+        try { fs.unlinkSync(SOCK_PATH) } catch {}
+      }
+    }
+  } catch {
+    // Malformed PID file — remove it
+    try { fs.unlinkSync(PID_FILE) } catch {}
+  }
+}
+fs.writeFileSync(PID_FILE, String(process.pid))
 process.on('exit', () => {
   try { fs.unlinkSync(PID_FILE) } catch {}
   try { fs.unlinkSync(LOCK_FILE) } catch {}
@@ -636,6 +657,112 @@ async function runNightlyPipeline() {
     } catch (err) { log('error', 'Nightly Phase G (curation) failed', { error: err.message }) }
   }
 
+  // Phase H: Outcome maintenance (pruning + dedup + tag enrichment)
+  try {
+    // H1: Prune stale outcomes (max 20 per pattern)
+    const patternsWithOutcomes = db.prepare(`
+      SELECT DISTINCT pattern_id FROM pattern_outcomes
+    `).all()
+    let pruned = 0
+    for (const { pattern_id } of patternsWithOutcomes) {
+      pruned += db.pruneOutcomes(pattern_id, 20)
+    }
+    if (pruned > 0) log('info', 'Outcome pruning', { pruned })
+
+    // H2: Deduplicate outcomes (same pattern + similar intention + same result)
+    let dedupCount = 0
+    for (const { pattern_id } of patternsWithOutcomes) {
+      const outcomes = db.getOutcomesForPattern(pattern_id, 50)
+      const toDelete = new Set()
+      for (let i = 0; i < outcomes.length; i++) {
+        if (toDelete.has(outcomes[i].id)) continue
+        if (!outcomes[i].intention_embedding) continue
+        const vecA = JSON.parse(outcomes[i].intention_embedding)
+        for (let j = i + 1; j < outcomes.length; j++) {
+          if (toDelete.has(outcomes[j].id)) continue
+          if (outcomes[j].outcome !== outcomes[i].outcome) continue
+          if (!outcomes[j].intention_embedding) continue
+          try {
+            const vecB = JSON.parse(outcomes[j].intention_embedding)
+            let dot = 0, magA = 0, magB = 0
+            for (let k = 0; k < vecA.length; k++) {
+              dot += vecA[k] * vecB[k]; magA += vecA[k] * vecA[k]; magB += vecB[k] * vecB[k]
+            }
+            const sim = dot / (Math.sqrt(magA) * Math.sqrt(magB) || 1)
+            if (sim > 0.92) toDelete.add(outcomes[j].id)
+          } catch {}
+        }
+      }
+      if (toDelete.size > 0) {
+        const ids = [...toDelete]
+        const placeholders = ids.map(() => '?').join(',')
+        db.prepare(`DELETE FROM pattern_outcomes WHERE id IN (${placeholders})`).run(...ids)
+        dedupCount += ids.length
+      }
+    }
+    if (dedupCount > 0) log('info', 'Outcome dedup', { deleted: dedupCount })
+
+    // H3: Tag enrichment — for patterns with >= 5 outcomes, add domain tags from successful outcomes
+    const enrichCandidates = db.prepare(`
+      SELECT pattern_id, COUNT(*) as total,
+             SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as successes
+      FROM pattern_outcomes
+      GROUP BY pattern_id
+      HAVING total >= 5
+    `).all()
+
+    let enriched = 0
+    for (const { pattern_id, successes } of enrichCandidates) {
+      if (successes < 3) continue
+      const pattern = db.getPattern(pattern_id)
+      if (!pattern) continue
+
+      const successOutcomes = db.prepare(`
+        SELECT session_context FROM pattern_outcomes
+        WHERE pattern_id = ? AND outcome = 'success' AND session_context IS NOT NULL
+      `).all(pattern_id)
+
+      const agentTypes = new Map()
+      for (const o of successOutcomes) {
+        try {
+          const ctx = JSON.parse(o.session_context)
+          if (ctx.agent_type) agentTypes.set(ctx.agent_type, (agentTypes.get(ctx.agent_type) || 0) + 1)
+        } catch {}
+      }
+
+      const currentTags = pattern.tags || []
+      let tagsChanged = false
+      for (const [agentType, count] of agentTypes) {
+        if (count >= 3 && !currentTags.includes(`agent:${agentType}`)) {
+          currentTags.push(`agent:${agentType}`)
+          tagsChanged = true
+        }
+      }
+
+      if (tagsChanged) {
+        db.prepare('UPDATE patterns SET tags = ? WHERE id = ?').run(JSON.stringify(currentTags), pattern_id)
+        enriched++
+      }
+    }
+    if (enriched > 0) log('info', 'Tag enrichment from outcomes', { enriched })
+
+    // H4: Flag old unresolved pipeline errors
+    const oldErrors = db.prepare(`
+      SELECT stage, error_message, COUNT(*) as c
+      FROM pipeline_errors
+      WHERE created_at < (strftime('%s','now') - 604800) * 1000
+      GROUP BY stage, substr(error_message, 1, 50)
+      HAVING c >= 3
+    `).all()
+    if (oldErrors.length > 0) {
+      log('warn', 'Recurring pipeline errors (>7 days)', {
+        errors: oldErrors.map(e => `${e.stage}: "${e.error_message.slice(0, 50)}" (${e.c}x)`),
+      })
+    }
+  } catch (err) {
+    log('error', 'Nightly Phase H (outcomes) failed', { error: err.message })
+  }
+
   const elapsed = Math.round((Date.now() - start) / 1000)
   appendExecLog(STATE_DIR, { event: 'pipeline_complete', elapsed_s: elapsed })
   log('info', `Nightly pipeline complete in ${elapsed}s`)
@@ -676,6 +803,11 @@ function mergeLoserIntoWinner(db, winnerId, loserId) {
         updated_at = strftime('%s','now') * 1000
       WHERE id = ?
     `).run(loser.alpha, loser.beta, loser.success_count || 0, loser.failure_count || 0, loser.exposure_count || 0, winnerId)
+    // Transfer contextual outcomes from loser to winner
+    try {
+      db.prepare('UPDATE pattern_outcomes SET pattern_id = ? WHERE pattern_id = ?')
+        .run(winnerId, loserId)
+    } catch {}
     db.prepare(`
       UPDATE patterns SET
         status = 'archived',
