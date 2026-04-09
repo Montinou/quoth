@@ -1116,6 +1116,31 @@ function createDb(dbPath) {
     return deleted.changes
   }
 
+  db.isDuplicateOutcome = function(patternId, intentionEmbedding, outcome, threshold = 0.92) {
+    if (!intentionEmbedding) return false
+
+    const existing = db.prepare(`
+      SELECT intention_embedding, outcome FROM pattern_outcomes
+      WHERE pattern_id = ? AND intention_embedding IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(patternId)
+
+    if (existing.length === 0) return false
+
+    const queryVec = Array.isArray(intentionEmbedding) ? intentionEmbedding : JSON.parse(intentionEmbedding)
+
+    for (const row of existing) {
+      if (row.outcome !== outcome) continue
+      try {
+        const storedVec = JSON.parse(row.intention_embedding)
+        const sim = cosineSimilarity(queryVec, storedVec)
+        if (sim >= threshold) return true
+      } catch {}
+    }
+    return false
+  }
+
   return db
 }
 

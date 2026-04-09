@@ -98,3 +98,68 @@ describe('pattern_outcomes table', () => {
     expect(count.c).toBe(1)
   })
 })
+
+describe('outcome dedup', () => {
+  it('isDuplicateOutcome returns true for similar intention + same result', () => {
+    const vecA = Array(384).fill(0)
+    vecA[0] = 1.0
+
+    db.insertOutcome({
+      pattern_id: 'pat-dup',
+      intention: 'refactor auth middleware',
+      intention_embedding: JSON.stringify(vecA),
+      outcome: 'success',
+      session_id: 'sess-1',
+    })
+
+    // Very similar embedding
+    const vecB = Array(384).fill(0)
+    vecB[0] = 0.99
+    vecB[1] = 0.05
+
+    const isDup = db.isDuplicateOutcome('pat-dup', vecB, 'success', 0.92)
+    expect(isDup).toBe(true)
+  })
+
+  it('isDuplicateOutcome returns false for similar intention but different result', () => {
+    const vecA = Array(384).fill(0)
+    vecA[0] = 1.0
+
+    db.insertOutcome({
+      pattern_id: 'pat-dup2',
+      intention: 'refactor auth middleware',
+      intention_embedding: JSON.stringify(vecA),
+      outcome: 'success',
+      session_id: 'sess-1',
+    })
+
+    const isDup = db.isDuplicateOutcome('pat-dup2', vecA, 'failure', 0.92)
+    expect(isDup).toBe(false)
+  })
+
+  it('isDuplicateOutcome returns false for different intention', () => {
+    const vecA = Array(384).fill(0)
+    vecA[0] = 1.0
+
+    db.insertOutcome({
+      pattern_id: 'pat-dup3',
+      intention: 'refactor auth',
+      intention_embedding: JSON.stringify(vecA),
+      outcome: 'success',
+      session_id: 'sess-1',
+    })
+
+    // Orthogonal embedding
+    const vecB = Array(384).fill(0)
+    vecB[1] = 1.0
+
+    const isDup = db.isDuplicateOutcome('pat-dup3', vecB, 'success', 0.92)
+    expect(isDup).toBe(false)
+  })
+
+  it('isDuplicateOutcome returns false when no outcomes exist', () => {
+    const vec = Array(384).fill(0.1)
+    const isDup = db.isDuplicateOutcome('pat-nonexistent', vec, 'success', 0.92)
+    expect(isDup).toBe(false)
+  })
+})
