@@ -228,6 +228,34 @@ async function handleQuery(body, db, log) {
       patterns = []
     }
 
+    // Outcome reranking: boost/penalize based on contextual outcomes
+    if (patterns.length > 0 && embedding) {
+      try {
+        const outcomesMap = {}
+        for (const p of patterns) {
+          if (p.id && !p.id.startsWith('doc:')) {
+            const outcomes = db.getOutcomesForPattern
+              ? db.getOutcomesForPattern(p.id, 10)
+              : []
+            if (outcomes.length > 0) outcomesMap[p.id] = outcomes
+          }
+        }
+        if (Object.keys(outcomesMap).length > 0) {
+          patterns = rerankByOutcomes(patterns, embedding, outcomesMap)
+          // Re-sort by combined score: original score + outcome adjustment
+          patterns.sort((a, b) => {
+            const aTotal = (a._score || a._trigramSim || a._similarity || 0) + (a._outcomeScore || 0)
+            const bTotal = (b._score || b._trigramSim || b._similarity || 0) + (b._outcomeScore || 0)
+            return bTotal - aTotal
+          })
+          // Trim back to limit
+          patterns = patterns.slice(0, limit)
+        }
+      } catch (err) {
+        log('error', 'Outcome reranking failed', { error: err.message })
+      }
+    }
+
     // Log pattern injections
     for (let i = 0; i < patterns.length; i++) {
       const p = patterns[i]
