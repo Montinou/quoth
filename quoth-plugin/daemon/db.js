@@ -352,6 +352,24 @@ function createDb(dbPath) {
     `)
   } catch (e) { console.error('[db] pipeline_errors create failed:', e.message) }
 
+  // --- pattern_outcomes table for contextual feedback ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pattern_outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pattern_id TEXT NOT NULL,
+        intention TEXT NOT NULL,
+        intention_embedding TEXT,
+        outcome TEXT NOT NULL,
+        session_context TEXT,
+        session_id TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_po_pattern ON pattern_outcomes(pattern_id);
+      CREATE INDEX IF NOT EXISTS idx_po_created ON pattern_outcomes(created_at);
+    `)
+  } catch (e) { console.error('[db] pattern_outcomes create failed:', e.message) }
+
   // --- doc_chunks table for project documentation semantic search ---
   try {
     db.exec(`
@@ -1051,6 +1069,51 @@ function createDb(dbPath) {
       ...r,
       payload: JSON.parse(r.payload || '{}')
     }))
+  }
+
+  // --- pattern_outcomes CRUD helpers ---
+  db.insertOutcome = function(o) {
+    db.prepare(`
+      INSERT INTO pattern_outcomes
+        (pattern_id, intention, intention_embedding, outcome, session_context, session_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      o.pattern_id,
+      o.intention,
+      o.intention_embedding || null,
+      o.outcome,
+      o.session_context || null,
+      o.session_id || null,
+    )
+  }
+
+  db.getOutcomesForPattern = function(patternId, limit = 20) {
+    return db.prepare(`
+      SELECT * FROM pattern_outcomes
+      WHERE pattern_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(patternId, limit)
+  }
+
+  db.pruneOutcomes = function(patternId, maxCount = 20) {
+    const count = db.prepare(
+      'SELECT COUNT(*) as c FROM pattern_outcomes WHERE pattern_id = ?'
+    ).get(patternId).c
+
+    if (count <= maxCount) return 0
+
+    const deleted = db.prepare(`
+      DELETE FROM pattern_outcomes
+      WHERE id IN (
+        SELECT id FROM pattern_outcomes
+        WHERE pattern_id = ?
+        ORDER BY created_at ASC
+        LIMIT ?
+      )
+    `).run(patternId, count - maxCount)
+
+    return deleted.changes
   }
 
   return db
