@@ -77,9 +77,30 @@ function log(level, msg, data) {
   if (process.env.QUOTH_DEBUG) process.stderr.write(line)
 }
 
-// --- PID management ---
-fs.writeFileSync(PID_FILE, String(process.pid))
+// --- PID management (single-instance guard) ---
 const SOCK_PATH = path.join(QUOTH_HOME, 'daemon.sock')
+if (fs.existsSync(PID_FILE)) {
+  try {
+    const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim())
+    if (existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0) // throws if process doesn't exist
+        // Process is alive — exit to avoid duplicates
+        log('info', 'Another daemon already running', { existingPid })
+        process.exit(0)
+      } catch {
+        // Process is dead — clean up stale files
+        log('info', 'Cleaned stale daemon', { stalePid: existingPid })
+        try { fs.unlinkSync(PID_FILE) } catch {}
+        try { fs.unlinkSync(SOCK_PATH) } catch {}
+      }
+    }
+  } catch {
+    // Malformed PID file — remove it
+    try { fs.unlinkSync(PID_FILE) } catch {}
+  }
+}
+fs.writeFileSync(PID_FILE, String(process.pid))
 process.on('exit', () => {
   try { fs.unlinkSync(PID_FILE) } catch {}
   try { fs.unlinkSync(LOCK_FILE) } catch {}

@@ -113,6 +113,15 @@ function isDaemonAlive() {
 
 async function ensureDaemon() {
   if (fs.existsSync(SOCK_PATH) && await isDaemonAlive()) return
+  // Clean stale sock/pid before starting — prevents "already listening" errors
+  try { fs.unlinkSync(SOCK_PATH) } catch {}
+  const pidPath = path.join(QUOTH_HOME, 'daemon.pid')
+  if (fs.existsSync(pidPath)) {
+    try {
+      const oldPid = parseInt(fs.readFileSync(pidPath, 'utf8').trim())
+      try { process.kill(oldPid, 0) } catch { fs.unlinkSync(pidPath) }
+    } catch { try { fs.unlinkSync(pidPath) } catch {} }
+  }
   // Start daemon
   const daemonPath = path.join(QUOTH_PLUGIN, 'daemon', 'daemon.js')
   const child = spawn('node', [daemonPath], { detached: true, stdio: 'ignore' })
