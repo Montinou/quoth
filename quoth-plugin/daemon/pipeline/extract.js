@@ -7,7 +7,7 @@ const childProcess = require('child_process')
  * EXTRACT: Single-stage pipeline replacing JUDGE + DISTILL + CONSOLIDATE.
  *
  * Primary model: claude -p Sonnet --effort low ($0, Max plan)
- * Fallback model: Gemini 2.5 Flash via AI Gateway (~$0.003)
+ * Fallback model: Kimi K2.5 via Moonshot API
  *
  * Returns 0-N patterns with rich context, intention, and quality_signal.
  * Errors are always logged to pipeline_errors table (never silent).
@@ -158,33 +158,18 @@ async function extract(summaryEntry, toolEntries, db) {
       })
     } catch {}
 
-    // Fallback: Gemini 2.5 Flash via AI Gateway
+    // Fallback: Kimi K2.5 via Moonshot API
     try {
-      const { callLLMWithUsage } = require('../lib/llm.js')
-      const result = await callLLMWithUsage(prompt, 400, 'google/gemini-2.5-flash')
-      rawOutput = result.content
-      model = 'google/gemini-2.5-flash'
-
-      // Record fallback cost
-      try {
-        db.recordPipelineCost({
-          stage: 'extract',
-          model: result.model || model,
-          input_tokens: result.input_tokens || 0,
-          output_tokens: result.output_tokens || 0,
-          estimated_cost_usd: result.estimated_cost_usd || 0,
-          batch_size: 1,
-          session_id: summaryEntry.session || null,
-          project: summaryEntry.project || null,
-        })
-      } catch {}
+      const { callMoonshot } = require('../lib/llm.js')
+      rawOutput = await callMoonshot(prompt, 600)
+      model = 'kimi-k2.5'
 
       // Mark fallback success
       try {
         db.insertPipelineError({
           stage: 'extract',
           error_message: `Primary failed, fallback succeeded: ${primaryErr.message}`,
-          context: JSON.stringify({ session_id: summaryEntry.session, model: 'google/gemini-2.5-flash' }),
+          context: JSON.stringify({ session_id: summaryEntry.session, model: 'kimi-k2.5' }),
           model_attempted: 'claude-sonnet-4-6',
           fallback_attempted: 1,
           fallback_succeeded: 1,
@@ -203,7 +188,7 @@ async function extract(summaryEntry, toolEntries, db) {
             entry_count: recentTools.length,
             primary_error: primaryErr.message,
           }),
-          model_attempted: 'google/gemini-2.5-flash',
+          model_attempted: 'kimi-k2.5',
           fallback_attempted: 1,
           fallback_succeeded: 0,
         })
