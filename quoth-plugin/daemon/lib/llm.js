@@ -84,12 +84,17 @@ async function callGateway(prompt, maxTokens, model) {
   })
 }
 
-async function callMoonshot(prompt, maxTokens) {
+async function callMoonshot(prompt, maxTokens, { jsonPrefill = false } = {}) {
   const apiKey = getMoonshotKey()
   if (!apiKey) throw new Error('No MOONSHOT_API_KEY')
+  const messages = [{ role: 'user', content: prompt }]
+  // Partial prefill: force JSON output by starting the assistant response with "{"
+  if (jsonPrefill) {
+    messages.push({ role: 'assistant', content: '{', partial: true })
+  }
   const body = JSON.stringify({
     model: 'kimi-k2.5',
-    messages: [{ role: 'user', content: prompt }],
+    messages,
     max_tokens: maxTokens,
     temperature: 0.6,
     thinking: { type: 'disabled' },
@@ -111,6 +116,8 @@ async function callMoonshot(prompt, maxTokens) {
           const data = JSON.parse(chunks)
           if (data.error) { reject(new Error(data.error.message)); return }
           let content = data.choices?.[0]?.message?.content || ''
+          // Prepend "{" when using partial prefill (model continues from there)
+          if (jsonPrefill) content = '{' + content
           content = content.replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim()
           resolve(content)
         } catch { reject(new Error('Invalid JSON response')) }

@@ -26,7 +26,16 @@ process.stdin.on('end', () => {
     // Extract project name from CLAUDE_PROJECT_DIR or cwd.
     // For OpenClaw workspaces (~/.openclaw/workspaces/<name>/repo), use the workspace
     // name instead of "repo" to avoid collisions across agents.
-    const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+    // Try CLAUDE_PROJECT_DIR first, then cwd. If both resolve to home dir,
+    // try git rev-parse from cwd to find the actual repo root.
+    let projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+    if (projectDir === os.homedir() || path.basename(projectDir) === os.userInfo().username) {
+      try {
+        const { execSync } = require('child_process')
+        const gitRoot = execSync('git rev-parse --show-toplevel', { timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+        if (gitRoot && gitRoot !== os.homedir()) projectDir = gitRoot
+      } catch {}
+    }
     const project = resolveProjectName(projectDir)
 
     // Extract tool info from hook data

@@ -131,7 +131,7 @@ async function extract(summaryEntry, toolEntries, db) {
   // Primary: Kimi K2.5 via Moonshot API
   try {
     const { callMoonshot } = require('../lib/llm.js')
-    rawOutput = await callMoonshot(prompt, 600)
+    rawOutput = await callMoonshot(prompt, 600, { jsonPrefill: true })
   } catch (primaryErr) {
     // Log primary failure
     try {
