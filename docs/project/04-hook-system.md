@@ -1,4 +1,4 @@
-# Hook System <!-- v1.0.2 | 2026-04-08 -->
+# Hook System <!-- v1.0.3 | 2026-04-09 -->
 
 Quoth's hook system integrates with Claude Code's lifecycle events to provide intelligence routing, trajectory capture, pattern injection, and command safety checks. All hooks are declared in `hooks/hooks.json` and execute via two entry points: the unified dispatcher (`hook-dispatch.js`) and the standalone trajectory capture script (`trajectory-capture.js`).
 

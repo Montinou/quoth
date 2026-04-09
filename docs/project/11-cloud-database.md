@@ -1,6 +1,6 @@
 # Cloud Database (Neon Postgres)
 
-> Version: 1.0.2 | Last updated: 2026-04-08
+> Version: 1.0.3 | Last updated: 2026-04-09
 
 The Quoth SaaS platform uses Neon Postgres (serverless) as its cloud database, with Drizzle ORM for schema management and query building. The schema spans 6 Postgres schemas with 26 tables total, supporting multi-tenant organizations, agent coordination, document RAG, search analytics, and inter-agent communication.
 

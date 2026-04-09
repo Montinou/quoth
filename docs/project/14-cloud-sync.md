@@ -1,6 +1,6 @@
 # Cloud Sync & Promotion
 
-*Version: 1.0.2 — Last updated: 2026-04-08*
+*Version: 1.0.3 — Last updated: 2026-04-09*
 
 Documentation of the pattern promotion and cloud synchronization system that bridges the local SQLite-based learning daemon with the Quoth cloud platform (quoth.triqual.dev).
 

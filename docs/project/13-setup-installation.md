@@ -1,6 +1,6 @@
 # Setup & Installation
 
-> v1.0.2 — Last updated 2026-04-08
+> v1.0.3 — Last updated 2026-04-09
 
 Complete guide to installing and configuring the Quoth plugin for Claude Code.
 

@@ -1,10 +1,10 @@
-<!-- version: 1.1.0 | updated: 2026-04-08 -->
+<!-- version: 1.1.1 | updated: 2026-04-09 -->
 
 # V2 Subsystems: Bandit-Based Learning Pipeline
 
 The V2 subsystem replaces V1's simple Bayesian update + trigram matching with a hierarchical Thompson sampling bandit, pattern clustering, propensity-scored injection, and counterfactual off-policy evaluation via SNIPS. These components work together to make pattern selection statistically principled: patterns are grouped into clusters, clusters compete via Thompson sampling, injection slots carry propensity scores for debiased reward estimation, and a curation pipeline maintains knowledge base quality.
 
-**Version:** 1.1.0 | **Last updated:** 2026-04-08
+**Version:** 1.1.1 | **Last updated:** 2026-04-09
 
 Source files:
 - `quoth-plugin/daemon/lib/flags.js` -- V2 feature flag infrastructure
@@ -204,11 +204,32 @@ V2 attribution replaces V1's Jaccard-overlap approach (which conflated correlati
 
 `sessionOutcomeReward(events)`:
 
-| Condition | Reward | Description |
-|-----------|--------|-------------|
-| Any event with `outcome === 'failure'` or `'error'` | 0.0 | Hard failure signal |
-| At least one event with `outcome === 'success'`, no failures | 1.0 | Clean success |
-| No outcome fields present | 0.5 | Null signal (no information) |
+Three priority tiers are checked in order; the first matching tier determines the reward:
+
+**Priority 1 — `session_summary` event with `success_rate` field:**
+
+| `success_rate` | Reward |
+|----------------|--------|
+| >= 0.8 | 1.0 |
+| >= 0.5 | 0.7 |
+| > 0 | 0.3 |
+| == 0 | 0.0 |
+
+**Priority 2 — legacy `outcome` fields (backward compat):**
+
+| Condition | Reward |
+|-----------|--------|
+| Any event with `outcome === 'failure'` or `'error'` | 0.0 |
+| Any event with `outcome === 'success'`, no failures | 1.0 |
+
+**Priority 3 — infer from tool mix (fallback):**
+
+| Condition | Reward |
+|-----------|--------|
+| `Write`/`Edit`/`MultiEdit` calls > 0 AND no Bash errors | 0.8 |
+| `Write`/`Edit`/`MultiEdit` calls > 0 AND Bash errors > 0 | 0.5 |
+| Bash errors > 0 AND no writes | 0.2 |
+| No signal (empty or unknown events) | 0.5 |
 
 ### Session Signal Extraction
 
@@ -394,7 +415,7 @@ Phase G: curation.js
 
 ```
 Day 1: Patterns injected with propensity P -> logged
-Day 1: Session completes -> attribution.js computes reward {0.0, 0.5, 1.0}
+Day 1: Session completes -> attribution.js computes reward {0.0, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0}
 Day 1: scoring.js records exposure, applies soft-negative if ignored
 Night: SNIPS uses (reward, propensity) pairs to estimate cluster value
 Night: Cluster posteriors updated -> next day's Thompson sampling changes

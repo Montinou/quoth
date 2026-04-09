@@ -1,6 +1,6 @@
 # Configuration
 
-*Version: 1.0.2 | Last updated: 2026-04-08*
+*Version: 1.0.3 | Last updated: 2026-04-09*
 
 Complete reference for all configuration files, environment variables, file paths, and setup procedures in the Quoth system.
 
