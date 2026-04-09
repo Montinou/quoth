@@ -100,7 +100,8 @@ async function main() {
   const Database = require('better-sqlite3')
   const db = new Database(dbPath, { readonly: true })
 
-  const rows = db.prepare(`
+  // Try patterns with stored embeddings first, fall back to all active patterns
+  let rows = db.prepare(`
     SELECT id, name, action, embedding, confidence
     FROM patterns
     WHERE status = 'active' AND embedding IS NOT NULL
@@ -108,15 +109,44 @@ async function main() {
     LIMIT ?
   `).all(topN)
 
+  let needsLiveEmbedding = false
+  if (rows.length === 0) {
+    console.log('No stored embeddings found — will generate MiniLM-L6 embeddings on-the-fly...\n')
+    rows = db.prepare(`
+      SELECT id, name, action, confidence
+      FROM patterns
+      WHERE status = 'active'
+      ORDER BY confidence DESC
+      LIMIT ?
+    `).all(topN)
+    needsLiveEmbedding = true
+  }
+
   console.log(`\nLoaded ${rows.length} patterns from ${dbPath}\n`)
 
-  const patterns = rows.map(r => ({
-    id: r.id,
-    name: r.name,
-    action: (r.action || '').slice(0, 80),
-    confidence: r.confidence,
-    embedding: JSON.parse(r.embedding),
-  }))
+  let patterns
+  if (needsLiveEmbedding) {
+    const { generateEmbeddingBatch } = require('../daemon/lib/embed.js')
+    const texts = rows.map(r => `${r.name || ''} ${(r.action || '').slice(0, 80)}`.trim())
+    console.log(`Generating ${texts.length} embeddings (MiniLM-L6, ~5ms each after warmup)...`)
+    const embeddings = await generateEmbeddingBatch(texts)
+    patterns = rows.map((r, i) => ({
+      id: r.id,
+      name: r.name,
+      action: (r.action || '').slice(0, 80),
+      confidence: r.confidence,
+      embedding: embeddings[i],
+    }))
+    console.log(`Generated ${embeddings.filter(e => e).length} embeddings\n`)
+  } else {
+    patterns = rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      action: (r.action || '').slice(0, 80),
+      confidence: r.confidence,
+      embedding: JSON.parse(r.embedding),
+    }))
+  }
 
   console.log('Computing pairwise similarity...')
   const pairs = computePairwiseSimilarity(patterns)
