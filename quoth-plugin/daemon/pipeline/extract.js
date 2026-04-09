@@ -6,8 +6,8 @@ const childProcess = require('child_process')
 /**
  * EXTRACT: Single-stage pipeline replacing JUDGE + DISTILL + CONSOLIDATE.
  *
- * Primary model: claude -p Sonnet --effort low ($0, Max plan)
- * Fallback model: Kimi K2.5 via Moonshot API
+ * Primary model: Kimi K2.5 via Moonshot API
+ * Fallback model: claude -p Sonnet --effort low ($0, Max plan)
  *
  * Returns 0-N patterns with rich context, intention, and quality_signal.
  * Errors are always logged to pipeline_errors table (never silent).
@@ -126,20 +126,12 @@ async function extract(summaryEntry, toolEntries, db) {
   const prompt = buildPrompt(summaryEntry, recentTools)
 
   let rawOutput
-  let model = 'claude-sonnet-4-6'
+  let model = 'kimi-k2.5'
 
-  // Primary: claude -p Sonnet --effort low ($0)
+  // Primary: Kimi K2.5 via Moonshot API
   try {
-    rawOutput = childProcess.execSync(
-      'claude -p --model claude-sonnet-4-6 --effort low --output-format text --allowedTools ""',
-      {
-        input: prompt,
-        encoding: 'utf8',
-        timeout: 60000,
-        maxBuffer: 512 * 1024,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    )
+    const { callMoonshot } = require('../lib/llm.js')
+    rawOutput = await callMoonshot(prompt, 600)
   } catch (primaryErr) {
     // Log primary failure
     try {
@@ -151,26 +143,34 @@ async function extract(summaryEntry, toolEntries, db) {
           session_id: summaryEntry.session,
           project: summaryEntry.project,
           entry_count: recentTools.length,
-          model: 'claude-sonnet-4-6',
+          model: 'kimi-k2.5',
         }),
-        model_attempted: 'claude-sonnet-4-6',
+        model_attempted: 'kimi-k2.5',
         fallback_attempted: 1,
       })
     } catch {}
 
-    // Fallback: Kimi K2.5 via Moonshot API
+    // Fallback: claude -p Sonnet --effort low ($0)
     try {
-      const { callMoonshot } = require('../lib/llm.js')
-      rawOutput = await callMoonshot(prompt, 600)
-      model = 'kimi-k2.5'
+      rawOutput = childProcess.execSync(
+        'claude -p --model claude-sonnet-4-6 --effort low --output-format text --allowedTools ""',
+        {
+          input: prompt,
+          encoding: 'utf8',
+          timeout: 60000,
+          maxBuffer: 512 * 1024,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }
+      )
+      model = 'claude-sonnet-4-6'
 
       // Mark fallback success
       try {
         db.insertPipelineError({
           stage: 'extract',
           error_message: `Primary failed, fallback succeeded: ${primaryErr.message}`,
-          context: JSON.stringify({ session_id: summaryEntry.session, model: 'kimi-k2.5' }),
-          model_attempted: 'claude-sonnet-4-6',
+          context: JSON.stringify({ session_id: summaryEntry.session, model: 'claude-sonnet-4-6' }),
+          model_attempted: 'kimi-k2.5',
           fallback_attempted: 1,
           fallback_succeeded: 1,
         })
@@ -188,7 +188,7 @@ async function extract(summaryEntry, toolEntries, db) {
             entry_count: recentTools.length,
             primary_error: primaryErr.message,
           }),
-          model_attempted: 'kimi-k2.5',
+          model_attempted: 'claude-sonnet-4-6',
           fallback_attempted: 1,
           fallback_succeeded: 0,
         })
