@@ -303,4 +303,62 @@ async function handleQuery(body, db, log) {
   return result
 }
 
-module.exports = { createQueryServer }
+function cosineSim(a, b) {
+  let dot = 0, magA = 0, magB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]; magA += a[i] * a[i]; magB += b[i] * b[i]
+  }
+  const mag = Math.sqrt(magA) * Math.sqrt(magB)
+  return mag === 0 ? 0 : dot / mag
+}
+
+/**
+ * Rerank patterns by contextual outcome data.
+ *
+ * For each candidate pattern, compare the current query embedding against
+ * stored intention embeddings in pattern_outcomes:
+ * - Similar intention + success → boost score
+ * - Similar intention + failure → penalize score
+ * - No similar intention → neutral (global confidence stands)
+ *
+ * @param {Object[]} patterns - candidate patterns (must have .id)
+ * @param {number[]} queryEmbedding - current prompt embedding
+ * @param {Object} outcomesMap - { patternId: [{intention_embedding, outcome}] }
+ * @param {number} simThreshold - minimum similarity to count as "similar" (default 0.5)
+ * @returns {Object[]} patterns with _outcomeScore added
+ */
+function rerankByOutcomes(patterns, queryEmbedding, outcomesMap, simThreshold = 0.5) {
+  if (!queryEmbedding || queryEmbedding.length === 0) {
+    return patterns.map(p => ({ ...p, _outcomeScore: 0 }))
+  }
+
+  return patterns.map(p => {
+    const outcomes = outcomesMap[p.id] || []
+    if (outcomes.length === 0) return { ...p, _outcomeScore: 0 }
+
+    let score = 0
+    let matchCount = 0
+
+    for (const o of outcomes) {
+      if (!o.intention_embedding) continue
+      try {
+        const intentVec = typeof o.intention_embedding === 'string'
+          ? JSON.parse(o.intention_embedding)
+          : o.intention_embedding
+        const sim = cosineSim(queryEmbedding, intentVec)
+        if (sim < simThreshold) continue
+
+        matchCount++
+        if (o.outcome === 'success') score += sim * 0.3
+        else if (o.outcome === 'failure') score -= sim * 0.3
+        else score += sim * 0.1 // partial
+      } catch {}
+    }
+
+    // Normalize by match count to prevent patterns with many outcomes from dominating
+    const normalizedScore = matchCount > 0 ? score / matchCount : 0
+    return { ...p, _outcomeScore: normalizedScore }
+  })
+}
+
+module.exports = { createQueryServer, rerankByOutcomes }
