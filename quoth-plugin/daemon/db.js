@@ -158,6 +158,9 @@ function createDb(dbPath) {
   try { db.prepare("ALTER TABLE patterns ADD COLUMN pattern_trigrams TEXT").run() } catch {}
   try { db.prepare("ALTER TABLE patterns ADD COLUMN quality_history TEXT DEFAULT '[]'").run() } catch {}
 
+  // Runtime migration: format_version for v3.4→v4 pattern format coexistence
+  try { db.prepare("ALTER TABLE patterns ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1").run() } catch {}
+
   // V2 runtime migrations: hierarchical Thompson + curation columns
   // Helper: swallow "duplicate column" errors only (idempotency); log everything else.
   function v2Migrate(label, fn) {
@@ -330,6 +333,25 @@ function createDb(dbPath) {
     `)
   } catch (e) { console.error('[db v2] pipeline_costs create failed:', e.message); throw e }
 
+  // --- pipeline_errors table for error visibility ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pipeline_errors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stage TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        error_stack TEXT,
+        context TEXT,
+        model_attempted TEXT,
+        fallback_attempted INTEGER DEFAULT 0,
+        fallback_succeeded INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pipeline_errors_stage ON pipeline_errors(stage);
+      CREATE INDEX IF NOT EXISTS idx_pipeline_errors_created ON pipeline_errors(created_at DESC);
+    `)
+  } catch (e) { console.error('[db] pipeline_errors create failed:', e.message) }
+
   // --- doc_chunks table for project documentation semantic search ---
   try {
     db.exec(`
@@ -413,7 +435,8 @@ function createDb(dbPath) {
     return null
   }
 
-  db.findDuplicateByEmbedding = function(embedding, threshold = 0.92) {
+  db.findDuplicateByEmbedding = function(embedding, threshold) {
+    threshold = threshold ?? parseFloat(process.env.QUOTH_DEDUP_THRESHOLD || '0.92')
     if (!embedding || !hnswHealthy || hnsw.size === 0) return null
     try {
       const vec = typeof embedding === 'string' ? JSON.parse(embedding) : embedding
@@ -947,6 +970,22 @@ function createDb(dbPath) {
       input_tokens || 0, output_tokens || 0,
       estimated_cost_usd || 0, batch_size || 1,
       session_id || null, project || null
+    )
+  }
+
+  db.insertPipelineError = function(err) {
+    db.prepare(`
+      INSERT INTO pipeline_errors (stage, error_message, error_stack, context,
+        model_attempted, fallback_attempted, fallback_succeeded)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      err.stage,
+      err.error_message,
+      err.error_stack || null,
+      err.context || null,
+      err.model_attempted || null,
+      err.fallback_attempted || 0,
+      err.fallback_succeeded || 0,
     )
   }
 

@@ -255,4 +255,110 @@ describe('doc_chunks Thompson priors', () => {
     expect(results[0].confidence).toBeCloseTo(2 / 3)
     expect(results[0]._similarity).toBeGreaterThan(0.9)
   })
+
+  describe('pipeline_errors', () => {
+    it('insertPipelineError stores error with all fields', () => {
+      db.insertPipelineError({
+        stage: 'extract',
+        error_message: 'JSON parse failed',
+        error_stack: 'Error: JSON parse failed\n  at extract.js:42',
+        context: JSON.stringify({ session_id: 'sess-1', model: 'claude-sonnet' }),
+        model_attempted: 'claude-sonnet-4-6',
+        fallback_attempted: 1,
+        fallback_succeeded: 0,
+      })
+
+      const rows = db.prepare('SELECT * FROM pipeline_errors').all()
+      expect(rows).toHaveLength(1)
+      expect(rows[0].stage).toBe('extract')
+      expect(rows[0].error_message).toBe('JSON parse failed')
+      expect(rows[0].model_attempted).toBe('claude-sonnet-4-6')
+      expect(rows[0].fallback_attempted).toBe(1)
+      expect(rows[0].fallback_succeeded).toBe(0)
+      expect(rows[0].created_at).toBeGreaterThan(0)
+    })
+
+    it('insertPipelineError works with minimal fields', () => {
+      db.insertPipelineError({
+        stage: 'embed',
+        error_message: 'Model load failed',
+      })
+      const rows = db.prepare('SELECT * FROM pipeline_errors').all()
+      expect(rows).toHaveLength(1)
+      expect(rows[0].error_stack).toBeNull()
+      expect(rows[0].fallback_attempted).toBe(0)
+    })
+  })
+
+  describe('format_version', () => {
+    it('patterns table has format_version column defaulting to 1', () => {
+      db.upsertPattern({
+        id: 'test-fv',
+        name: 'test pattern',
+        condition: 'test',
+        action: 'test action',
+        confidence: 0.5,
+        tags: [],
+        source: 'distilled',
+      })
+
+      const row = db.prepare('SELECT format_version FROM patterns WHERE id = ?').get('test-fv')
+      expect(row.format_version).toBe(1)
+    })
+
+    it('format_version can be set to 2 for new-format patterns', () => {
+      db.upsertPattern({
+        id: 'test-fv2',
+        name: 'rich pattern with context',
+        condition: 'test',
+        action: 'rich pattern text',
+        confidence: 0.67,
+        tags: [],
+        source: 'distilled',
+      })
+      db.prepare('UPDATE patterns SET format_version = 2 WHERE id = ?').run('test-fv2')
+
+      const row = db.prepare('SELECT format_version FROM patterns WHERE id = ?').get('test-fv2')
+      expect(row.format_version).toBe(2)
+    })
+  })
+
+  describe('findDuplicateByEmbedding configurable threshold', () => {
+    it('uses QUOTH_DEDUP_THRESHOLD env var when set', () => {
+      // Init HNSW so findDuplicateByEmbedding can search
+      db.initHnsw()
+
+      // Insert a pattern with a known embedding
+      const vec = Array(384).fill(0)
+      vec[0] = 1.0
+      db.upsertPattern({
+        id: 'dedup-test-1',
+        name: 'test pattern',
+        condition: 'test',
+        action: 'test',
+        confidence: 0.5,
+        tags: [],
+        embedding: JSON.stringify(vec),
+      })
+
+      // Create a slightly different vector (high similarity ~0.95 but below 1.0)
+      const query = Array(384).fill(0)
+      query[0] = 0.98
+      query[1] = 0.2
+
+      // With high threshold (0.99) → should NOT find duplicate
+      process.env.QUOTH_DEDUP_THRESHOLD = '0.99'
+      const noDup = db.findDuplicateByEmbedding(query)
+      expect(noDup).toBeNull()
+
+      // With low threshold (0.80) → should find duplicate
+      process.env.QUOTH_DEDUP_THRESHOLD = '0.80'
+      const yesDup = db.findDuplicateByEmbedding(query)
+      expect(yesDup).not.toBeNull()
+      expect(yesDup.id).toBe('dedup-test-1')
+
+      // Cleanup
+      delete process.env.QUOTH_DEDUP_THRESHOLD
+    })
+  })
 })
