@@ -392,7 +392,7 @@ const handlers = {
     } catch {}
   },
 
-  'session-end': () => {
+  'session-end': async () => {
     const intel = getIntelligence()
     const db = getDb()
     const result = intel.consolidateGraph(db)
@@ -512,6 +512,18 @@ const handlers = {
         } catch (e) {
           console.error('[quoth-v2 session-end] trajectory read failed:', e.message)
         }
+        // Compute session intention for contextual outcomes
+        let intentionText = ''
+        let intentionEmbedding = null
+        try {
+          intentionText = (state.prompts || []).slice(0, 3).join(' ').slice(0, 200)
+            || (summary && summary.user_intents ? summary.user_intents.join(' ').slice(0, 200) : '')
+          if (intentionText.length >= 10) {
+            const { generateEmbedding } = require(path.join(QUOTH_PLUGIN, 'daemon', 'lib', 'embed.js'))
+            intentionEmbedding = await generateEmbedding(intentionText)
+          }
+        } catch {}
+
         for (const pid of injectedIds) {
           const wasUsed = state.injectedPatterns[pid]?.used
           // Used patterns get reward=1.0 (strong signal); unused get session outcome
@@ -527,6 +539,39 @@ const handlers = {
           } else {
             if (patternReward >= 0.7) db.applyBayesianUpdate(pid, 'success')
             else if (patternReward <= 0.3) db.applyBayesianUpdate(pid, 'failure')
+          }
+
+          // Contextual outcome recording (skip doc chunks)
+          if (!pid.startsWith('doc:') && intentionText && intentionText.length >= 10) {
+            let outcomeLabel
+            if (wasUsed && reward >= 0.7) outcomeLabel = 'success'
+            else if (!wasUsed) outcomeLabel = 'failure'
+            else outcomeLabel = 'partial'
+
+            // Half-penalty per spec: used + session failed → beta += 0.5
+            if (outcomeLabel === 'partial') {
+              try {
+                const pat = db.prepare('SELECT beta FROM patterns WHERE id = ?').get(pid)
+                if (pat) db.prepare('UPDATE patterns SET beta = ? WHERE id = ?').run(pat.beta + 0.5, pid)
+              } catch {}
+            }
+
+            const isDup = db.isDuplicateOutcome
+              ? db.isDuplicateOutcome(pid, intentionEmbedding, outcomeLabel)
+              : false
+            if (!isDup) {
+              try {
+                db.insertOutcome({
+                  pattern_id: pid,
+                  intention: intentionText,
+                  intention_embedding: intentionEmbedding ? JSON.stringify(intentionEmbedding) : null,
+                  outcome: outcomeLabel,
+                  session_context: JSON.stringify({ project, agent_type: state.routingResult?.agent_type || 'unknown' }),
+                  session_id: sessionId,
+                })
+                if (db.pruneOutcomes) db.pruneOutcomes(pid, 20)
+              } catch {}
+            }
           }
         }
       } else if (db) {
@@ -728,7 +773,7 @@ async function main() {
       } else if (command === 'post-edit' || command === 'pre-bash' || command === 'subagent-start') {
         await handlers[command](hookInput)
       } else {
-        handlers[command]()
+        await handlers[command]()
       }
     } catch (e) {
       console.log(`[WARN] Hook ${command} error: ${e.message}`)
