@@ -104,49 +104,11 @@ describe('integration: db + pipeline', () => {
   })
 })
 
-// ── Agent-Type Pipeline Integration Tests ──
+// ── Pipeline Integration Tests ──
 
-describe('integration: agent-type pipeline', () => {
-  const { batchJudge, VALID_DOMAINS } = require('../daemon/pipeline/batch-judge.js')
+describe('integration: pipeline', () => {
   const { AGENT_TYPES } = require('../mcp/lib/routing.js')
   const { createDb } = require('../daemon/db.js')
-
-  it('VALID_DOMAINS matches AGENT_TYPES from routing.js', () => {
-    const domainArray = [...VALID_DOMAINS].sort()
-    const typesArray = [...AGENT_TYPES].sort()
-    expect(domainArray).toEqual(typesArray)
-  })
-
-  it('batch judge classifies effective/ineffective entries with domains', async () => {
-    const entries = [
-      { agent: 'claude-code', task: 'implement login form', outcome: 'success', tool_calls: 5 },
-      { agent: 'claude-code', task: 'write unit tests', outcome: 'failure', tool_calls: 2 },
-      { agent: 'claude-code', task: 'deploy to staging', outcome: 'success', tool_calls: 3 },
-    ]
-
-    const mockCallLLM = vi.fn().mockResolvedValue({
-      content: JSON.stringify({
-        judgments: [
-          { index: 0, effective: true, domain: 'frontend-dev', reason: 'login form built' },
-          { index: 1, effective: false, domain: 'tester', reason: 'tests failed' },
-          { index: 2, effective: true, domain: 'devops', reason: 'deployed ok' },
-        ],
-      }),
-      model: 'google/gemini-2.5-flash',
-      input_tokens: 300,
-      output_tokens: 120,
-      estimated_cost_usd: 0.00039,
-    })
-
-    const mockRouteTask = vi.fn(() => ({ agent: 'coder', confidence: 0.5 }))
-    const result = await batchJudge(entries, { callLLMWithUsage: mockCallLLM, routeTask: mockRouteTask })
-
-    expect(result.judgments).toHaveLength(3)
-    expect(result.judgments[0]).toMatchObject({ effective: true, domain: 'frontend-dev' })
-    expect(result.judgments[1]).toMatchObject({ effective: false, domain: 'tester' })
-    expect(result.judgments[2]).toMatchObject({ effective: true, domain: 'devops' })
-    expect(result.usage.input_tokens).toBe(300)
-  })
 
   it('patterns with agent tags are filterable via getTopPatterns', () => {
     const testDbPath = join(tmpDir, `integ-tags-${Date.now()}.db`)
@@ -178,81 +140,51 @@ describe('integration: agent-type pipeline', () => {
     const db = createDb(testDbPath)
 
     db.recordPipelineCost({
-      stage: 'judge-batch', model: 'google/gemini-2.5-flash',
+      stage: 'extract', model: 'claude-sonnet-4-6',
       input_tokens: 2000, output_tokens: 500,
-      estimated_cost_usd: 0.00185, batch_size: 30,
+      estimated_cost_usd: 0, batch_size: 1,
       session_id: 'sess-integ', project: 'quoth',
     })
     db.recordPipelineCost({
-      stage: 'distill', model: 'google/gemini-2.5-flash-lite',
+      stage: 'extract', model: 'google/gemini-2.5-flash',
       input_tokens: 3000, output_tokens: 800,
-      estimated_cost_usd: 0.00062, batch_size: 5,
+      estimated_cost_usd: 0.00062, batch_size: 1,
       session_id: 'sess-integ', project: 'quoth',
     })
 
     const summary = db.getCostSummary()
     expect(summary.total_calls).toBe(2)
-    expect(summary.total_cost_usd).toBeCloseTo(0.00247, 5)
-    expect(summary.by_stage['judge-batch'].calls).toBe(1)
-    expect(summary.by_stage['distill'].calls).toBe(1)
-    expect(summary.by_stage['judge-batch'].input_tokens).toBe(2000)
-    expect(summary.by_stage['distill'].output_tokens).toBe(800)
+    expect(summary.total_cost_usd).toBeCloseTo(0.00062, 5)
+    expect(summary.by_stage['extract'].calls).toBe(2)
 
     db.close()
   })
 
-  it('end-to-end: judge → tag patterns → filtered retrieval', async () => {
-    // Step 1: Judge entries
-    const entries = [
-      { agent: 'claude-code', task: 'refactor auth module', outcome: 'success', tool_calls: 8 },
-      { agent: 'claude-code', task: 'review PR #42', outcome: 'success', tool_calls: 3 },
-    ]
-
-    const mockCallLLM = vi.fn().mockResolvedValue({
-      content: JSON.stringify({
-        judgments: [
-          { index: 0, effective: true, domain: 'coder', reason: 'clean refactor' },
-          { index: 1, effective: true, domain: 'reviewer', reason: 'thorough review' },
-        ],
-      }),
-      model: 'google/gemini-2.5-flash',
-      input_tokens: 200, output_tokens: 80, estimated_cost_usd: 0.00026,
-    })
-
-    const mockRouteTask = vi.fn(() => ({ agent: 'coder', confidence: 0.5 }))
-    const judgeResult = await batchJudge(entries, { callLLMWithUsage: mockCallLLM, routeTask: mockRouteTask })
-
-    // Step 2: Insert patterns tagged with domains from judge
+  it('end-to-end: extract patterns → tagged retrieval', () => {
     const testDbPath = join(tmpDir, `integ-e2e-${Date.now()}.db`)
     const db = createDb(testDbPath)
 
-    for (const j of judgeResult.judgments) {
-      if (j.effective) {
-        db.upsertPattern({
-          id: `e2e-${j.index}`, name: `pattern from ${entries[j.index].task}`,
-          condition: entries[j.index].task, action: `learned: ${j.reason}`,
-          confidence: 0.7, alpha: 5, beta: 2, namespace: 'quoth',
-          tags: [`agent:${j.domain}`, 'batch-distilled'],
-        })
-      }
-    }
+    // Simulate patterns from EXTRACT pipeline
+    db.upsertPattern({
+      id: 'e2e-0', name: 'When refactoring auth middleware, read all route handlers first',
+      condition: 'Session: refactor auth', action: 'When refactoring auth middleware, read all route handlers first',
+      confidence: 0.67, alpha: 2, beta: 1, namespace: 'quoth',
+      tags: ['refactoring', 'project:quoth', 'extracted'],
+    })
+    db.upsertPattern({
+      id: 'e2e-1', name: 'For debugging test failures, isolate with .only first',
+      condition: 'Session: debug tests', action: 'For debugging test failures, isolate with .only first',
+      confidence: 0.75, alpha: 3, beta: 1, namespace: 'quoth',
+      tags: ['debugging', 'project:quoth', 'extracted'],
+    })
 
-    // Step 3: Filter by agent tag
-    const coderPatterns = db.getTopPatterns(10, ['agent:coder'])
-    expect(coderPatterns).toHaveLength(1)
-    expect(coderPatterns[0].id).toBe('e2e-0')
-    expect(coderPatterns[0].tags).toContain('agent:coder')
+    // Filter by tag
+    const refactoring = db.getTopPatterns(10, ['refactoring'])
+    expect(refactoring).toHaveLength(1)
+    expect(refactoring[0].id).toBe('e2e-0')
 
-    const reviewerPatterns = db.getTopPatterns(10, ['agent:reviewer'])
-    expect(reviewerPatterns).toHaveLength(1)
-    expect(reviewerPatterns[0].id).toBe('e2e-1')
-
-    const allPatterns = db.getTopPatterns(10, [])
-    expect(allPatterns).toHaveLength(2)
-
-    // No devops patterns exist
-    const devopsPatterns = db.getTopPatterns(10, ['agent:devops'])
-    expect(devopsPatterns).toHaveLength(0)
+    const all = db.getTopPatterns(10, [])
+    expect(all).toHaveLength(2)
 
     db.close()
   })
