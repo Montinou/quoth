@@ -1059,6 +1059,26 @@ function createDb(dbPath) {
     })
   }
 
+  /**
+   * Increment the epoch counter for a session_id. If no rows exist yet,
+   * seed epoch=2 (implying epoch=1 was already archived without a dedicated
+   * row — safe default for Claude Code resume cases where we only discover
+   * the collision at archive time).
+   * Returns the NEW epoch number.
+   */
+  db.bumpSessionEpoch = function(session_id) {
+    const row = db.prepare('SELECT MAX(epoch) AS max_epoch, project FROM sessions WHERE session_id = ?').get(session_id)
+    const next = (row?.max_epoch || 1) + 1
+    const project = row?.project || 'unknown'
+    const now = Date.now()
+    db.prepare(`
+      INSERT INTO sessions (session_id, epoch, project, status, first_seen_ts, last_seen_ts, tool_count, closed_marker)
+      VALUES (?, ?, ?, 'processing', ?, ?, 0, 0)
+      ON CONFLICT(session_id, epoch) DO NOTHING
+    `).run(session_id, next, project, now, now)
+    return next
+  }
+
   db.getSession = function(session_id, epoch) {
     if (epoch != null) {
       return db.prepare('SELECT * FROM sessions WHERE session_id = ? AND epoch = ?').get(session_id, epoch) || null

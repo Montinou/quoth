@@ -1,5 +1,5 @@
 // tests/sessions-helpers.test.js
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -351,5 +351,76 @@ describe('insertNewFact — scope → namespace mapping', () => {
     const rows = db.listFactsByNamespace('facts:proj:quoth')
     expect(rows.length).toBe(1)
     expect(JSON.parse(rows[0].content).statement).toBe('v2')
+  })
+})
+
+describe('moveSessionFile — epoch collision handling', () => {
+  let tmp
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'quoth-epoch-test-')) })
+  afterEach(() => { try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {} })
+
+  function seedInProcessing(sid) {
+    const proc = path.join(tmp, 'trajectories', 'processing')
+    fs.mkdirSync(proc, { recursive: true })
+    const jsonl = path.join(proc, `${sid}.jsonl`)
+    const meta = path.join(proc, `${sid}.meta.json`)
+    fs.writeFileSync(jsonl, JSON.stringify({ event: 'tool_use', session: sid, tool: 'Bash' }) + '\n')
+    fs.writeFileSync(meta, JSON.stringify({ session_id: sid, project: 'quoth', status: 'terminated' }))
+    return jsonl
+  }
+
+  it('first archive lands as <sid>.jsonl under done/<date>/<project>/', async () => {
+    process.env.QUOTH_HOME = tmp
+    const sid = 'sess-resume-1'
+    const jsonl = seedInProcessing(sid)
+
+    await moveSessionFile(jsonl, 'done', { project: 'quoth' })
+
+    const today = new Date().toISOString().slice(0, 10)
+    const dst = path.join(tmp, 'trajectories', 'done', today, 'quoth', `${sid}.jsonl`)
+    expect(fs.existsSync(dst)).toBe(true)
+  })
+
+  it('second archive of the same sid lands as <sid>-e2.jsonl', async () => {
+    process.env.QUOTH_HOME = tmp
+    const sid = 'sess-resume-2'
+    let jsonl = seedInProcessing(sid)
+    await moveSessionFile(jsonl, 'done', { project: 'quoth' })
+
+    jsonl = seedInProcessing(sid)
+
+    const db = createDb(path.join(tmp, 'epoch-test.db'))
+    const nextEpoch = db.bumpSessionEpoch(sid)
+    expect(nextEpoch).toBe(2)
+
+    await moveSessionFile(jsonl, 'done', { project: 'quoth', filenameOverride: `${sid}-e${nextEpoch}.jsonl` })
+
+    const today = new Date().toISOString().slice(0, 10)
+    const dst = path.join(tmp, 'trajectories', 'done', today, 'quoth', `${sid}-e2.jsonl`)
+    expect(fs.existsSync(dst)).toBe(true)
+    expect(fs.existsSync(path.join(tmp, 'trajectories', 'done', today, 'quoth', `${sid}-e2.meta.json`))).toBe(true)
+    expect(fs.existsSync(path.join(tmp, 'trajectories', 'done', today, 'quoth', `${sid}.jsonl`))).toBe(true)
+  })
+
+  it('third resume → <sid>-e3.jsonl', async () => {
+    process.env.QUOTH_HOME = tmp
+    const sid = 'sess-resume-3'
+    const db = createDb(path.join(tmp, 'epoch-test.db'))
+
+    for (let i = 1; i <= 3; i++) {
+      const jsonl = seedInProcessing(sid)
+      if (i === 1) {
+        await moveSessionFile(jsonl, 'done', { project: 'quoth' })
+        continue
+      }
+      const epoch = db.bumpSessionEpoch(sid)
+      expect(epoch).toBe(i)
+      await moveSessionFile(jsonl, 'done', { project: 'quoth', filenameOverride: `${sid}-e${epoch}.jsonl` })
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    const dir = path.join(tmp, 'trajectories', 'done', today, 'quoth')
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort()
+    expect(files).toEqual([`${sid}-e2.jsonl`, `${sid}-e3.jsonl`, `${sid}.jsonl`])
   })
 })

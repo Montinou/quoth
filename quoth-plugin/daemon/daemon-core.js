@@ -104,8 +104,28 @@ async function processSessionFile({ sessionFile, db, extractFn, log = noopLog })
     pattern_count: patterns.length,
     fact_count: facts.length,
   })
+
+  // Epoch collision handling: if the target file already exists (Claude Code
+  // resume after the original sid was already archived), bump the session's
+  // epoch in the DB and use the suffixed name. moveSessionFile's
+  // filenameOverride contract requires the FULL filename INCLUDING `.jsonl`.
+  const destBase = path.basename(sessionFile, '.jsonl')
+  const project = summary.project || 'default'
+  const today = new Date().toISOString().slice(0, 10)
+  const targetDir = path.join(path.dirname(path.dirname(sessionFile)), bucket, today, project)
+  const targetJsonl = path.join(targetDir, `${destBase}.jsonl`)
+  let filenameOverride = null
+  if (fs.existsSync(targetJsonl) && typeof db.bumpSessionEpoch === 'function') {
+    const epoch = db.bumpSessionEpoch(sid)
+    filenameOverride = `${destBase}-e${epoch}.jsonl`
+    log('info', 'epoch_bumped_for_resume', { sid, epoch })
+  }
+
   try {
-    await moveSessionFile(sessionFile, bucket, { project: summary.project || 'default' })
+    await moveSessionFile(sessionFile, bucket, {
+      project,
+      ...(filenameOverride ? { filenameOverride } : {}),
+    })
   } catch (err) {
     log('error', `move_to_${bucket}_failed`, { sid, error: err.message })
   }
