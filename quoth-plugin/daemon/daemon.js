@@ -407,7 +407,7 @@ async function processSessionLocal(summaryEntry, toolEntries) {
 
 function insertNewPattern(distilled, summaryEntry, project) {
   // Pre-insert dedup check
-  const dupByName = db.findDuplicateByName(distilled.pattern)
+  const dupByName = db.findDuplicateByName(distilled.action)
   const dupByEmbed = distilled.embedding
     ? db.findDuplicateByEmbedding(distilled.embedding)
     : null
@@ -425,10 +425,11 @@ function insertNewPattern(distilled, summaryEntry, project) {
 
   db.upsertPattern({
     id: distilled.id,
-    name: distilled.pattern.slice(0, 200),
+    name: distilled.action.slice(0, 200),
     pattern_type: 'code-pattern',
-    condition: `Session: ${(summaryEntry.task || '').slice(0, 100)}`,
-    action: distilled.pattern,
+    condition: distilled.condition,
+    action: distilled.action,
+    description: distilled.condition,
     confidence,
     tags: [
       ...(distilled.tags || []),
@@ -445,7 +446,7 @@ function insertNewPattern(distilled, summaryEntry, project) {
 
   db.emitEvent('pattern.learned', summaryEntry.agent || 'daemon', project, {
     patternId: distilled.id,
-    name: distilled.pattern.slice(0, 80),
+    name: distilled.action.slice(0, 80),
     confidence,
     quality: distilled.quality_signal,
     source: 'extracted',
