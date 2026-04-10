@@ -180,6 +180,75 @@ async function callLLMWithUsage(prompt, maxTokens, model) {
 }
 
 /**
+ * Call Moonshot Kimi K2.5 with tool calling support.
+ * Used by extract pipeline for multi-turn tool conversations.
+ * Thinking mode is left as default (enabled) — do NOT disable it.
+ */
+async function callMoonshotWithTools(messages, {
+  tools = [],
+  tool_choice = 'auto',
+  maxTokens = 16384,
+  promptCacheKey = null,
+  responseFormat = null,
+} = {}) {
+  const apiKey = getMoonshotKey()
+  if (!apiKey) throw new Error('No MOONSHOT_API_KEY')
+
+  const body = {
+    model: 'kimi-k2.5',
+    messages,
+    max_tokens: maxTokens,
+    temperature: 0.6,
+  }
+
+  if (tools.length > 0) {
+    body.tools = tools
+    body.tool_choice = tool_choice
+  }
+  if (promptCacheKey) body.prompt_cache_key = promptCacheKey
+  if (responseFormat) body.response_format = responseFormat
+
+  const bodyStr = JSON.stringify(body)
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: MOONSHOT_HOST, path: MOONSHOT_PATH, method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Length': Buffer.byteLength(bodyStr),
+      },
+      timeout: 120000,
+    }, (res) => {
+      let chunks = ''
+      res.on('data', c => { chunks += c })
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(chunks)
+          if (data.error) { reject(new Error(data.error.message || JSON.stringify(data.error))); return }
+          const msg = data.choices?.[0]?.message || {}
+          const hasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
+          const usage = data.usage || {}
+          resolve({
+            message: msg,
+            tool_calls: hasToolCalls ? msg.tool_calls : null,
+            content: hasToolCalls ? null : (msg.content || null),
+            reasoning_content: msg.reasoning_content || null,
+            usage: {
+              prompt_tokens: usage.prompt_tokens || 0,
+              completion_tokens: usage.completion_tokens || 0,
+            },
+          })
+        } catch { reject(new Error('Invalid JSON response')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
+    req.write(bodyStr); req.end()
+  })
+}
+
+/**
  * Call the configured LLM. Prefers AI Gateway (Gemini Flash Lite default),
  * falls back to Moonshot Kimi if only MOONSHOT_API_KEY is set.
  */
@@ -189,4 +258,4 @@ async function callLLM(prompt, maxTokens = 200) {
   throw new Error('No LLM credentials (AI_GATEWAY_API_KEY or MOONSHOT_API_KEY)')
 }
 
-module.exports = { callLLM, callGateway, callMoonshot, callLLMWithUsage, getModel, estimateCost, MODEL_PRICING, DEFAULT_MODEL }
+module.exports = { callLLM, callGateway, callMoonshot, callMoonshotWithTools, callLLMWithUsage, getModel, estimateCost, MODEL_PRICING, DEFAULT_MODEL }
