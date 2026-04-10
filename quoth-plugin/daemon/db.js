@@ -73,6 +73,29 @@ CREATE TABLE IF NOT EXISTS memory_entries (
   UNIQUE(namespace, key)
 );
 
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  first_seen_ts INTEGER NOT NULL,
+  last_seen_ts INTEGER NOT NULL,
+  tool_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('active','processing','done','routine','empty','error')),
+  closed_marker INTEGER NOT NULL DEFAULT 0,
+  extracted_at INTEGER,
+  pattern_count INTEGER,
+  fact_count INTEGER,
+  epoch INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (session_id, epoch)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_status_last_seen ON sessions(status, last_seen_ts);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+
+CREATE TABLE IF NOT EXISTS daemon_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS agent_registry (
   agent_id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -1005,6 +1028,95 @@ function createDb(dbPath) {
       err.fallback_attempted || 0,
       err.fallback_succeeded || 0,
     )
+  }
+
+  // --- sessions table helpers (per-session isolation — spec §4.5) ---
+
+  db.upsertSession = function(s) {
+    db.prepare(`
+      INSERT INTO sessions (
+        session_id, project, first_seen_ts, last_seen_ts, tool_count,
+        status, closed_marker, epoch
+      )
+      VALUES (@session_id, @project, @first_seen_ts, @last_seen_ts, @tool_count,
+              @status, @closed_marker, @epoch)
+      ON CONFLICT(session_id, epoch) DO UPDATE SET
+        project = excluded.project,
+        last_seen_ts = excluded.last_seen_ts,
+        tool_count = excluded.tool_count,
+        status = excluded.status,
+        closed_marker = excluded.closed_marker
+    `).run({
+      session_id: s.session_id,
+      project: s.project,
+      first_seen_ts: s.first_seen_ts,
+      last_seen_ts: s.last_seen_ts,
+      tool_count: s.tool_count || 0,
+      status: s.status,
+      closed_marker: s.closed_marker ? 1 : 0,
+      epoch: s.epoch || 1,
+    })
+  }
+
+  db.getSession = function(session_id, epoch) {
+    if (epoch != null) {
+      return db.prepare('SELECT * FROM sessions WHERE session_id = ? AND epoch = ?').get(session_id, epoch) || null
+    }
+    // Default: return the latest epoch
+    return db.prepare('SELECT * FROM sessions WHERE session_id = ? ORDER BY epoch DESC LIMIT 1').get(session_id) || null
+  }
+
+  db.updateSessionStatus = function(session_id, status, extras = {}) {
+    const now = Date.now()
+    const terminal = ['done', 'routine', 'empty', 'error'].includes(status)
+    return db.prepare(`
+      UPDATE sessions
+      SET status = @status,
+          extracted_at = CASE WHEN @terminal THEN @now ELSE extracted_at END,
+          pattern_count = COALESCE(@pattern_count, pattern_count),
+          fact_count = COALESCE(@fact_count, fact_count)
+      WHERE session_id = @session_id
+        AND epoch = COALESCE(@epoch, (SELECT MAX(epoch) FROM sessions WHERE session_id = @session_id))
+    `).run({
+      session_id, status,
+      terminal: terminal ? 1 : 0,
+      now,
+      pattern_count: extras.pattern_count ?? null,
+      fact_count: extras.fact_count ?? null,
+      epoch: extras.epoch ?? null,
+    })
+  }
+
+  db.listSessions = function(filters = {}) {
+    let query = 'SELECT * FROM sessions WHERE 1=1'
+    const params = []
+    if (filters.status != null) { query += ' AND status = ?'; params.push(filters.status) }
+    if (filters.maxLastSeen != null) { query += ' AND last_seen_ts < ?'; params.push(filters.maxLastSeen) }
+    if (filters.project) { query += ' AND project = ?'; params.push(filters.project) }
+    query += ' ORDER BY last_seen_ts ASC'
+    if (filters.limit != null && filters.limit > 0) { query += ' LIMIT ?'; params.push(filters.limit) }
+    return db.prepare(query).all(...params)
+  }
+
+  db.countSessionEpochs = function(session_id, bucket) {
+    const row = db.prepare(
+      'SELECT COUNT(*) AS c FROM sessions WHERE session_id = ? AND status = ?'
+    ).get(session_id, bucket)
+    return row ? row.c : 0
+  }
+
+  // --- daemon_meta key/value store (spec §6.4 prerequisite) ---
+
+  db.setDaemonMeta = function(key, value) {
+    db.prepare(`
+      INSERT INTO daemon_meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, String(value))
+  }
+
+  db.getDaemonMeta = function(key) {
+    const row = db.prepare('SELECT value FROM daemon_meta WHERE key = ?').get(key)
+    return row ? row.value : null
   }
 
   db.getCostSummary = function(range) {
