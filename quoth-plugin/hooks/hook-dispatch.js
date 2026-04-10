@@ -399,6 +399,40 @@ const handlers = {
         }
       }
     } catch {}
+
+    // --- Facts injection (spec §6.7) ---
+    // Pull up to 5 facts per namespace (project + global) from
+    // memory_entries and emit a markdown block so Claude Code captures
+    // it in the opening context. Only two namespaces per spec §6.6 —
+    // there is no facts:user. Silent on error / empty DB.
+    try {
+      const factsDb = getDb()
+      if (!factsDb || typeof factsDb.listFactsByNamespace !== 'function') throw new Error('no_db')
+
+      const factsProject = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const namespaces = [
+        { label: 'project', ns: `facts:proj:${factsProject}` },
+        { label: 'global',  ns: 'facts:global' },
+      ]
+
+      const blocks = []
+      for (const { label, ns } of namespaces) {
+        const rows = factsDb.listFactsByNamespace(ns, 5) || []
+        if (rows.length === 0) continue
+        const lines = rows.map(r => {
+          let parsed
+          try { parsed = JSON.parse(r.content) } catch { parsed = { statement: String(r.content || '').slice(0, 200) } }
+          const stmt = String(parsed.statement || '').replace(/\s+/g, ' ').trim().slice(0, 240)
+          return `- **${r.key}**: ${stmt}`
+        })
+        const heading = label === 'project' ? `Facts (project — ${factsProject})` : 'Facts (global)'
+        blocks.push(`### ${heading}\n${lines.join('\n')}`)
+      }
+
+      if (blocks.length > 0) {
+        process.stdout.write(`## Facts\n\n${blocks.join('\n\n')}\n`)
+      }
+    } catch {}
   },
 
   'session-end': async () => {
