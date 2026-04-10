@@ -74,6 +74,9 @@ function findRgPath() {
   return null
 }
 
+// Cache rg path lookup at module load so we don't spawn `which` per grep call.
+const RG_PATH = findRgPath()
+
 function escapeShellArg(arg) {
   return `'${arg.replace(/'/g, "'\\''")}'`
 }
@@ -81,7 +84,7 @@ function escapeShellArg(arg) {
 function grepCodebase(pattern, searchPath, maxResults = 30) {
   const effectiveMax = Math.min(maxResults, HARD_CAP_RESULTS)
 
-  const rgPath = findRgPath()
+  const rgPath = RG_PATH
 
   let cmd
   if (rgPath) {
@@ -150,6 +153,24 @@ function commonAncestorDir(dirPaths) {
   return common.join('/') || '/'
 }
 
+// --- Path confinement ---
+// Ensures a requested path (from LLM tool args) resolves inside projectRoot.
+// Accepts both absolute and relative input paths. path.resolve() ignores the
+// first arg if the second is absolute, which is exactly what we want for
+// rejecting out-of-tree absolute paths.
+function isInsideProjectRoot(requested, projectRoot) {
+  if (!projectRoot || typeof projectRoot !== 'string') return false
+  const resolvedRoot = path.resolve(projectRoot)
+  const resolved = path.resolve(resolvedRoot, requested)
+  return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep)
+}
+
+function confinePath(requested, projectRoot) {
+  if (!requested || typeof requested !== 'string') return null
+  if (!isInsideProjectRoot(requested, projectRoot)) return null
+  return path.resolve(path.resolve(projectRoot), requested)
+}
+
 // --- executeToolCall ---
 // Parameter names match K2.5 tool definitions: path, maxLines, pattern, maxResults
 function executeToolCall(toolCall, projectRoot) {
@@ -162,11 +183,23 @@ function executeToolCall(toolCall, projectRoot) {
   }
 
   switch (name) {
-    case 'read_file':
-      return readFile(args.path, args.maxLines)
+    case 'read_file': {
+      if (!projectRoot) return 'Error: no project root resolved — cannot read file'
+      const confined = confinePath(args.path, projectRoot)
+      if (!confined) return 'Error: path outside project root'
+      return readFile(confined, args.maxLines)
+    }
 
-    case 'grep_codebase':
-      return grepCodebase(args.pattern, args.path || projectRoot, args.maxResults)
+    case 'grep_codebase': {
+      if (!projectRoot) return 'Error: no project root resolved — cannot grep'
+      let searchPath = projectRoot
+      if (args.path) {
+        const confined = confinePath(args.path, projectRoot)
+        if (!confined) return 'Error: path outside project root'
+        searchPath = confined
+      }
+      return grepCodebase(args.pattern, searchPath, args.maxResults)
+    }
 
     default:
       return `Unknown tool: ${name}`

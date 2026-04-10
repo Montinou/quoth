@@ -199,4 +199,75 @@ describe('executeToolCall', () => {
     }, tmpDir)
     expect(result).toContain('Unknown tool')
   })
+
+  describe('path confinement (security)', () => {
+    it('rejects read_file with absolute path outside projectRoot', () => {
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: '/etc/passwd' }) }
+      }, tmpDir)
+      expect(result).toContain('outside project root')
+    })
+
+    it('rejects read_file with ../ traversal escape', () => {
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: '../../../etc/passwd' }) }
+      }, tmpDir)
+      expect(result).toContain('outside project root')
+    })
+
+    it('rejects read_file with ~/.ssh/id_rsa-style path', () => {
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: '/home/nonexistent_user/.ssh/id_rsa' }) }
+      }, tmpDir)
+      expect(result).toContain('outside project root')
+    })
+
+    it('allows relative paths inside projectRoot', () => {
+      fs.writeFileSync(path.join(tmpDir, 'allowed.txt'), 'ok content\n')
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: 'allowed.txt' }) }
+      }, tmpDir)
+      expect(result).toContain('ok content')
+    })
+
+    it('allows absolute paths that resolve inside projectRoot', () => {
+      const filePath = path.join(tmpDir, 'abs.txt')
+      fs.writeFileSync(filePath, 'abs content\n')
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: filePath }) }
+      }, tmpDir)
+      expect(result).toContain('abs content')
+    })
+
+    it('rejects read_file when no projectRoot is resolved', () => {
+      const result = executeToolCall({
+        function: { name: 'read_file', arguments: JSON.stringify({ path: '/etc/passwd' }) }
+      }, null)
+      expect(result).toContain('no project root')
+    })
+
+    it('rejects grep_codebase with explicit path outside projectRoot', () => {
+      const result = executeToolCall({
+        function: { name: 'grep_codebase', arguments: JSON.stringify({ pattern: 'root', path: '/etc' }) }
+      }, tmpDir)
+      expect(result).toContain('outside project root')
+    })
+
+    it('rejects grep_codebase with ../ path traversal', () => {
+      const result = executeToolCall({
+        function: { name: 'grep_codebase', arguments: JSON.stringify({ pattern: 'root', path: '../../../etc' }) }
+      }, tmpDir)
+      expect(result).toContain('outside project root')
+    })
+
+    it('allows grep_codebase with no explicit path (defaults to projectRoot)', () => {
+      const srcDir = path.join(tmpDir, 'src')
+      fs.mkdirSync(srcDir)
+      fs.writeFileSync(path.join(srcDir, 'x.js'), 'findable_confinement_ok\n')
+      const result = executeToolCall({
+        function: { name: 'grep_codebase', arguments: JSON.stringify({ pattern: 'findable_confinement_ok' }) }
+      }, tmpDir)
+      expect(result).toContain('findable_confinement_ok')
+    })
+  })
 })

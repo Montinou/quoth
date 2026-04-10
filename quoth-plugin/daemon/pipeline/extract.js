@@ -166,8 +166,14 @@ function parsePatterns(raw) {
 
 // --- Main extract function ---
 
-// Module-level cache for json_mode support detection
+// Module-level cache for json_mode support detection.
+// Latched off only on clear 400 response_format rejection from Moonshot.
+// Exposed reset helper for tests and to allow future retry logic.
 let _jsonModeSupported = true
+
+function _resetJsonModeCache() {
+  _jsonModeSupported = true
+}
 
 async function extract(summaryEntry, toolEntries, db, _deps = null) {
   const recentTools = toolEntries.slice(-60)
@@ -204,6 +210,9 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
       { role: 'user', content: userPrompt },
     ]
 
+    // Moonshot's usage.prompt_tokens is cumulative-per-turn (includes full
+    // conversation history). We overwrite totalTokens each iteration rather
+    // than summing, to avoid artificially tripping the 100K cap.
     let totalTokens = 0
 
     for (let iter = 0; iter < 12; iter++) {
@@ -224,8 +233,15 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
       try {
         response = await callMoonshotWithTools(messages, callOpts)
       } catch (apiErr) {
-        // If json_mode rejected, retry without it
-        if (iter === 0 && _jsonModeSupported && apiErr.message && apiErr.message.includes('response_format')) {
+        // If json_mode rejected, retry without it. Only latch-off on clear
+        // 4xx client errors that mention response_format AND "not support"
+        // or "invalid" — to avoid false positives on coincidental substring matches.
+        const msg = (apiErr?.message || '').toLowerCase()
+        const looksLikeResponseFormatRejection =
+          msg.includes('response_format') &&
+          (msg.includes('not support') || msg.includes('unsupported') || msg.includes('invalid')) &&
+          (msg.includes('400') || msg.includes('bad request') || !msg.includes('5'))
+        if (iter === 0 && _jsonModeSupported && looksLikeResponseFormatRejection) {
           _jsonModeSupported = false
           delete callOpts.responseFormat
           response = await callMoonshotWithTools(messages, callOpts)
@@ -234,19 +250,29 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
         }
       }
 
-      totalTokens += (response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)
+      // Overwrite (don't accumulate) — prompt_tokens already includes history.
+      totalTokens = (response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)
 
-      // Build assistant message for conversation history
-      const assistantMsg = { role: 'assistant' }
-      if (response.message?.content) assistantMsg.content = response.message.content
-      if (response.reasoning_content) assistantMsg.reasoning_content = response.reasoning_content
-      if (response.tool_calls) assistantMsg.tool_calls = response.tool_calls
-
+      // Build assistant message for conversation history.
+      // Only include role/content/tool_calls — NEVER reasoning_content, which
+      // Moonshot rejects as an input-side field (output-only).
+      const assistantMsg = { role: 'assistant', content: response.message?.content ?? null }
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        assistantMsg.tool_calls = response.tool_calls
+      }
       messages.push(assistantMsg)
 
-      // Tool calls → execute and continue loop
-      if (response.tool_calls) {
-        for (const tc of response.tool_calls) {
+      // Tool calls → execute and continue loop.
+      // Enforce tool budget per-call: if response returns more tool_calls
+      // than budget allows, execute only the first N and push synthetic
+      // tool results for the rest so the conversation stays valid.
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        const allCalls = response.tool_calls
+        const runnable = Math.max(0, toolBudget)
+        const toRun = allCalls.slice(0, runnable)
+        const toSkip = allCalls.slice(runnable)
+
+        for (const tc of toRun) {
           const result = executeToolCall(tc, projectRoot)
           const sanitized = sanitize(result) || 'No output'
           messages.push({
@@ -256,12 +282,24 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
           })
           toolBudget--
         }
+
+        for (const tc of toSkip) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: 'Tool budget exhausted — no more tools available',
+          })
+        }
+
         continue
       }
 
-      // Content response → we're done
-      if (response.content) {
-        rawOutput = response.content
+      // Content response → we're done. llm.js exposes both response.content
+      // (null when tool_calls present) and response.message.content. Prefer
+      // the top-level convenience field for consistency.
+      const finalContent = response.content ?? response.message?.content ?? null
+      if (finalContent) {
+        rawOutput = finalContent
         break
       }
 
@@ -386,5 +424,5 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
 
 module.exports = {
   extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson, parsePatterns,
-  QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS,
+  QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS, _resetJsonModeCache,
 }

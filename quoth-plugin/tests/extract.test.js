@@ -3,7 +3,7 @@ import childProcess from 'child_process'
 
 const {
   extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson, parsePatterns,
-  QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS,
+  QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS, _resetJsonModeCache,
 } = require('../daemon/pipeline/extract.js')
 
 // --- Test helpers: build a deps object for injection ---
@@ -22,6 +22,7 @@ function makeDeps(overrides = {}) {
 beforeEach(() => {
   vi.spyOn(childProcess, 'execSync')
   vi.clearAllMocks()
+  _resetJsonModeCache()
 })
 
 afterEach(() => {
@@ -50,26 +51,31 @@ const TOOL_ENTRIES = [
   { tool: 'Bash', tool_input: 'npm test', task: 'Run npm test', outcome: 'success', llm_reasoning: 'Verify changes pass tests', user_intent: 'verify tests' },
 ]
 
-// Helper to build a mock K2.5 response with content (no tool calls)
-function mockContentResponse(content) {
+// Helper to build a mock K2.5 response with content (no tool calls).
+// Matches the shape returned by llm.js:callMoonshotWithTools — canonical
+// field is top-level `content`, with `message.content` kept as the raw
+// OpenAI-compatible payload.
+function mockContentResponse(content, usage = { prompt_tokens: 500, completion_tokens: 200 }) {
   const str = typeof content === 'string' ? content : JSON.stringify(content)
   return {
-    message: { content: str },
+    message: { role: 'assistant', content: str },
     tool_calls: null,
     content: str,
     reasoning_content: null,
-    usage: { prompt_tokens: 500, completion_tokens: 200 },
+    usage,
   }
 }
 
-// Helper to build a mock K2.5 response with tool calls
-function mockToolCallResponse(toolCalls, reasoningContent = null) {
+// Helper to build a mock K2.5 response with tool calls.
+// Matches llm.js: top-level `content` is null when tool_calls present;
+// `reasoning_content` is present but must NEVER be forwarded to the next turn.
+function mockToolCallResponse(toolCalls, reasoningContent = null, usage = { prompt_tokens: 500, completion_tokens: 100 }) {
   return {
-    message: { content: null, tool_calls: toolCalls },
+    message: { role: 'assistant', content: null, tool_calls: toolCalls },
     tool_calls: toolCalls,
     content: null,
     reasoning_content: reasoningContent,
-    usage: { prompt_tokens: 500, completion_tokens: 100 },
+    usage,
   }
 }
 
@@ -390,6 +396,112 @@ describe('extract v2', () => {
       const result = await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
       expect(result).toHaveLength(1)
       expect(result[0].quality_signal).toBe('project')
+    })
+  })
+
+  describe('extract() — token accounting', () => {
+    it('does not double-count cumulative prompt_tokens across turns', async () => {
+      const deps = makeDeps()
+      // Build a large entry set so toolBudget = 8 and doesn't interfere with
+      // the token-cap check on turn 3.
+      const manyEntries = Array.from({ length: 40 }, (_, i) => ({
+        tool: 'Read',
+        tool_input: `/home/user/project/src/f${i}.js`,
+        outcome: 'success',
+      }))
+      // Two tool-calling turns, each reporting large cumulative prompt_tokens.
+      // If we summed them we'd trip the 100K cap after turn 2 (40k+55k=95k plus
+      // completion tokens > 100k) and force tool_choice=none on turn 3. With
+      // correct overwrite semantics, totalTokens after turn 2 = 55,200 < 100K
+      // and tools remain enabled on turn 3.
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockToolCallResponse(
+        [{ id: 'call_1', function: { name: 'read_file', arguments: '{"path":"src/a.js"}' } }],
+        null,
+        { prompt_tokens: 45_000, completion_tokens: 2_000 }
+      ))
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockToolCallResponse(
+        [{ id: 'call_2', function: { name: 'read_file', arguments: '{"path":"src/b.js"}' } }],
+        null,
+        { prompt_tokens: 55_000, completion_tokens: 200 }
+      ))
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockContentResponse(
+        { session_type: 'routine', patterns: [] },
+        { prompt_tokens: 60_000, completion_tokens: 100 }
+      ))
+
+      await extract(SUMMARY, manyEntries, mockDb(), deps)
+
+      // Verify third call still had tools available. With summing semantics,
+      // totalTokens after turn 2 would be 47,000 + 55,200 = 102,200 > 100K,
+      // and turn 3 would force tool_choice=none. With overwrite semantics,
+      // totalTokens = 55,200 and tools stay enabled.
+      const thirdCall = deps.callMoonshotWithTools.mock.calls[2]
+      expect(thirdCall[1].tool_choice).toBe('auto')
+      expect(Array.isArray(thirdCall[1].tools) && thirdCall[1].tools.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('extract() — reasoning_content handling', () => {
+    it('does NOT push reasoning_content into assistant message history', async () => {
+      const deps = makeDeps()
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockToolCallResponse(
+        [{ id: 'call_1', function: { name: 'read_file', arguments: '{"path":"src/a.js"}' } }],
+        'internal chain of thought that should never leak to turn 2',
+      ))
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockContentResponse({
+        session_type: 'productive',
+        patterns: [{
+          condition: 'When inspecting files during extraction',
+          action: 'Prefer reading the file once rather than multiple overlapping grep calls to save tokens',
+          tags: [], quality_signal: 'project',
+        }],
+      }))
+
+      await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
+
+      // Inspect the messages array passed to the second call — the assistant
+      // message pushed after turn 1 must NOT contain reasoning_content.
+      const secondCallMessages = deps.callMoonshotWithTools.mock.calls[1][0]
+      const assistantMsg = secondCallMessages.find(m => m.role === 'assistant')
+      expect(assistantMsg).toBeDefined()
+      expect(assistantMsg).not.toHaveProperty('reasoning_content')
+      expect(assistantMsg.tool_calls).toBeDefined()
+    })
+  })
+
+  describe('extract() — tool budget enforcement', () => {
+    it('caps tool execution at budget even if model returns more calls', async () => {
+      const deps = makeDeps()
+      // Small entry count => toolBudget = 2
+      const smallEntries = TOOL_ENTRIES.slice(0, 3)
+      // First turn returns 5 tool calls, but budget is 2 → only 2 should run.
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockToolCallResponse([
+        { id: 'c1', function: { name: 'read_file', arguments: '{"path":"a.js"}' } },
+        { id: 'c2', function: { name: 'read_file', arguments: '{"path":"b.js"}' } },
+        { id: 'c3', function: { name: 'read_file', arguments: '{"path":"c.js"}' } },
+        { id: 'c4', function: { name: 'read_file', arguments: '{"path":"d.js"}' } },
+        { id: 'c5', function: { name: 'read_file', arguments: '{"path":"e.js"}' } },
+      ]))
+      deps.callMoonshotWithTools.mockResolvedValueOnce(mockContentResponse({
+        session_type: 'routine', patterns: [],
+      }))
+
+      await extract(SUMMARY, smallEntries, mockDb(), deps)
+
+      // Only 2 tools should have actually executed (budget cap).
+      expect(deps.executeToolCall).toHaveBeenCalledTimes(2)
+
+      // The second-turn messages must still have 5 tool results (one per
+      // tool_call_id from turn 1), so the conversation stays valid —
+      // 3 of them are synthetic "budget exhausted" stubs.
+      const secondCallMessages = deps.callMoonshotWithTools.mock.calls[1][0]
+      const toolMessages = secondCallMessages.filter(m => m.role === 'tool')
+      expect(toolMessages).toHaveLength(5)
+      const exhausted = toolMessages.filter(m => (m.content || '').includes('budget exhausted'))
+      expect(exhausted).toHaveLength(3)
+
+      // Second turn should be forced to tool_choice=none since budget is 0.
+      expect(deps.callMoonshotWithTools.mock.calls[1][1].tool_choice).toBe('none')
     })
   })
 
