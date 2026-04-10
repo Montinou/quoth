@@ -187,7 +187,7 @@ async function callLLMWithUsage(prompt, maxTokens, model) {
 async function callMoonshotWithTools(messages, {
   tools = [],
   tool_choice = 'auto',
-  maxTokens = 16384,
+  maxTokens = 32768,
   promptCacheKey = null,
   responseFormat = null,
 } = {}) {

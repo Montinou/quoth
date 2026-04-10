@@ -263,15 +263,16 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
 
     // Moonshot's usage.prompt_tokens is cumulative-per-turn (includes full
     // conversation history). We overwrite totalTokens each iteration rather
-    // than summing, to avoid artificially tripping the 100K cap.
+    // than summing, to avoid artificially tripping the 200K cap. Kimi K2.5
+    // advertises 256K context — we leave ~56K slack for output + overhead.
     let totalTokens = 0
 
     for (let iter = 0; iter < 12; iter++) {
-      const forceNoTools = toolBudget <= 0 || totalTokens >= 100_000
+      const forceNoTools = toolBudget <= 0 || totalTokens >= 200_000
       const callOpts = {
         tools: forceNoTools ? [] : TOOL_DEFINITIONS,
         tool_choice: forceNoTools ? 'none' : 'auto',
-        maxTokens: 16384,
+        maxTokens: 32768,
         promptCacheKey: cacheKey,
       }
 

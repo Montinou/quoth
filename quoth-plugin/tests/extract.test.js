@@ -617,3 +617,36 @@ describe('parseExtractOutput — session_type + patterns + facts', () => {
     expect(out.facts).toEqual([])
   })
 })
+
+describe('extract — token caps', () => {
+  it('passes maxTokens=32768 to callMoonshotWithTools on first call', async () => {
+    const extractMod = require('../daemon/pipeline/extract.js')
+
+    const captured = []
+    const fakeDeps = {
+      callMoonshotWithTools: async (_messages, opts) => {
+        captured.push(opts)
+        return {
+          content: JSON.stringify({ session_type: 'routine', patterns: [], facts: [] }),
+          message: { content: JSON.stringify({ session_type: 'routine', patterns: [], facts: [] }) },
+          tool_calls: [],
+          usage: { prompt_tokens: 500, completion_tokens: 20 },
+        }
+      },
+      executeToolCall: () => ({ output: 'unused' }),
+      resolveProjectRoot: () => '/tmp',
+      sanitize: (x) => x,
+      generateEmbeddingBatch: async (texts) => texts.map(() => [0]),
+    }
+
+    const db = { insertPipelineError: () => {} }
+
+    const summaryEntry = { session: 's1', project: 'quoth', outcome: 'success', success_rate: 1, total_calls: 1, user_intents: [] }
+    const toolEntries = [{ tool: 'Bash', task: 'ls', outcome: 'success', timestamp: Date.now() }]
+
+    await extractMod.extract(summaryEntry, toolEntries, db, fakeDeps)
+
+    expect(captured.length).toBeGreaterThanOrEqual(1)
+    expect(captured[0].maxTokens).toBe(32768)
+  })
+})
