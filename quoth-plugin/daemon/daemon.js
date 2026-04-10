@@ -39,6 +39,7 @@ const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
 // 'local' = full local LLM pipeline (needs AI_GATEWAY_API_KEY or claude CLI)
 // 'managed' = cloud pipeline via Quoth API (only needs QUOTH_API_KEY)
 const QUOTH_MODE = process.env.QUOTH_MODE || 'local'
+const MANAGED_LOCAL_BG = process.env.QUOTH_MANAGED_LOCAL_BACKGROUND === 'true'
 
 // --- Paths ---
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
@@ -196,12 +197,26 @@ async function runWorker() {
       const file = _sessionQueue.shift()
       if (!fs.existsSync(file)) continue
       const { processSessionFile } = require('./daemon-core.js')
-      const { extract } = require('./pipeline/extract.js')
+      let extractFn
+      if (QUOTH_MODE === 'managed' && MANAGED_LOCAL_BG) {
+        const { runLocalBackground } = require('./lib/pipeline-api.js')
+        extractFn = async (summary, toolEntries, dbArg) =>
+          runLocalBackground({ summary, toolEntries, db: dbArg })
+      } else if (QUOTH_MODE === 'managed') {
+        const { callPipelineAPI } = require('./lib/pipeline-api.js')
+        extractFn = async (summary, toolEntries) => {
+          const res = await callPipelineAPI([{ summary, tool_entries: toolEntries.slice(-30) }], [])
+          return res || { patterns: [], facts: [] }
+        }
+      } else {
+        const { extract } = require('./pipeline/extract.js')
+        extractFn = (summary, toolEntries, dbArg) => extract(summary, toolEntries, dbArg)
+      }
       try {
         await processSessionFile({
           sessionFile: file,
           db,
-          extractFn: (summary, toolEntries, db) => extract(summary, toolEntries, db),
+          extractFn,
           log,
         })
       } catch (err) {

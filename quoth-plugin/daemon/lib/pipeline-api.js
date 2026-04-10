@@ -83,4 +83,71 @@ function apiCall(url, method, body, apiKey) {
   })
 }
 
-module.exports = { callPipelineAPI }
+/**
+ * Managed-mode escape hatch: run EXTRACT locally (Moonshot + user's own key)
+ * then post the result to the cloud as a confirmation write-through.
+ *
+ * Controlled by the QUOTH_MANAGED_LOCAL_BACKGROUND env var (see daemon.js
+ * startup). The DAEMON decides which sessions get this treatment; this
+ * function is just the execution path.
+ *
+ * Returns { patterns, facts } identical to callPipelineAPI's shape so
+ * callers don't need to branch on the mode.
+ */
+async function runLocalBackground({
+  summary,
+  toolEntries,
+  db,
+  _localExtract = null,
+  _postConfirmation = null,
+} = {}) {
+  const extract = _localExtract || require('../pipeline/extract.js').extract
+  const postConfirmation = _postConfirmation || _defaultPostConfirmation
+
+  let local
+  try {
+    local = await extract(summary, toolEntries, db)
+  } catch (err) {
+    try {
+      if (db && typeof db.insertPipelineError === 'function') {
+        db.insertPipelineError({
+          stage: 'extract-local-background',
+          error_message: err.message,
+          context: JSON.stringify({ session_id: summary?.session, project: summary?.project }),
+        })
+      }
+    } catch {}
+    return { patterns: [], facts: [] }
+  }
+
+  // Normalize shape: extract() may return an array (old shim) or object.
+  const patterns = Array.isArray(local) ? local : (local?.patterns || [])
+  const facts = Array.isArray(local) ? [] : (local?.facts || [])
+
+  // Fire-and-forget cloud confirmation. Errors are logged, not raised.
+  try {
+    await postConfirmation({ summary, patterns, facts })
+  } catch (err) {
+    try {
+      if (db && typeof db.insertPipelineError === 'function') {
+        db.insertPipelineError({
+          stage: 'confirmation-post',
+          error_message: err.message,
+          context: JSON.stringify({ session_id: summary?.session }),
+        })
+      }
+    } catch {}
+  }
+
+  return { patterns, facts }
+}
+
+async function _defaultPostConfirmation({ summary, patterns, facts }) {
+  return callPipelineAPI([{
+    summary,
+    tool_entries: [],
+    local_result: { patterns, facts },
+  }], [])
+}
+
+module.exports = { callPipelineAPI, runLocalBackground }
