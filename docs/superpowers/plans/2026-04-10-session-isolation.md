@@ -1216,7 +1216,7 @@ EOF
 - Test: `quoth-plugin/tests/trajectory-capture.test.js` (create)
 - Reference: `docs/superpowers/specs/2026-04-10-session-isolation.md` §4.1, §6.1, §6.2
 
-**Goal of the task:** Stop writing every hook fire into a shared `<project>-<date>.jsonl`. Instead, append each entry into `~/.quoth/trajectories/active/<sessionId>.jsonl` and bump `last_activity_ts` on the sidecar. Sessions become truly isolated from the first tool call.
+**Goal of the task:** Stop writing every hook fire into a shared `<project>-<date>.jsonl`. Instead, append each entry into `~/.quoth/trajectories/active/<sessionId>.jsonl` and bump `last_seen_ts` / `tool_count` on the sidecar. Sessions become truly isolated from the first tool call.
 
 **Commit prefix:** `feat(hooks):`
 
@@ -1310,12 +1310,13 @@ describe('trajectory-capture — per-session files', () => {
     expect(parsed.status).toBe('active')
     expect(parsed.first_seen_ts).toBeGreaterThanOrEqual(before)
     expect(parsed.first_seen_ts).toBeLessThanOrEqual(after)
-    expect(parsed.last_activity_ts).toBeGreaterThanOrEqual(parsed.first_seen_ts)
-    expect(parsed.entry_count).toBe(1)
+    expect(parsed.last_seen_ts).toBeGreaterThanOrEqual(parsed.first_seen_ts)
+    expect(parsed.tool_count).toBe(1)
+    expect(parsed.closed_marker).toBe(false)
     expect(typeof parsed.project).toBe('string')
   })
 
-  it('updates sidecar last_activity_ts and entry_count on subsequent entries', () => {
+  it('updates sidecar last_seen_ts and tool_count on subsequent entries', () => {
     const sid = 'sess-alpha-0004'
     runHook(tmpHome, makeEntry(sid, 'Bash', 'ls'))
     const meta = path.join(tmpHome, 'trajectories', 'active', `${sid}.meta.json`)
@@ -1325,8 +1326,8 @@ describe('trajectory-capture — per-session files', () => {
     const second = JSON.parse(fs.readFileSync(meta, 'utf8'))
 
     expect(second.first_seen_ts).toBe(first.first_seen_ts)
-    expect(second.last_activity_ts).toBeGreaterThanOrEqual(first.last_activity_ts)
-    expect(second.entry_count).toBe(2)
+    expect(second.last_seen_ts).toBeGreaterThanOrEqual(first.last_seen_ts)
+    expect(second.tool_count).toBe(2)
   })
 
   it('two parallel sessions do NOT contaminate each other', () => {
@@ -1357,8 +1358,8 @@ describe('trajectory-capture — per-session files', () => {
     // Sidecars agree.
     const metaA = JSON.parse(fs.readFileSync(path.join(dir, `${sidA}.meta.json`), 'utf8'))
     const metaB = JSON.parse(fs.readFileSync(path.join(dir, `${sidB}.meta.json`), 'utf8'))
-    expect(metaA.entry_count).toBe(3)
-    expect(metaB.entry_count).toBe(3)
+    expect(metaA.tool_count).toBe(3)
+    expect(metaB.tool_count).toBe(3)
   })
 })
 ```
@@ -1390,8 +1391,13 @@ Replace lines 107-110 (the old `trajFile` append) with:
 ```javascript
     // Per-session file isolation: every session writes to its own JSONL
     // under active/, plus a sidecar with metadata the daemon reads.
-    const sessionFile = path.join(ACTIVE_DIR, `${sessionId}.jsonl`)
-    const sidecarFile = path.join(ACTIVE_DIR, `${sessionId}.meta.json`)
+    // Sanitize sessionId before using it as a path segment to prevent
+    // directory traversal if a malformed payload arrives. Keep the raw
+    // value in the JSONL entry body so downstream consumers see the
+    // original id.
+    const safeSid = String(sessionId).replace(/[^A-Za-z0-9_\-]/g, '_')
+    const sessionFile = path.join(ACTIVE_DIR, `${safeSid}.jsonl`)
+    const sidecarFile = path.join(ACTIVE_DIR, `${safeSid}.meta.json`)
     const nowTs = Date.now()
 
     // Append JSONL line first — if we crash between append and sidecar
@@ -1402,6 +1408,8 @@ Replace lines 107-110 (the old `trajFile` append) with:
     // by treating it as a fresh session. We write via .tmp + rename
     // for atomicity (see daemon/lib/sessions.js for the shared helper,
     // but this hook stays dependency-free to keep startup cost near zero).
+    // Field names match the canonical schema in spec §5 / db.js sessions
+    // table: last_seen_ts (not last_activity_ts), tool_count (not entry_count).
     let meta = null
     try {
       meta = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'))
@@ -1412,14 +1420,14 @@ Replace lines 107-110 (the old `trajFile` append) with:
         project,
         status: 'active',
         first_seen_ts: nowTs,
-        last_activity_ts: nowTs,
-        entry_count: 0,
-        has_summary: false,
+        last_seen_ts: nowTs,
+        tool_count: 0,
+        closed_marker: false,
         source: 'hook',
       }
     }
-    meta.last_activity_ts = nowTs
-    meta.entry_count = (meta.entry_count || 0) + 1
+    meta.last_seen_ts = nowTs
+    meta.tool_count = (meta.tool_count || 0) + 1
     // Keep project stable after first write — don't overwrite on later calls.
     if (!meta.project) meta.project = project
 
@@ -1457,8 +1465,8 @@ git commit -m "$(cat <<'EOF'
 feat(hooks): write per-session trajectory JSONL under active/
 
 trajectory-capture.js now appends to active/<sid>.jsonl and maintains
-a sidecar <sid>.meta.json with {status, first_seen_ts, last_activity_ts,
-entry_count, project}. The sidecar is updated via .tmp + rename so a
+a sidecar <sid>.meta.json with {status, first_seen_ts, last_seen_ts,
+tool_count, project}. The sidecar is updated via .tmp + rename so a
 crash mid-write never leaves the daemon reading half a JSON file.
 
 Parallel sessions no longer share a file, eliminating the root cause
@@ -1513,9 +1521,9 @@ function writeActiveSession(tmpHome, sid, entries) {
     project: 'quoth',
     status: 'active',
     first_seen_ts: Date.now() - 60_000,
-    last_activity_ts: Date.now(),
-    entry_count: entries.length,
-    has_summary: false,
+    last_seen_ts: Date.now(),
+    tool_count: entries.length,
+    closed_marker: false,
     source: 'hook',
   }
   fs.writeFileSync(path.join(dir, `${sid}.meta.json`), JSON.stringify(sidecar))
@@ -1576,7 +1584,7 @@ describe('session-end hook — atomic handoff to processing/', () => {
     expect(summary.source).toBe('session-end')
   })
 
-  it('writes sidecar with status=terminated and has_summary=true', async () => {
+  it('writes sidecar with status=terminated and closed_marker=true', async () => {
     const sid = 'sess-end-0003'
     process.env.CLAUDE_SESSION_ID = sid
     writeActiveSession(tmpHome, sid, [
@@ -1590,8 +1598,8 @@ describe('session-end hook — atomic handoff to processing/', () => {
       fs.readFileSync(path.join(tmpHome, 'trajectories', 'processing', `${sid}.meta.json`), 'utf8')
     )
     expect(meta.status).toBe('terminated')
-    expect(meta.has_summary).toBe(true)
-    expect(meta.entry_count).toBeGreaterThanOrEqual(1)
+    expect(meta.closed_marker).toBe(true)
+    expect(meta.tool_count).toBeGreaterThanOrEqual(1)
   })
 
   it('is a no-op if the active file does not exist (hook reran after handoff)', async () => {
@@ -1701,12 +1709,12 @@ Replace from `// Write session summary to trajectory JSONL for downstream learni
       let meta = null
       try { meta = JSON.parse(fs.readFileSync(sidecarSrc, 'utf8')) } catch {}
       if (!meta) {
-        meta = { session_id: sessionId, project, first_seen_ts: Date.now(), entry_count: sessionEntries.length }
+        meta = { session_id: sessionId, project, first_seen_ts: Date.now(), tool_count: sessionEntries.length }
       }
       meta.status = 'terminated'
-      meta.has_summary = true
-      meta.entry_count = sessionEntries.length
-      meta.last_activity_ts = Date.now()
+      meta.closed_marker = true
+      meta.tool_count = sessionEntries.length
+      meta.last_seen_ts = Date.now()
       meta.summary = {
         total_calls: sessionEntries.length,
         tool_counts: toolCounts,
@@ -2352,8 +2360,8 @@ function seedProcessing(home, sid, entries, summary) {
   fs.writeFileSync(jsonl, lines.join('\n') + '\n')
   fs.writeFileSync(meta, JSON.stringify({
     session_id: sid, project: 'quoth', status: 'terminated',
-    first_seen_ts: Date.now() - 60_000, last_activity_ts: Date.now(),
-    entry_count: entries.length, has_summary: !!summary,
+    first_seen_ts: Date.now() - 60_000, last_seen_ts: Date.now(),
+    tool_count: entries.length, closed_marker: !!summary,
   }))
   return { jsonl, meta }
 }
@@ -3043,7 +3051,7 @@ In `quoth-plugin/daemon/db.js`, after the `upsertSession` helper from Task 1, ad
     const row = db.prepare('SELECT MAX(epoch) AS max_epoch FROM sessions WHERE session_id = ?').get(session_id)
     const next = (row?.max_epoch || 1) + 1
     db.prepare(`
-      INSERT INTO sessions (session_id, epoch, status, first_seen_ts, last_activity_ts, entry_count)
+      INSERT INTO sessions (session_id, epoch, status, first_seen_ts, last_seen_ts, tool_count)
       VALUES (?, ?, 'processing', CAST(strftime('%s','now') AS INTEGER) * 1000, CAST(strftime('%s','now') AS INTEGER) * 1000, 0)
       ON CONFLICT(session_id, epoch) DO NOTHING
     `).run(session_id, next)
@@ -4056,7 +4064,7 @@ describe('migrate-session-isolation — legacy → per-session', () => {
     expect(meta.session_id).toBe('D')
     expect(meta.source).toBe('migration')
     expect(meta.status).toBe('terminated')
-    expect(meta.has_summary).toBe(true)
+    expect(meta.closed_marker).toBe(true)
     // No empty_reason: that field only exists for sessions that landed in empty/.
     expect(meta.empty_reason).toBeUndefined()
   })
@@ -4205,9 +4213,9 @@ function migrate({ home = process.env.QUOTH_HOME || path.join(os.homedir(), '.qu
         project,
         status: isEmpty ? 'empty' : 'terminated',
         first_seen_ts: bucket.any[0]?.timestamp || Date.now(),
-        last_activity_ts: bucket.any[bucket.any.length - 1]?.timestamp || Date.now(),
-        entry_count: entryCount,
-        has_summary: Boolean(bucket.summary) || (!isEmpty),
+        last_seen_ts: bucket.any[bucket.any.length - 1]?.timestamp || Date.now(),
+        tool_count: entryCount,
+        closed_marker: Boolean(bucket.summary) || (!isEmpty),
         source: 'migration',
         ...(isEmpty ? { empty_reason: 'no-tool-use' } : {}),
       }
@@ -5283,7 +5291,7 @@ EOF
 - Reference: `docs/superpowers/specs/2026-04-10-session-isolation.md` §10.2 decision #10
 
 **Goal of the task:** The query server is the daemon's local HTTP interface — MCP tools and CLIs can hit it over loopback. Add three new routes so operators and agents can inspect session state and manage facts:
-- `GET /sessions/:sid/status` — returns `{session_id, project, status, location, entry_count, last_activity_ts}` by searching all buckets.
+- `GET /sessions/:sid/status` — returns `{session_id, project, status, location, tool_count, last_seen_ts}` by searching all buckets.
 - `GET /facts/:namespace` — returns `[{topic, statement, evidence, scope, tags, updated_at}]` for the namespace. Accepts `?limit=N`.
 - `DELETE /facts/:namespace/:topic` — marks the memory_entries row as `status=archived`. Returns `{deleted: true}` or `{deleted: false}` if not found.
 
@@ -5365,14 +5373,14 @@ describe('query-server — session + facts routes', () => {
       fs.writeFileSync(path.join(home, 'trajectories', 'active', `${sid}.jsonl`), '{}\n')
       fs.writeFileSync(path.join(home, 'trajectories', 'active', `${sid}.meta.json`), JSON.stringify({
         session_id: sid, project: 'quoth', status: 'active',
-        first_seen_ts: 1, last_activity_ts: 2, entry_count: 3,
+        first_seen_ts: 1, last_seen_ts: 2, tool_count: 3,
       }))
 
       const res = await httpGET(port, `/sessions/${sid}/status`)
       expect(res.status).toBe(200)
       expect(res.body.status).toBe('active')
       expect(res.body.location).toBe('active')
-      expect(res.body.entry_count).toBe(3)
+      expect(res.body.tool_count).toBe(3)
     })
 
     it('finds a session in done/YYYY-MM-DD/<project>/', async () => {
@@ -5380,7 +5388,7 @@ describe('query-server — session + facts routes', () => {
       const doneDir = path.join(home, 'trajectories', 'done', '2026-04-10', 'quoth')
       fs.writeFileSync(path.join(doneDir, `${sid}.jsonl`), '{}\n')
       fs.writeFileSync(path.join(doneDir, `${sid}.meta.json`), JSON.stringify({
-        session_id: sid, project: 'quoth', status: 'done', entry_count: 10,
+        session_id: sid, project: 'quoth', status: 'done', tool_count: 10,
       }))
 
       const res = await httpGET(port, `/sessions/${sid}/status`)
@@ -5667,7 +5675,7 @@ Add a new section "## Trajectory Layout" with:
 
 State machine: `active → processing → {done, routine, empty, error}`.
 
-Each `<sessionId>.jsonl` is paired with `<sessionId>.meta.json`. Sidecars contain `{session_id, project, status, first_seen_ts, last_activity_ts, entry_count, has_summary, ...}`. Both files move together on every state change via `fs.renameSync` (POSIX atomic).
+Each `<sessionId>.jsonl` is paired with `<sessionId>.meta.json`. Sidecars contain `{session_id, project, status, first_seen_ts, last_seen_ts, tool_count, closed_marker, ...}`. Both files move together on every state change via `fs.renameSync` (POSIX atomic).
 ```
 
 - [ ] **Step 19.3 — Update env vars table**

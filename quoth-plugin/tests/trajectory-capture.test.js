@@ -85,12 +85,13 @@ describe('trajectory-capture — per-session files', () => {
     expect(parsed.status).toBe('active')
     expect(parsed.first_seen_ts).toBeGreaterThanOrEqual(before)
     expect(parsed.first_seen_ts).toBeLessThanOrEqual(after)
-    expect(parsed.last_activity_ts).toBeGreaterThanOrEqual(parsed.first_seen_ts)
-    expect(parsed.entry_count).toBe(1)
+    expect(parsed.last_seen_ts).toBeGreaterThanOrEqual(parsed.first_seen_ts)
+    expect(parsed.tool_count).toBe(1)
+    expect(parsed.closed_marker).toBe(false)
     expect(typeof parsed.project).toBe('string')
   })
 
-  it('updates sidecar last_activity_ts and entry_count on subsequent entries', () => {
+  it('updates sidecar last_seen_ts and tool_count on subsequent entries', () => {
     const sid = 'sess-alpha-0004'
     runHook(tmpHome, makeEntry(sid, 'Bash', 'ls'))
     const meta = path.join(tmpHome, 'trajectories', 'active', `${sid}.meta.json`)
@@ -100,8 +101,8 @@ describe('trajectory-capture — per-session files', () => {
     const second = JSON.parse(fs.readFileSync(meta, 'utf8'))
 
     expect(second.first_seen_ts).toBe(first.first_seen_ts)
-    expect(second.last_activity_ts).toBeGreaterThanOrEqual(first.last_activity_ts)
-    expect(second.entry_count).toBe(2)
+    expect(second.last_seen_ts).toBeGreaterThanOrEqual(first.last_seen_ts)
+    expect(second.tool_count).toBe(2)
   })
 
   it('two parallel sessions do NOT contaminate each other', () => {
@@ -132,7 +133,7 @@ describe('trajectory-capture — per-session files', () => {
     // Sidecars agree.
     const metaA = JSON.parse(fs.readFileSync(path.join(dir, `${sidA}.meta.json`), 'utf8'))
     const metaB = JSON.parse(fs.readFileSync(path.join(dir, `${sidB}.meta.json`), 'utf8'))
-    expect(metaA.entry_count).toBe(3)
-    expect(metaB.entry_count).toBe(3)
+    expect(metaA.tool_count).toBe(3)
+    expect(metaB.tool_count).toBe(3)
   })
 })

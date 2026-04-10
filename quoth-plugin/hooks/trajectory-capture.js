@@ -107,8 +107,13 @@ process.stdin.on('end', () => {
 
     // Per-session file isolation: every session writes to its own JSONL
     // under active/, plus a sidecar with metadata the daemon reads.
-    const sessionFile = path.join(ACTIVE_DIR, `${sessionId}.jsonl`)
-    const sidecarFile = path.join(ACTIVE_DIR, `${sessionId}.meta.json`)
+    // Sanitize sessionId before using it as a path segment to prevent
+    // directory traversal if a malformed payload arrives. Keep the raw
+    // value in the JSONL entry body so downstream consumers see the
+    // original id.
+    const safeSid = String(sessionId).replace(/[^A-Za-z0-9_\-]/g, '_')
+    const sessionFile = path.join(ACTIVE_DIR, `${safeSid}.jsonl`)
+    const sidecarFile = path.join(ACTIVE_DIR, `${safeSid}.meta.json`)
     const nowTs = Date.now()
 
     // Append JSONL line first — if we crash between append and sidecar
@@ -119,6 +124,8 @@ process.stdin.on('end', () => {
     // by treating it as a fresh session. We write via .tmp + rename
     // for atomicity (see daemon/lib/sessions.js for the shared helper,
     // but this hook stays dependency-free to keep startup cost near zero).
+    // Field names match the canonical schema in spec §5 / db.js sessions
+    // table: last_seen_ts (not last_activity_ts), tool_count (not entry_count).
     let meta = null
     try {
       meta = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'))
@@ -129,14 +136,14 @@ process.stdin.on('end', () => {
         project,
         status: 'active',
         first_seen_ts: nowTs,
-        last_activity_ts: nowTs,
-        entry_count: 0,
-        has_summary: false,
+        last_seen_ts: nowTs,
+        tool_count: 0,
+        closed_marker: false,
         source: 'hook',
       }
     }
-    meta.last_activity_ts = nowTs
-    meta.entry_count = (meta.entry_count || 0) + 1
+    meta.last_seen_ts = nowTs
+    meta.tool_count = (meta.tool_count || 0) + 1
     // Keep project stable after first write — don't overwrite on later calls.
     if (!meta.project) meta.project = project
 
