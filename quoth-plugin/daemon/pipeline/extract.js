@@ -4,12 +4,12 @@ const crypto = require('crypto')
 const childProcess = require('child_process')
 
 /**
- * EXTRACT: Single-stage pipeline replacing JUDGE + DISTILL + CONSOLIDATE.
+ * EXTRACT v2: Multi-turn tool-calling pipeline.
  *
- * Primary model: Kimi K2.5 via Moonshot API
+ * Primary model: Kimi K2.5 via Moonshot API (with tool calling)
  * Fallback model: claude -p Sonnet --effort low ($0, Max plan)
  *
- * Returns 0-N patterns with rich context, intention, and quality_signal.
+ * Returns 0-N patterns with condition/action format, embeddings, and quality_signal.
  * Errors are always logged to pipeline_errors table (never silent).
  */
 
@@ -31,80 +31,6 @@ function makeId(content) {
   return crypto.createHash('sha1').update(content).digest('hex').slice(0, 12)
 }
 
-function buildPrompt(summaryEntry, recentTools) {
-  const toolSummary = (summaryEntry.task || 'unknown').slice(0, 200)
-  const successRate = Math.round((summaryEntry.success_rate || 0) * 100)
-  const outcome = summaryEntry.outcome || 'unknown'
-  const intents = (summaryEntry.user_intents || [])
-    .filter(i => i && i.length > 5)
-    .slice(0, 5)
-    .join(' -> ') || 'Not captured'
-
-  const actions = recentTools.map((e, i) => {
-    const parts = [`${i + 1}. [${e.tool}] ${(e.task || '').slice(0, 100)}`]
-    if (e.llm_reasoning) parts.push(`   Why: ${e.llm_reasoning.slice(0, 120)}`)
-    if (e.outcome === 'failure') parts.push(`   FAILED`)
-    return parts.join('\n')
-  }).join('\n')
-
-  return `You are analyzing a coding session to extract reusable patterns.
-
-SESSION:
-- Project: ${summaryEntry.project || 'unknown'}
-- Outcome: ${outcome} (success rate: ${successRate}%)
-- User intent: ${intents}
-- Tools used: ${toolSummary}
-
-RECENT ACTIONS (chronological):
-${actions || 'No actions captured'}
-
-TASK:
-1. Was this session productive or routine? Routine sessions (just reading files,
-   standard edits) produce NO patterns. Only extract from sessions where a genuine
-   technique or workflow emerged.
-   (Note: deduplication against existing patterns is handled at write time via
-   embedding similarity — do NOT spend prompt tokens listing existing patterns here)
-
-2. For productive sessions, extract EVERY relevant pattern. No minimum, no maximum.
-   Each pattern must be:
-   - A reusable technique/workflow, NOT a specific file path or command
-   - Rich enough to match similar future situations via embedding search
-   - Include context: when/why to use this approach
-   - Include intention: what problem it solves
-
-3. For each pattern, assess reusability using ONE of these labels:
-   - "universal": technique applicable across any project
-   - "domain": applicable to similar project types
-   - "project": applicable within this specific domain
-   - "edge_case": narrow, might be useful occasionally
-
-EXAMPLES of GOOD patterns:
-- "When refactoring across multiple files in a monorepo, read all target files in
-  parallel before making batch edits to ensure consistency and catch dependencies"
-- "For debugging intermittent test failures, isolate the failing test first with
-  .only, then add verbose logging to the setup/teardown lifecycle hooks"
-
-EXAMPLES of BAD patterns (do NOT extract these):
-- "Read file then edit it" (obvious)
-- "Run npm test after changes" (standard practice)
-- "Use git commit to save changes" (trivial)
-
-Respond with JSON:
-{
-  "session_type": "productive" | "routine",
-  "patterns": [
-    {
-      "pattern": "rich description with context and intention (100-200 chars)",
-      "tags": ["domain1", "domain2"],
-      "intention": "what the user was trying to accomplish",
-      "quality_signal": "universal" | "domain" | "project" | "edge_case"
-    }
-  ]
-}
-
-If routine, return {"session_type": "routine", "patterns": []}`
-}
-
 function parseJson(raw) {
   let content = (raw || '').replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim()
   const start = content.indexOf('{')
@@ -113,25 +39,239 @@ function parseJson(raw) {
   return JSON.parse(content.slice(start, end + 1))
 }
 
-/**
- * Extract patterns from a session via single LLM call.
- *
- * @param {Object} summaryEntry - session_summary JSONL entry
- * @param {Object[]} toolEntries - tool_use entries from the same session
- * @param {Object} db - database instance (for error logging)
- * @returns {Promise<Object[]>} Array of pattern objects
- */
-async function extract(summaryEntry, toolEntries, db) {
-  const recentTools = toolEntries.slice(-30)
-  const prompt = buildPrompt(summaryEntry, recentTools)
+// --- Tool definitions for K2.5 ---
+
+const TOOL_DEFINITIONS = [
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read a file from the project. Returns numbered lines. Use to inspect source code relevant to the session patterns.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Absolute file path to read' },
+          maxLines: { type: 'integer', description: 'Max lines to read (default 100, max 200)', default: 100 },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'grep_codebase',
+      description: 'Search the project codebase for a pattern using ripgrep. Returns matching lines with file paths and line numbers.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Search pattern (regex supported)' },
+          path: { type: 'string', description: 'Directory to search in (defaults to project root)' },
+          maxResults: { type: 'integer', description: 'Max results to return (default 30, max 50)', default: 30 },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+]
+
+// --- Prompt builders ---
+
+function buildSystemPrompt() {
+  return `You are a pattern extractor analyzing coding sessions. You have tools to read files and search the codebase to understand what happened.
+
+EXTRACTION RULES:
+1. Determine if the session was productive or routine. Routine sessions (just reading files, standard edits, running tests) produce NO patterns.
+2. For productive sessions, extract EVERY genuine reusable technique as a condition/action pair.
+3. Each pattern has:
+   - "condition": WHEN to apply this pattern (>= 10 chars). Describes the situation/trigger.
+   - "action": WHAT to do (>= 20 chars, <= 500 chars). The reusable technique/workflow.
+   - "tags": domain tags (max 5)
+   - "quality_signal": one of "universal", "domain", "project", "edge_case"
+
+GOOD PATTERNS:
+- condition: "When refactoring across multiple files in a monorepo"
+  action: "Read all target files in parallel before making batch edits to ensure consistency and catch cross-file dependencies before committing changes"
+- condition: "When debugging intermittent test failures"
+  action: "Isolate the failing test first with .only, then add verbose logging to the setup/teardown lifecycle hooks to identify timing or state issues"
+
+BAD PATTERNS (do NOT extract these):
+- "Read file then edit it" (obvious)
+- "Run npm test after changes" (standard practice)
+- "Use git commit to save changes" (trivial)
+
+Use your tools to inspect relevant files if you need more context about the techniques used. Then respond with JSON:
+
+{
+  "session_type": "productive" | "routine",
+  "patterns": [
+    {
+      "condition": "When/situation description (>= 10 chars)",
+      "action": "What to do — reusable technique (20-500 chars)",
+      "tags": ["domain1", "domain2"],
+      "quality_signal": "universal" | "domain" | "project" | "edge_case"
+    }
+  ]
+}
+
+If routine, return {"session_type": "routine", "patterns": []}`
+}
+
+function buildUserPrompt(summaryEntry, toolEntries) {
+  const project = summaryEntry.project || 'unknown'
+  const outcome = summaryEntry.outcome || 'unknown'
+  const successRate = Math.round((summaryEntry.success_rate || 0) * 100)
+  const intents = (summaryEntry.user_intents || [])
+    .filter(i => i && i.length > 5)
+    .slice(0, 5)
+    .join(' -> ') || 'Not captured'
+
+  const actions = toolEntries.map((e, i) => {
+    const parts = [`${i + 1}. [${e.tool}]`]
+    if (e.tool_input) parts.push(` ${(e.tool_input + '').slice(0, 300)}`)
+    else if (e.task) parts.push(` ${(e.task + '').slice(0, 300)}`)
+    if (e.user_intent) parts.push(`   Intent: ${e.user_intent}`)
+    if (e.llm_reasoning) parts.push(`   Reasoning: ${(e.llm_reasoning + '').slice(0, 150)}`)
+    if (e.outcome === 'failure') parts.push(`   FAILED`)
+    return parts.join('\n')
+  }).join('\n')
+
+  return `SESSION:
+- Project: ${project}
+- Outcome: ${outcome} (success rate: ${successRate}%)
+- User intents: ${intents}
+
+TOOL ACTIONS (${toolEntries.length} entries, chronological):
+${actions || 'No actions captured'}
+
+Analyze this session and extract reusable patterns. Use tools if you need more context about the codebase.`
+}
+
+// --- Pattern parser ---
+
+function parsePatterns(raw) {
+  const parsed = parseJson(raw)
+
+  // Backward-compat: routine sessions return empty
+  if (parsed.session_type === 'routine' || !parsed.patterns || !Array.isArray(parsed.patterns)) {
+    return []
+  }
+
+  return parsed.patterns.filter(p => {
+    if (!p.condition || p.condition.length < 10) return false
+    if (!p.action || p.action.length < 20 || p.action.length > 500) return false
+    return true
+  })
+}
+
+// --- Main extract function ---
+
+// Module-level cache for json_mode support detection
+let _jsonModeSupported = true
+
+async function extract(summaryEntry, toolEntries, db, _deps = null) {
+  const recentTools = toolEntries.slice(-60)
+  const systemPrompt = buildSystemPrompt()
+  const userPrompt = buildUserPrompt(summaryEntry, recentTools)
+
+  // Cache key for prompt caching (K2.5 supports this)
+  const cacheKey = crypto.createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16)
+
+  // Dynamic tool budget based on entry count
+  const entryCount = recentTools.length
+  let toolBudget = entryCount <= 10 ? 2 : entryCount <= 30 ? 5 : 8
 
   let rawOutput
   let model = 'kimi-k2.5'
 
-  // Primary: Kimi K2.5 via Moonshot API
+  // Dependency injection for testability (falls back to real modules)
+  const deps = _deps || {
+    callMoonshotWithTools: require('../lib/llm.js').callMoonshotWithTools,
+    executeToolCall: require('../lib/tool-executor.js').executeToolCall,
+    resolveProjectRoot: require('../lib/tool-executor.js').resolveProjectRoot,
+    sanitize: require('../lib/tool-executor.js').sanitize,
+    generateEmbeddingBatch: require('../lib/embed.js').generateEmbeddingBatch,
+  }
+
+  // Primary: Kimi K2.5 with multi-turn tool calling
   try {
-    const { callMoonshot } = require('../lib/llm.js')
-    rawOutput = await callMoonshot(prompt, 600, { jsonPrefill: true })
+    const { callMoonshotWithTools, executeToolCall, resolveProjectRoot, sanitize } = deps
+
+    const projectRoot = resolveProjectRoot(summaryEntry.project, recentTools)
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ]
+
+    let totalTokens = 0
+
+    for (let iter = 0; iter < 12; iter++) {
+      const forceNoTools = toolBudget <= 0 || totalTokens >= 100_000
+      const callOpts = {
+        tools: forceNoTools ? [] : TOOL_DEFINITIONS,
+        tool_choice: forceNoTools ? 'none' : 'auto',
+        maxTokens: 16384,
+        promptCacheKey: cacheKey,
+      }
+
+      // Try json_mode on first call if supported
+      if (iter === 0 && _jsonModeSupported) {
+        callOpts.responseFormat = { type: 'json_object' }
+      }
+
+      let response
+      try {
+        response = await callMoonshotWithTools(messages, callOpts)
+      } catch (apiErr) {
+        // If json_mode rejected, retry without it
+        if (iter === 0 && _jsonModeSupported && apiErr.message && apiErr.message.includes('response_format')) {
+          _jsonModeSupported = false
+          delete callOpts.responseFormat
+          response = await callMoonshotWithTools(messages, callOpts)
+        } else {
+          throw apiErr
+        }
+      }
+
+      totalTokens += (response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)
+
+      // Build assistant message for conversation history
+      const assistantMsg = { role: 'assistant' }
+      if (response.message?.content) assistantMsg.content = response.message.content
+      if (response.reasoning_content) assistantMsg.reasoning_content = response.reasoning_content
+      if (response.tool_calls) assistantMsg.tool_calls = response.tool_calls
+
+      messages.push(assistantMsg)
+
+      // Tool calls → execute and continue loop
+      if (response.tool_calls) {
+        for (const tc of response.tool_calls) {
+          const result = executeToolCall(tc, projectRoot)
+          const sanitized = sanitize(result) || 'No output'
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized),
+          })
+          toolBudget--
+        }
+        continue
+      }
+
+      // Content response → we're done
+      if (response.content) {
+        rawOutput = response.content
+        break
+      }
+
+      // No tool calls and no content — shouldn't happen, but break to avoid infinite loop
+      break
+    }
+
+    if (!rawOutput) {
+      throw new Error('K2.5 returned no content after tool loop')
+    }
   } catch (primaryErr) {
     // Log primary failure
     try {
@@ -152,10 +292,11 @@ async function extract(summaryEntry, toolEntries, db) {
 
     // Fallback: claude -p Sonnet --effort low ($0)
     try {
+      const fallbackPrompt = systemPrompt + '\n\n' + userPrompt
       rawOutput = childProcess.execSync(
         'claude -p --model claude-sonnet-4-6 --effort low --output-format text --allowedTools ""',
         {
-          input: prompt,
+          input: fallbackPrompt,
           encoding: 'utf8',
           timeout: 60000,
           maxBuffer: 512 * 1024,
@@ -197,10 +338,10 @@ async function extract(summaryEntry, toolEntries, db) {
     }
   }
 
-  // Parse JSON response
-  let parsed
+  // Parse patterns from LLM output
+  let validPatterns
   try {
-    parsed = parseJson(rawOutput)
+    validPatterns = parsePatterns(rawOutput)
   } catch (parseErr) {
     try {
       db.insertPipelineError({
@@ -213,22 +354,14 @@ async function extract(summaryEntry, toolEntries, db) {
     return []
   }
 
-  // Short-circuit routine sessions
-  if (parsed.session_type === 'routine' || !parsed.patterns || !Array.isArray(parsed.patterns)) {
-    return []
-  }
-
-  // Filter valid patterns (20-300 chars, has text)
-  const validPatterns = parsed.patterns.filter(p =>
-    p.pattern && p.pattern.length >= 20 && p.pattern.length <= 300
-  )
   if (validPatterns.length === 0) return []
 
-  // Batch embed pattern texts (pattern text ONLY, not concatenated with intention)
+  // Batch embed: condition + " → " + action
   let embeddings = validPatterns.map(() => null)
   try {
-    const { generateEmbeddingBatch } = require('../lib/embed.js')
-    embeddings = await generateEmbeddingBatch(validPatterns.map(p => p.pattern))
+    embeddings = await deps.generateEmbeddingBatch(
+      validPatterns.map(p => p.condition + ' → ' + p.action)
+    )
   } catch (embedErr) {
     try {
       db.insertPipelineError({
@@ -241,14 +374,17 @@ async function extract(summaryEntry, toolEntries, db) {
   }
 
   return validPatterns.map((p, i) => ({
-    id: makeId(p.pattern),
-    pattern: p.pattern,
+    id: makeId(p.condition + p.action),
+    condition: p.condition,
+    action: p.action,
     tags: Array.isArray(p.tags) ? p.tags.slice(0, 5) : [],
-    intention: p.intention || '',
     quality_signal: QUALITY_MAP[p.quality_signal] ? p.quality_signal : 'project',
     embedding: embeddings[i],
     source: 'distilled',
   }))
 }
 
-module.exports = { extract, makeId, buildPrompt, parseJson, QUALITY_MAP, QUALITY_PRIORS }
+module.exports = {
+  extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson, parsePatterns,
+  QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS,
+}
