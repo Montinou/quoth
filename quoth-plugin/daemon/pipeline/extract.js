@@ -78,43 +78,63 @@ const TOOL_DEFINITIONS = [
 // --- Prompt builders ---
 
 function buildSystemPrompt() {
-  return `You are a pattern extractor analyzing coding sessions. You have tools to read files and search the codebase to understand what happened.
+  return `You are a session analyzer. You have tools to read files and search the codebase. You produce two things from a session: PATTERNS (reusable techniques) and FACTS (stable, session-independent knowledge).
 
-EXTRACTION RULES:
-1. Determine if the session was productive or routine. Routine sessions (just reading files, standard edits, running tests) produce NO patterns.
-2. For productive sessions, extract EVERY genuine reusable technique as a condition/action pair.
-3. Each pattern has:
-   - "condition": WHEN to apply this pattern (>= 10 chars). Describes the situation/trigger.
-   - "action": WHAT to do (>= 20 chars, <= 500 chars). The reusable technique/workflow.
-   - "tags": domain tags (max 5)
-   - "quality_signal": one of "universal", "domain", "project", "edge_case"
+DECIDE FIRST: Was this session productive or routine?
+- productive: the agent accomplished something non-trivial, learned, fixed a bug, shipped code, established a fact, or made a decision
+- routine: the agent just read files, ran standard tests, asked questions — nothing worth remembering
 
-GOOD PATTERNS:
-- condition: "When refactoring across multiple files in a monorepo"
-  action: "Read all target files in parallel before making batch edits to ensure consistency and catch cross-file dependencies before committing changes"
-- condition: "When debugging intermittent test failures"
-  action: "Isolate the failing test first with .only, then add verbose logging to the setup/teardown lifecycle hooks to identify timing or state issues"
+For routine sessions, return { "session_type": "routine", "patterns": [], "facts": [] }.
 
-BAD PATTERNS (do NOT extract these):
-- "Read file then edit it" (obvious)
-- "Run npm test after changes" (standard practice)
-- "Use git commit to save changes" (trivial)
+For productive sessions, extract BOTH patterns and facts.
 
-Use your tools to inspect relevant files if you need more context about the techniques used. Then respond with JSON:
+PATTERN EXTRACTION RULES:
+1. A pattern has { condition, action, tags, quality_signal }
+   - condition (>= 10 chars): WHEN to apply this pattern — the trigger/situation
+   - action (20-500 chars): WHAT to do — the reusable technique/workflow
+   - tags: max 5 short domain tags
+   - quality_signal: one of "universal", "domain", "project", "edge_case"
+2. GOOD PATTERNS:
+   - condition: "When refactoring across multiple files in a monorepo"
+     action: "Read all target files in parallel before batch-editing to ensure consistency and catch cross-file dependencies before committing"
+   - condition: "When debugging intermittent test failures"
+     action: "Isolate the failing test with .only, then add verbose logging to setup/teardown hooks to identify timing or state issues"
+3. BAD PATTERNS (do NOT extract these):
+   - "Read file then edit it" (obvious)
+   - "Run npm test after changes" (standard practice)
+   - "Use git commit to save changes" (trivial)
+
+FACT EXTRACTION RULES:
+1. A fact is a stable piece of knowledge that is true INDEPENDENT of this particular session — it is something someone would want to know next week.
+2. A fact has { topic, statement, evidence, scope, tags }
+   - topic (<= 120 chars): short slug-like key e.g. "build command", "auth flow", "db primary key"
+   - statement (<= 500 chars): the fact itself, in one or two sentences
+   - evidence (<= 300 chars, optional): how we know — file path, command output, url, commit, etc
+   - scope: one of "global" (true across all projects) or "project" (true for this project). These are the ONLY two allowed scopes. Do NOT use "user" or anything else.
+   - tags: max 5 short tags
+3. GOOD FACTS:
+   - { topic: "build command", statement: "The plugin builds with \`pnpm -C quoth-plugin test\`", evidence: "package.json scripts", scope: "project", tags: ["build","pnpm"] }
+   - { topic: "atomic rename on POSIX", statement: "fs.renameSync is atomic inside the same filesystem on POSIX, which is what makes the active→processing handoff race-free", scope: "global", tags: ["posix","fs"] }
+   - { topic: "db primary key", statement: "The sessions table uses a compound (session_id, epoch) primary key", evidence: "daemon/db.js", scope: "project", tags: ["db","schema"] }
+4. BAD FACTS (do NOT extract these):
+   - Anything that's just THIS session's state (e.g. "we just edited foo.ts")
+   - Anything that's obviously true (e.g. "Node.js has a fs module")
+   - Anything about the human operator (preferences, role, language) — that is NOT in scope for facts
+   - Repetition of the exact same topic multiple times — pick the most complete phrasing
+
+Use your tools to inspect files if you need more context. Then respond with JSON:
 
 {
   "session_type": "productive" | "routine",
   "patterns": [
-    {
-      "condition": "When/situation description (>= 10 chars)",
-      "action": "What to do — reusable technique (20-500 chars)",
-      "tags": ["domain1", "domain2"],
-      "quality_signal": "universal" | "domain" | "project" | "edge_case"
-    }
+    { "condition": "...", "action": "...", "tags": ["..."], "quality_signal": "universal" | "domain" | "project" | "edge_case" }
+  ],
+  "facts": [
+    { "topic": "...", "statement": "...", "evidence": "...", "scope": "global" | "project", "tags": ["..."] }
   ]
 }
 
-If routine, return {"session_type": "routine", "patterns": []}`
+If routine, return { "session_type": "routine", "patterns": [], "facts": [] }.`
 }
 
 function buildUserPrompt(summaryEntry, toolEntries) {
@@ -147,21 +167,51 @@ ${actions || 'No actions captured'}
 Analyze this session and extract reusable patterns. Use tools if you need more context about the codebase.`
 }
 
-// --- Pattern parser ---
+// --- Extract output parser ---
 
-function parsePatterns(raw) {
+// Spec §6.6: only "global" and "project" are allowed. "user" is explicitly
+// NOT a valid fact scope — facts about the human operator are out of scope.
+const ALLOWED_SCOPES = new Set(['global', 'project'])
+
+function parseExtractOutput(raw) {
   const parsed = parseJson(raw)
 
-  // Backward-compat: routine sessions return empty
-  if (parsed.session_type === 'routine' || !parsed.patterns || !Array.isArray(parsed.patterns)) {
-    return []
+  const session_type = parsed.session_type === 'productive' ? 'productive' : 'routine'
+  if (session_type === 'routine') {
+    return { session_type, patterns: [], facts: [] }
   }
 
-  return parsed.patterns.filter(p => {
-    if (!p.condition || p.condition.length < 10) return false
-    if (!p.action || p.action.length < 20 || p.action.length > 500) return false
+  const rawPatterns = Array.isArray(parsed.patterns) ? parsed.patterns : []
+  const patterns = rawPatterns.filter(p => {
+    if (!p.condition || typeof p.condition !== 'string' || p.condition.length < 10) return false
+    if (!p.action || typeof p.action !== 'string' || p.action.length < 20 || p.action.length > 500) return false
     return true
   })
+
+  const rawFacts = Array.isArray(parsed.facts) ? parsed.facts : []
+  const facts = rawFacts
+    .filter(f => {
+      if (!f.topic || typeof f.topic !== 'string' || f.topic.trim().length === 0) return false
+      if (!f.statement || typeof f.statement !== 'string' || f.statement.trim().length === 0) return false
+      if (!f.scope || !ALLOWED_SCOPES.has(f.scope)) return false
+      return true
+    })
+    .map(f => ({
+      topic: f.topic.trim().slice(0, 120),
+      statement: f.statement.trim().slice(0, 500),
+      evidence: typeof f.evidence === 'string' ? f.evidence.trim().slice(0, 300) : null,
+      scope: f.scope,
+      tags: Array.isArray(f.tags) ? f.tags.slice(0, 5) : [],
+    }))
+
+  return { session_type, patterns, facts }
+}
+
+// Back-compat shim so any existing direct caller still works until Task 8
+// rewires everything via parseExtractOutput. NOTE: this just returns the
+// patterns array from the new parser.
+function parsePatterns(raw) {
+  return parseExtractOutput(raw).patterns
 }
 
 // --- Main extract function ---
@@ -177,6 +227,7 @@ function _resetJsonModeCache() {
 
 async function extract(summaryEntry, toolEntries, db, _deps = null) {
   const recentTools = toolEntries.slice(-60)
+  let extractedFacts = []
   const systemPrompt = buildSystemPrompt()
   const userPrompt = buildUserPrompt(summaryEntry, recentTools)
 
@@ -372,14 +423,17 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
           fallback_succeeded: 0,
         })
       } catch {}
-      return []
+      return { patterns: [], facts: [] }
     }
   }
 
   // Parse patterns from LLM output
   let validPatterns
   try {
-    validPatterns = parsePatterns(rawOutput)
+    const parsed = parseExtractOutput(rawOutput)
+    validPatterns = parsed.patterns
+    // Attach facts onto the result so the caller can consume them.
+    extractedFacts = parsed.facts
   } catch (parseErr) {
     try {
       db.insertPipelineError({
@@ -389,10 +443,10 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
         model_attempted: model,
       })
     } catch {}
-    return []
+    return { patterns: [], facts: [] }
   }
 
-  if (validPatterns.length === 0) return []
+  if (validPatterns.length === 0) return { patterns: [], facts: extractedFacts }
 
   // Batch embed: condition + " → " + action
   let embeddings = validPatterns.map(() => null)
@@ -411,7 +465,7 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
     } catch {}
   }
 
-  return validPatterns.map((p, i) => ({
+  const patterns = validPatterns.map((p, i) => ({
     id: makeId(p.condition + p.action),
     condition: p.condition,
     action: p.action,
@@ -420,9 +474,12 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
     embedding: embeddings[i],
     source: 'distilled',
   }))
+
+  return { patterns, facts: extractedFacts }
 }
 
 module.exports = {
-  extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson, parsePatterns,
+  extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson,
+  parseExtractOutput, parsePatterns, // parsePatterns kept for back-compat
   QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS, _resetJsonModeCache,
 }

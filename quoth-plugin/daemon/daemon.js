@@ -401,8 +401,11 @@ async function processSessionManaged(summaryEntry, toolEntries, project) {
 
 async function processSessionLocal(summaryEntry, toolEntries) {
   const result = await extract(summaryEntry, toolEntries, db)
-  // extract() returns flat array (unlike distillBatch which returns {patterns, usage})
-  return Array.isArray(result) ? result : []
+  // Back-compat shim: older callers expect an array of patterns.
+  // Task 8 will consume the full { patterns, facts } object.
+  if (Array.isArray(result)) return result
+  if (result && Array.isArray(result.patterns)) return result.patterns
+  return []
 }
 
 function insertNewPattern(distilled, summaryEntry, project) {
