@@ -126,8 +126,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGUSR1', async () => {
   log('info', 'SIGUSR1: flush triggered')
-  scanAndEnqueue()
-  processQueue()
+  scanProcessingDir()
 })
 
 process.on('SIGUSR2', async () => {
@@ -149,73 +148,68 @@ process.on('uncaughtException', (err) => {
 
 // --- File watcher ---
 function watchTrajectories() {
+  const processingDir = path.join(TRAJECTORIES_DIR, 'processing')
+  fs.mkdirSync(processingDir, { recursive: true })
+
+  log('info', 'Watching trajectories/processing/ for session handoffs', { dir: processingDir })
   try {
-    fs.watch(TRAJECTORIES_DIR, { persistent: true }, (event, filename) => {
-      if (filename && filename.endsWith('.jsonl')) {
-        setTimeout(() => { scanAndEnqueue(); processQueue() }, 500)
-      }
+    fs.watch(processingDir, { persistent: true }, (eventType, filename) => {
+      if (!filename || !filename.endsWith('.jsonl')) return
+      const fullPath = path.join(processingDir, filename)
+      setTimeout(() => { enqueueSessionFile(fullPath) }, 50)
     })
-    log('info', 'Watching trajectories', { dir: TRAJECTORIES_DIR, mode: QUOTH_MODE })
   } catch (err) {
-    log('error', 'Failed to start watcher', { error: err.message })
+    log('error', 'fs.watch on processing/ failed', { error: err.message })
+  }
+
+  scanProcessingDir()
+}
+
+function scanProcessingDir() {
+  const processingDir = path.join(TRAJECTORIES_DIR, 'processing')
+  try {
+    const files = fs.readdirSync(processingDir).filter(f => f.endsWith('.jsonl'))
+    for (const f of files) enqueueSessionFile(path.join(processingDir, f))
+  } catch (err) {
+    log('error', 'initial scan of processing/ failed', { error: err.message })
   }
 }
 
-// --- Scan JSONL files for unprocessed entries ---
-function scanAndEnqueue() {
-  let added = 0
+const _sessionQueue = []
+let _workerBusy = false
+
+function enqueueSessionFile(fullPath) {
+  if (_sessionQueue.includes(fullPath)) return
+  if (!fs.existsSync(fullPath)) return
+  _sessionQueue.push(fullPath)
+  runWorker()
+}
+
+async function runWorker() {
+  if (_workerBusy) return
+  _workerBusy = true
+  // Attach insertNewPattern onto db so daemon-core can call it via the db param.
+  // The module-level insertNewPattern function closes over module-level db + log.
+  if (!db.insertNewPattern) db.insertNewPattern = insertNewPattern
   try {
-    const files = fs.readdirSync(TRAJECTORIES_DIR).filter(f => f.endsWith('.jsonl'))
-    for (const file of files) {
-      const filePath = path.join(TRAJECTORIES_DIR, file)
+    while (_sessionQueue.length > 0) {
+      const file = _sessionQueue.shift()
+      if (!fs.existsSync(file)) continue
+      const { processSessionFile } = require('./daemon-core.js')
+      const { extract } = require('./pipeline/extract.js')
       try {
-        const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-        for (let i = 0; i < lines.length; i++) {
-          try {
-            const entry = JSON.parse(lines[i])
-            if (entry._processed) continue
-            // Deduplicate: use file + line index as unique key
-            const key = `${file}:${i}`
-            if (enqueuedKeys.has(key)) continue
-            enqueuedKeys.add(key)
-            jobQueue.push({ entry, filePath, line: lines[i], key })
-            added++
-          } catch {}
-        }
+        await processSessionFile({
+          sessionFile: file,
+          db,
+          extractFn: (summary, toolEntries, db) => extract(summary, toolEntries, db),
+          log,
+        })
       } catch (err) {
-        log('error', 'Failed to read trajectory file', { file, error: err.message })
+        log('error', 'worker unexpected', { file, error: err.message })
       }
-    }
-  } catch (err) {
-    log('error', 'scanAndEnqueue failed', { error: err.message })
-  }
-  if (added > 0) log('info', `Enqueued ${added} new entries (queue: ${jobQueue.length})`)
-}
-
-// --- Process queue with up to 5 parallel workers ---
-async function processQueue() {
-  if (isProcessing || jobQueue.length === 0) return
-  if (fs.existsSync(LOCK_FILE)) {
-    // Check if lock holder is still alive
-    try {
-      const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
-      try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE) }
-    } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
-    if (fs.existsSync(LOCK_FILE)) return
-  }
-
-  try { fs.writeFileSync(LOCK_FILE, String(process.pid)) } catch { return }
-  isProcessing = true
-
-  try {
-    const CONCURRENCY = 5
-    while (jobQueue.length > 0) {
-      const batch = jobQueue.splice(0, CONCURRENCY)
-      await Promise.all(batch.map(job => processEntry(job)))
     }
   } finally {
-    isProcessing = false
-    try { fs.unlinkSync(LOCK_FILE) } catch {}
+    _workerBusy = false
   }
 }
 
@@ -284,6 +278,7 @@ async function processEntry({ entry, filePath, line }) {
   }
 }
 
+// DEPRECATED: removed in Task 17
 async function processSessionBatch(summaryEntry, filePath, summaryLine) {
   const sessionId = summaryEntry.session
   const project = summaryEntry.project || 'default'
@@ -350,6 +345,7 @@ async function processSessionBatch(summaryEntry, filePath, summaryLine) {
 }
 
 // --- Managed mode: send sessions to cloud pipeline API ---
+// DEPRECATED: removed in Task 17
 async function processSessionManaged(summaryEntry, toolEntries, project) {
   // Get top local patterns for consolidation context
   const topPatterns = db.getTopPatterns(10).map(p => ({
@@ -399,6 +395,7 @@ async function processSessionManaged(summaryEntry, toolEntries, project) {
   }))
 }
 
+// DEPRECATED: removed in Task 17
 async function processSessionLocal(summaryEntry, toolEntries) {
   const result = await extract(summaryEntry, toolEntries, db)
   // Back-compat shim: older callers expect an array of patterns.
@@ -467,6 +464,7 @@ function insertNewPattern(distilled, summaryEntry, project) {
 }
 
 // --- Mark a line as processed ---
+// DEPRECATED: removed in Task 17
 function markProcessed(filePath, originalLine) {
   try {
     const content = fs.readFileSync(filePath, 'utf8')
@@ -1499,8 +1497,6 @@ startV2MiniTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()
-scanAndEnqueue()
-processQueue()
 
 // --- Query server (Unix socket for hook → daemon communication) ---
 try {

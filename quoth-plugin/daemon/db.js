@@ -1142,6 +1142,42 @@ function createDb(dbPath) {
     })
   }
 
+  /**
+   * Insert or upsert a fact extracted from a session.
+   * The fact schema has already been validated by parseExtractOutput.
+   * Maps scope → namespace per spec §6.6:
+   *   - 'global'  → 'facts:global'
+   *   - 'project' → 'facts:proj:<project>'
+   *
+   * (There is NO user scope. Facts about the human operator are out of
+   *  scope by spec and would have been rejected by parseExtractOutput.)
+   *
+   * Returns the inserted memory_entries row.
+   */
+  db.insertNewFact = function(fact, { project, session_id }) {
+    const namespace = db.factNamespace(fact.scope, project)
+    const content = JSON.stringify({
+      statement: fact.statement,
+      evidence: fact.evidence || null,
+      tags: fact.tags || [],
+      source_session: session_id || null,
+      extracted_at: Date.now(),
+    })
+    return db.upsertMemoryEntry({
+      namespace,
+      key: fact.topic,
+      content,
+      type: 'fact',
+      tags: fact.tags || [],
+    })
+  }
+
+  db.factNamespace = function(scope, project) {
+    if (scope === 'global') return 'facts:global'
+    // default: project — this is the only other valid scope per spec §6.6.
+    return `facts:proj:${project || 'default'}`
+  }
+
   db.listFactsByNamespace = function(namespace, limit = 20) {
     return db.prepare(`
       SELECT key, content, tags, metadata, updated_at
