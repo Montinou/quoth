@@ -105,20 +105,22 @@ async function processSessionFile({ sessionFile, db, extractFn, log = noopLog })
     fact_count: facts.length,
   })
 
-  // Epoch collision handling: if the target file already exists (Claude Code
-  // resume after the original sid was already archived), bump the session's
-  // epoch in the DB and use the suffixed name. moveSessionFile's
-  // filenameOverride contract requires the FULL filename INCLUDING `.jsonl`.
-  const destBase = path.basename(sessionFile, '.jsonl')
   const project = summary.project || 'default'
-  const today = new Date().toISOString().slice(0, 10)
-  const targetDir = path.join(path.dirname(path.dirname(sessionFile)), bucket, today, project)
-  const targetJsonl = path.join(targetDir, `${destBase}.jsonl`)
   let filenameOverride = null
-  if (fs.existsSync(targetJsonl) && typeof db.bumpSessionEpoch === 'function') {
-    const epoch = db.bumpSessionEpoch(sid)
-    filenameOverride = `${destBase}-e${epoch}.jsonl`
-    log('info', 'epoch_bumped_for_resume', { sid, epoch })
+  // Epoch collision only applies to done/routine (dated+project layout).
+  // empty/error buckets are project-less per spec §4.1 and never reach here
+  // in practice (see the early returns above), but guard explicitly so a
+  // future refactor can't miscompute the target path. Spec §10.2 Q6.
+  if (bucket === 'done' || bucket === 'routine') {
+    const destBase = path.basename(sessionFile, '.jsonl')
+    const today = new Date().toISOString().slice(0, 10)
+    const targetDir = path.join(path.dirname(path.dirname(sessionFile)), bucket, today, project)
+    const targetJsonl = path.join(targetDir, `${destBase}.jsonl`)
+    if (fs.existsSync(targetJsonl) && typeof db.bumpSessionEpoch === 'function') {
+      const epoch = db.bumpSessionEpoch(sid)
+      filenameOverride = `${destBase}-e${epoch}.jsonl`
+      log('info', 'epoch_bumped_for_resume', { sid, epoch })
+    }
   }
 
   try {
