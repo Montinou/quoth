@@ -3,6 +3,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const { HnswIndex } = require('./lib/hnsw.js')
 const { trigrams } = require('./lib/injection.js')
 
@@ -1117,6 +1118,45 @@ function createDb(dbPath) {
   db.getDaemonMeta = function(key) {
     const row = db.prepare('SELECT value FROM daemon_meta WHERE key = ?').get(key)
     return row ? row.value : null
+  }
+
+  // --- memory_entries helpers (spec §6.7) ---
+
+  db.upsertMemoryEntry = function({ namespace, key, content, type, tags, metadata }) {
+    const id = crypto.createHash('sha1').update(`${namespace}:${key}`).digest('hex').slice(0, 12)
+    const now = Date.now()
+    db.prepare(`
+      INSERT INTO memory_entries (id, namespace, key, content, type, tags, metadata, created_at, updated_at)
+      VALUES (@id, @namespace, @key, @content, @type, @tags, @metadata, @created_at, @updated_at)
+      ON CONFLICT(namespace, key) DO UPDATE SET
+        content = excluded.content,
+        tags = excluded.tags,
+        metadata = excluded.metadata,
+        updated_at = excluded.updated_at
+    `).run({
+      id, namespace, key, content,
+      type: type || 'fact',
+      tags: JSON.stringify(tags || []),
+      metadata: JSON.stringify(metadata || {}),
+      created_at: now, updated_at: now,
+    })
+  }
+
+  db.listFactsByNamespace = function(namespace, limit = 20) {
+    return db.prepare(`
+      SELECT key, content, tags, metadata, updated_at
+      FROM memory_entries
+      WHERE namespace = ? AND type = 'fact' AND status = 'active'
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(namespace, limit)
+  }
+
+  db.deleteMemoryEntry = function({ namespace, key }) {
+    const result = db.prepare(`
+      DELETE FROM memory_entries WHERE namespace = ? AND key = ?
+    `).run(namespace, key)
+    return result.changes
   }
 
   db.getCostSummary = function(range) {
