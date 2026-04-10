@@ -780,6 +780,15 @@ async function runNightlyPipeline() {
     log('error', 'Nightly Phase H (outcomes) failed', { error: err.message })
   }
 
+  // Phase I: Retention sweep — delete stale trajectory files per-bucket TTLs.
+  try {
+    const { runRetentionSweep } = require('./retention.js')
+    const res = runRetentionSweep({ log })
+    log('info', 'nightly_retention_complete', { deleted: res.deleted, ttls: res.ttls })
+  } catch (err) {
+    log('error', 'nightly_retention_failed', { error: err.message })
+  }
+
   const elapsed = Math.round((Date.now() - start) / 1000)
   appendExecLog(STATE_DIR, { event: 'pipeline_complete', elapsed_s: elapsed })
   log('info', `Nightly pipeline complete in ${elapsed}s`)
