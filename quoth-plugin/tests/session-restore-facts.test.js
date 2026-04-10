@@ -62,14 +62,14 @@ describe('session-restore — facts injection block', () => {
 
     const res = runRestore(tmpHome)
     expect(res.status).toBe(0)
-    const out = (res.stdout || '') + (res.stderr || '')
 
-    expect(out).toContain('## Facts')
-    expect(out).toContain(`Facts (project — ${project})`)
-    expect(out).toContain('Facts (global)')
-    expect(out).toContain('build command')
-    expect(out).toContain('db primary key')
-    expect(out).toContain('llm rule')
+    expect(res.stdout).toContain('## Facts')
+    expect(res.stdout).toContain(`Facts (project — ${project})`)
+    expect(res.stdout).toContain('Facts (global)')
+    expect(res.stdout).toContain('build command')
+    expect(res.stdout).toContain('db primary key')
+    expect(res.stdout).toContain('llm rule')
+    expect(res.stderr).not.toContain('## Facts')
   }, 20000)
 
   it('caps facts per namespace to 5', () => {
@@ -81,10 +81,9 @@ describe('session-restore — facts injection block', () => {
 
     const res = runRestore(tmpHome)
     expect(res.status).toBe(0)
-    const out = (res.stdout || '') + (res.stderr || '')
 
-    const matches = out.match(/^- \*\*t\d+\*\*/gm) || []
-    expect(matches.length).toBeLessThanOrEqual(5)
+    const matches = (res.stdout || '').match(/^- \*\*t\d+\*\*/gm) || []
+    expect(matches.length).toBe(5)
   }, 20000)
 
   it('silent when there are no facts (no block)', () => {
@@ -95,8 +94,7 @@ describe('session-restore — facts injection block', () => {
 
     const res = runRestore(tmpHome)
     expect(res.status).toBe(0)
-    const out = (res.stdout || '') + (res.stderr || '')
 
-    expect(out).not.toContain('## Facts')
+    expect(res.stdout).not.toContain('## Facts')
   }, 20000)
 })
