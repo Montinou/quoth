@@ -28,9 +28,8 @@ for (const envPath of [
 }
 
 const { createDb } = require('./db.js')
-const { extract, QUALITY_PRIORS } = require('./pipeline/extract.js')
+const { QUALITY_PRIORS } = require('./pipeline/extract.js')
 const { promotePattern } = require('./lib/promote.js')
-const { callPipelineAPI } = require('./lib/pipeline-api.js')
 const { callDocUpdateAPI } = require('./lib/doc-update-api.js')
 const { scanDocs } = require('./lib/doc-manifest.js')
 const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
@@ -46,7 +45,6 @@ const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const TRAJECTORIES_DIR = path.join(QUOTH_HOME, 'trajectories')
 const PID_FILE = path.join(QUOTH_HOME, 'daemon.pid')
 const LOG_FILE = path.join(QUOTH_HOME, 'daemon.log')
-const LOCK_FILE = path.join(QUOTH_HOME, 'processing.lock')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
 
@@ -66,10 +64,6 @@ let decayTimer = null
 let deepConsolidateTimer = null
 let hnswSaveTimer = null
 let agentCleanupTimer = null
-
-const DAILY_EXTRACT_CAP = parseInt(process.env.QUOTH_DAILY_EXTRACT_CAP || process.env.QUOTH_DAILY_DISTILL_CAP || '50', 10)
-let dailyExtractCount = 0
-let dailyExtractDate = new Date().toISOString().slice(0, 10)
 
 // --- Logging ---
 function log(level, msg, data) {
@@ -104,16 +98,8 @@ if (fs.existsSync(PID_FILE)) {
 fs.writeFileSync(PID_FILE, String(process.pid))
 process.on('exit', () => {
   try { fs.unlinkSync(PID_FILE) } catch {}
-  try { fs.unlinkSync(LOCK_FILE) } catch {}
   try { fs.unlinkSync(SOCK_PATH) } catch {}
 })
-// Clean stale lock from previous crash
-if (fs.existsSync(LOCK_FILE)) {
-  try {
-    const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
-    try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE); log('info', 'Cleaned stale lock', { stalePid: lockPid }) }
-  } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
-}
 
 // --- Signal handlers ---
 let queryServer = null
@@ -273,153 +259,6 @@ function detectProjectFromTask(task, fallback) {
   return fallback
 }
 
-async function processEntry({ entry, filePath, line }) {
-  try {
-    // Only process session_summary entries (EXTRACT pipeline).
-    // Individual tool_use entries are consumed as context by EXTRACT
-    // when the session_summary arrives.
-    if (entry.event === 'session_summary') {
-      await processSessionBatch(entry, filePath, line)
-      return
-    }
-
-    // Don't mark tool_use — processSessionBatch() reads unprocessed
-    // tool_use entries from the file when session_summary arrives.
-    if (entry.event !== 'tool_use') {
-      markProcessed(filePath, line)
-    }
-  } catch (err) {
-    log('error', 'processEntry failed', { error: err.message })
-  }
-}
-
-// DEPRECATED: removed in Task 17
-async function processSessionBatch(summaryEntry, filePath, summaryLine) {
-  const sessionId = summaryEntry.session
-  const project = summaryEntry.project || 'default'
-  log('info', 'EXTRACT for session', { session: sessionId, project, tools: summaryEntry.total_calls })
-
-  // Read all tool_use entries from file for this session
-  const toolEntries = []
-  const toolLines = []
-  try {
-    const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-    for (const rawLine of lines) {
-      try {
-        const e = JSON.parse(rawLine)
-        if (e.session === sessionId && e.event === 'tool_use' && !e._processed) {
-          toolEntries.push(e)
-          toolLines.push(rawLine)
-        }
-      } catch {}
-    }
-  } catch (err) {
-    log('error', 'Failed to read session entries', { error: err.message })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-
-  if (toolEntries.length === 0) {
-    log('debug', 'No tool entries for session', { session: sessionId })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-
-  // Daily cap check
-  const today = new Date().toISOString().slice(0, 10)
-  if (today !== dailyExtractDate) { dailyExtractCount = 0; dailyExtractDate = today }
-  if (dailyExtractCount >= DAILY_EXTRACT_CAP) {
-    log('info', 'Daily extract cap reached', { count: dailyExtractCount, cap: DAILY_EXTRACT_CAP })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-  dailyExtractCount++
-
-  // Mode switch: managed (cloud) vs local
-  let extractedPatterns = []
-  if (QUOTH_MODE === 'managed') {
-    extractedPatterns = await processSessionManaged(summaryEntry, toolEntries, project)
-  } else {
-    extractedPatterns = await processSessionLocal(summaryEntry, toolEntries)
-  }
-
-  log('info', 'EXTRACT produced patterns', { count: extractedPatterns.length, session: sessionId, mode: QUOTH_MODE })
-
-  // Insert patterns into local DB
-  for (const pattern of extractedPatterns) {
-    try {
-      insertNewPattern(pattern, summaryEntry, project)
-    } catch (err) {
-      log('error', 'Pattern insertion failed', { error: err.message })
-    }
-  }
-
-  // Mark all entries as processed
-  for (const toolLine of toolLines) markProcessed(filePath, toolLine)
-  markProcessed(filePath, summaryLine)
-}
-
-// --- Managed mode: send sessions to cloud pipeline API ---
-// DEPRECATED: removed in Task 17
-async function processSessionManaged(summaryEntry, toolEntries, project) {
-  // Get top local patterns for consolidation context
-  const topPatterns = db.getTopPatterns(10).map(p => ({
-    id: p.id, name: p.name, confidence: p.confidence
-  }))
-
-  const session = {
-    summary: {
-      project,
-      outcome: summaryEntry.outcome || 'unknown',
-      success_rate: summaryEntry.success_rate || 0,
-      total_calls: summaryEntry.total_calls || toolEntries.length,
-      user_intents: summaryEntry.user_intents || [],
-      task: summaryEntry.task || ''
-    },
-    tool_entries: toolEntries.slice(-30).map(e => ({
-      tool: e.tool || '', task: (e.task || '').slice(0, 200),
-      outcome: e.outcome || 'success', llm_reasoning: (e.llm_reasoning || '').slice(0, 150)
-    }))
-  }
-
-  const result = await callPipelineAPI([session], topPatterns)
-  if (!result || !result.patterns) {
-    log('warn', 'Managed pipeline returned no results, falling back to local', { project })
-    return processSessionLocal(summaryEntry, toolEntries)
-  }
-
-  if (result.tokens_used) {
-    log('info', 'Cloud pipeline tokens used', { tokens: result.tokens_used, quota: result.quota_remaining })
-  }
-
-  // Map cloud response to local pattern format (add local embeddings)
-  const { generateEmbeddingBatch } = require('./lib/embed.js')
-  const texts = result.patterns.map(p => p.pattern)
-  const embeddings = await generateEmbeddingBatch(texts)
-
-  return result.patterns.map((p, i) => ({
-    id: p.id,
-    pattern: p.pattern,
-    tags: p.tags || [],
-    applicability: p.applicability || 'broad',
-    embedding: embeddings[i],
-    source: 'distilled',
-    // Cloud already did consolidation
-    _action: p.action,
-    _targetId: p.targetId
-  }))
-}
-
-// DEPRECATED: removed in Task 17
-async function processSessionLocal(summaryEntry, toolEntries) {
-  const result = await extract(summaryEntry, toolEntries, db)
-  // Back-compat shim: older callers expect an array of patterns.
-  // Task 8 will consume the full { patterns, facts } object.
-  if (Array.isArray(result)) return result
-  if (result && Array.isArray(result.patterns)) return result.patterns
-  return []
-}
-
 function insertNewPattern(distilled, summaryEntry, project) {
   // Pre-insert dedup check
   const dupByName = db.findDuplicateByName(distilled.action)
@@ -476,16 +315,6 @@ function insertNewPattern(distilled, summaryEntry, project) {
     quality: distilled.quality_signal,
     confidence: confidence.toFixed(2),
   })
-}
-
-// --- Mark a line as processed ---
-// DEPRECATED: removed in Task 17
-function markProcessed(filePath, originalLine) {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8')
-    const processedLine = originalLine.replace(/\}(\s*)$/, ',"_processed":true}$1')
-    fs.writeFileSync(filePath, content.replace(originalLine, processedLine))
-  } catch {}
 }
 
 // --- Hourly decay timer ---
