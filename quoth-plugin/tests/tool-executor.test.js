@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { readFile, grepCodebase, resolveProjectRoot, executeToolCall, sanitize } from '../daemon/lib/tool-executor.js'
+
+const { readFile, grepCodebase, resolveProjectRoot, executeToolCall, sanitize } = require('../daemon/lib/tool-executor.js')
 
 let tmpDir
 
@@ -139,7 +140,6 @@ describe('grepCodebase', () => {
 
   it('handles invalid regex gracefully', () => {
     const result = grepCodebase('[invalid(', tmpDir)
-    // Should not throw, returns error or no matches
     expect(typeof result).toBe('string')
   })
 
@@ -153,11 +153,10 @@ describe('grepCodebase', () => {
 })
 
 describe('resolveProjectRoot', () => {
-  it('extracts common ancestor from tool entry paths', () => {
+  it('extracts common ancestor from file paths in tool entries', () => {
     const entries = [
-      { tool_input: JSON.stringify({ file_path: '/home/user/project/src/app.js' }) },
-      { tool_input: JSON.stringify({ file_path: '/home/user/project/src/lib/util.js' }) },
-      { tool_input: JSON.stringify({ file_path: '/home/user/project/tests/test.js' }) },
+      { tool_input: 'file: /home/user/project/src/app.js, content: ...' },
+      { tool_input: 'file: /home/user/project/tests/test.js, old: ...' },
     ]
     const result = resolveProjectRoot('unknown', entries)
     expect(result).toBe('/home/user/project')
@@ -175,16 +174,16 @@ describe('resolveProjectRoot', () => {
 })
 
 describe('executeToolCall', () => {
-  it('dispatches read_file', () => {
+  it('dispatches read_file with spec parameter names (path, maxLines)', () => {
     const filePath = path.join(tmpDir, 'dispatch.txt')
     fs.writeFileSync(filePath, 'dispatched content\n')
     const result = executeToolCall({
-      function: { name: 'read_file', arguments: JSON.stringify({ file_path: filePath }) }
+      function: { name: 'read_file', arguments: JSON.stringify({ path: filePath }) }
     }, tmpDir)
     expect(result).toContain('dispatched content')
   })
 
-  it('dispatches grep_codebase', () => {
+  it('dispatches grep_codebase with spec parameter names (pattern, path, maxResults)', () => {
     const srcDir = path.join(tmpDir, 'src')
     fs.mkdirSync(srcDir)
     fs.writeFileSync(path.join(srcDir, 'code.js'), 'findable_token_xyz\n')
