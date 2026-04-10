@@ -35,7 +35,13 @@ async function callPipelineAPI(sessions, existingPatterns) {
 
   try {
     const res = await apiCall(`${apiUrl}/api/v1/pipeline/process`, 'POST', body, apiKey)
-    return res
+    if (res === null) return null
+    return {
+      patterns: Array.isArray(res.patterns) ? res.patterns : [],
+      facts: Array.isArray(res.facts) ? res.facts : [],
+      tokens_used: res.tokens_used || 0,
+      quota_remaining: res.quota_remaining || null,
+    }
   } catch (err) {
     process.stderr.write(`[quoth-pipeline] Error: ${err.message || err}\n`)
     return null

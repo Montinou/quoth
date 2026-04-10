@@ -58,7 +58,12 @@ describe('callPipelineAPI', () => {
     mockResponse(200, response)
 
     const result = await callPipelineAPI([session], patterns)
-    expect(result).toEqual(response)
+    expect(result).toEqual({
+      patterns: response.patterns,
+      facts: [],
+      tokens_used: 100,
+      quota_remaining: null,
+    })
 
     const callOpts = requestSpy.mock.calls[0][0]
     expect(callOpts.hostname).toBe('test.example.com')
