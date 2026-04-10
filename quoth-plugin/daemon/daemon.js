@@ -1389,101 +1389,34 @@ function startAgentCleanupTimer() {
   }, 5 * 60 * 1000)
 }
 
-// --- Stale session detector: generates synthetic summaries for orphaned sessions ---
+// --- Stale session detector: SQL-first scan (spec §6.4) ---
 function startStaleSessionTimer() {
-  staleSessionTimer = setInterval(() => {
-    try {
+  // Spec §6.4(b): startup catch-up using daemon_meta.last_stale_scan_ts.
+  try {
+    const lastTsRaw = typeof db.getDaemonMeta === 'function'
+      ? db.getDaemonMeta('last_stale_scan_ts')
+      : null
+    const lastTs = lastTsRaw != null ? Number(lastTsRaw) || 0 : 0
+    if (Date.now() - lastTs > 10 * 60 * 1000) {
+      log('info', 'Stale scan startup catch-up', { last_scan_ts: lastTs })
       detectStaleSessions()
-    } catch (err) {
-      log('error', 'Stale session detection failed', { error: err.message })
     }
+  } catch (err) {
+    log('warn', 'Stale startup catch-up failed', { error: err.message })
+  }
+
+  staleSessionTimer = setInterval(() => {
+    try { detectStaleSessions() }
+    catch (err) { log('error', 'Stale session detection failed', { error: err.message }) }
   }, 10 * 60 * 1000) // Every 10 minutes
 }
 
 function detectStaleSessions() {
-  const STALE_THRESHOLD = 30 * 60 * 1000 // 30 minutes
-  const now = Date.now()
-
+  const { detectStaleSessions: scan } = require('./stale-detector.js')
   try {
-    const files = fs.readdirSync(TRAJECTORIES_DIR).filter(f => f.endsWith('.jsonl'))
-    for (const file of files) {
-      const filePath = path.join(TRAJECTORIES_DIR, file)
-      const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-
-      // Group unprocessed tool_use entries by session
-      const sessions = new Map() // sessionId → { entries, latestTimestamp }
-      const hasSummary = new Set() // sessions that already have a summary
-
-      for (const rawLine of lines) {
-        try {
-          const e = JSON.parse(rawLine)
-          if (e._processed) continue
-          if (e.event === 'session_summary') {
-            hasSummary.add(e.session)
-            continue
-          }
-          if (e.event === 'tool_use' && e.session) {
-            if (!sessions.has(e.session)) {
-              sessions.set(e.session, { entries: [], latest: 0 })
-            }
-            const s = sessions.get(e.session)
-            s.entries.push(e)
-            s.latest = Math.max(s.latest, e.timestamp || 0)
-          }
-        } catch {}
-      }
-
-      // Find orphaned sessions: tool_use entries without summary, idle > 30 min
-      for (const [sessionId, { entries, latest }] of sessions) {
-        if (hasSummary.has(sessionId)) continue
-        if (entries.length < 3) continue // Skip tiny sessions
-        if ((now - latest) < STALE_THRESHOLD) continue // Still active
-
-        log('info', 'Detected stale session, generating synthetic summary', {
-          session: sessionId, entries: entries.length, idleMin: Math.round((now - latest) / 60000)
-        })
-
-        // Build synthetic session_summary
-        const toolCounts = {}
-        const intents = new Set()
-        const reasonings = []
-        let successes = 0, failures = 0
-        const project = entries[0].project || 'default'
-
-        for (const e of entries) {
-          toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1
-          if (e.outcome === 'success') successes++
-          else failures++
-          if (e.user_intent) intents.add(e.user_intent)
-          if (e.llm_reasoning) reasonings.push(e.llm_reasoning)
-        }
-
-        const toolSummary = Object.entries(toolCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([tool, count]) => `${tool}:${count}`)
-          .join(', ')
-
-        const summary = {
-          event: 'session_summary',
-          agent: 'claude-code',
-          project,
-          session: sessionId,
-          task: `Session (synthetic): ${entries.length} tool calls (${toolSummary}). ${successes} ok, ${failures} fail.`,
-          tool_counts: toolCounts,
-          total_calls: entries.length,
-          success_rate: entries.length > 0 ? successes / entries.length : 0,
-          user_intents: [...intents].slice(0, 5),
-          llm_reasonings: [...new Set(reasonings)].slice(-10),
-          outcome: failures === 0 ? 'success' : (successes > failures ? 'partial' : 'failure'),
-          source: 'stale-session-detector',
-          timestamp: now
-        }
-
-        fs.appendFileSync(filePath, JSON.stringify(summary) + '\n')
-      }
-    }
+    scan({ db, trajectoriesDir: TRAJECTORIES_DIR, log })
   } catch (err) {
-    log('error', 'detectStaleSessions scan failed', { error: err.message })
+    log('error', 'Stale session detection failed', { error: err.message })
   }
 }
 
