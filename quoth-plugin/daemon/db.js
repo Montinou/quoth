@@ -1208,6 +1208,21 @@ function createDb(dbPath) {
     `).all(namespace, limit)
   }
 
+  /**
+   * Soft-delete a fact by flipping status='archived'. Returns true if a
+   * row was affected, false otherwise. The row remains in the table so
+   * undo is possible, but listFactsByNamespace will not return it.
+   */
+  db.archiveFact = function(namespace, topic) {
+    const result = db.prepare(`
+      UPDATE memory_entries
+      SET status = 'archived',
+          updated_at = CAST(strftime('%s','now') AS INTEGER) * 1000
+      WHERE namespace = ? AND key = ? AND status = 'active'
+    `).run(namespace, topic)
+    return result.changes > 0
+  }
+
   db.deleteMemoryEntry = function({ namespace, key }) {
     const result = db.prepare(`
       DELETE FROM memory_entries WHERE namespace = ? AND key = ?

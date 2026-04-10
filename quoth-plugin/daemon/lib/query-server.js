@@ -14,6 +14,24 @@ const SOCK_PATH = path.join(
 const MAX_BODY = 64 * 1024 // 64KB
 const HANDLER_TIMEOUT_MS = 400
 
+/**
+ * Build a raw http.Server wired to our request handler. Does NOT call
+ * listen() — the caller decides where (unix socket for the daemon,
+ * ephemeral loopback port for tests).
+ *
+ * @param {object}   opts
+ * @param {object}   opts.db               - db handle from createDb()
+ * @param {function} [opts.log]            - log(level, msg, meta) sink
+ * @param {?string}  [opts.trajectoriesDir] - absolute path to ~/.quoth/trajectories
+ *                                            (required for /sessions/:sid/status)
+ * @returns {import('http').Server}
+ */
+function buildQueryServer({ db, log = () => {}, trajectoriesDir = null } = {}) {
+  return http.createServer((req, res) =>
+    _handleRequest(req, res, db, log, { trajectoriesDir })
+  )
+}
+
 function createQueryServer(db, log) {
   let server = null
 
@@ -38,7 +56,10 @@ function createQueryServer(db, log) {
   }
 
   function _listen(resolve, reject) {
-    server = http.createServer((req, res) => _handleRequest(req, res, db, log))
+    // Unix-socket path: no trajectoriesDir needed (daemon wiring does not
+    // yet use /sessions routes over the socket — loopback port is the
+    // primary consumer). A future task can thread trajectoriesDir through.
+    server = buildQueryServer({ db, log, trajectoriesDir: null })
     server.on('error', reject)
     server.listen(SOCK_PATH, () => {
       log('info', 'Query server listening', { socket: SOCK_PATH })
@@ -57,7 +78,7 @@ function createQueryServer(db, log) {
   return { start, stop }
 }
 
-function _handleRequest(req, res, db, log) {
+function _handleRequest(req, res, db, log, ctx = {}) {
   res.setHeader('Content-Type', 'application/json')
 
   if (req.method === 'GET' && req.url === '/health') {
@@ -129,9 +150,150 @@ function _handleRequest(req, res, db, log) {
     return
   }
 
+  // --- Session + facts routes (Task 18, spec §10.2 #10) ---
+
+  // GET /sessions/:sid/status
+  if (req.method === 'GET') {
+    let parsedUrl
+    try {
+      parsedUrl = new URL(req.url, 'http://localhost')
+    } catch {
+      parsedUrl = null
+    }
+    if (parsedUrl) {
+      const parts = parsedUrl.pathname.split('/').filter(Boolean)
+
+      if (parts[0] === 'sessions' && parts.length === 3 && parts[2] === 'status') {
+        const sid = decodeURIComponent(parts[1])
+        const info = findSessionInBuckets(sid, ctx.trajectoriesDir)
+        if (!info) {
+          res.writeHead(404)
+          res.end(JSON.stringify({ error: 'not_found' }))
+          return
+        }
+        res.writeHead(200)
+        res.end(JSON.stringify(info))
+        return
+      }
+
+      // GET /facts/:namespace?limit=N
+      if (parts[0] === 'facts' && parts.length === 2) {
+        const ns = decodeURIComponent(parts[1])
+        const limit = Math.min(100, Number(parsedUrl.searchParams.get('limit')) || 20)
+        const rows = (db.listFactsByNamespace && db.listFactsByNamespace(ns, limit)) || []
+        const mapped = rows.map((r) => {
+          let content
+          try { content = JSON.parse(r.content) } catch { content = {} }
+          let tags = []
+          if (r.tags) {
+            if (typeof r.tags === 'string') {
+              try { tags = JSON.parse(r.tags) } catch { tags = [] }
+            } else if (Array.isArray(r.tags)) {
+              tags = r.tags
+            }
+          }
+          return {
+            topic: r.key,
+            statement: content.statement || null,
+            evidence: content.evidence || null,
+            scope: nsToScope(ns),
+            tags,
+            updated_at: r.updated_at,
+          }
+        })
+        res.writeHead(200)
+        res.end(JSON.stringify(mapped))
+        return
+      }
+    }
+  }
+
+  // DELETE /facts/:namespace/:topic
+  if (req.method === 'DELETE') {
+    let parsedUrl
+    try {
+      parsedUrl = new URL(req.url, 'http://localhost')
+    } catch {
+      parsedUrl = null
+    }
+    if (parsedUrl) {
+      const parts = parsedUrl.pathname.split('/').filter(Boolean)
+      if (parts[0] === 'facts' && parts.length === 3) {
+        const ns = decodeURIComponent(parts[1])
+        const topic = decodeURIComponent(parts[2])
+        const deleted = (db.archiveFact && db.archiveFact(ns, topic)) || false
+        res.writeHead(200)
+        res.end(JSON.stringify({ deleted: Boolean(deleted) }))
+        return
+      }
+    }
+  }
+
   // Unknown route
   res.writeHead(404)
   res.end(JSON.stringify({ error: 'Not found' }))
+}
+
+function findSessionInBuckets(sid, trajectoriesDir) {
+  if (!trajectoriesDir) return null
+  const metaName = `${sid}.meta.json`
+
+  // Flat buckets (no date subdir): active + processing.
+  for (const bucket of ['active', 'processing']) {
+    const sidecar = path.join(trajectoriesDir, bucket, metaName)
+    if (fs.existsSync(sidecar)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(sidecar, 'utf8'))
+        return { ...meta, location: bucket }
+      } catch {}
+    }
+  }
+
+  // Dated-but-flat buckets (spec §4.1): empty/YYYY-MM-DD/ and error/YYYY-MM-DD/
+  // — no project subdir.
+  for (const bucket of ['empty', 'error']) {
+    const bucketRoot = path.join(trajectoriesDir, bucket)
+    if (!fs.existsSync(bucketRoot)) continue
+    for (const dateDir of safeReaddir(bucketRoot)) {
+      const sidecar = path.join(bucketRoot, dateDir, metaName)
+      if (fs.existsSync(sidecar)) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(sidecar, 'utf8'))
+          return { ...meta, location: `${bucket}/${dateDir}` }
+        } catch {}
+      }
+    }
+  }
+
+  // Dated + project buckets: done/YYYY-MM-DD/<project>/ and routine/YYYY-MM-DD/<project>/.
+  for (const bucket of ['done', 'routine']) {
+    const bucketRoot = path.join(trajectoriesDir, bucket)
+    if (!fs.existsSync(bucketRoot)) continue
+    for (const dateDir of safeReaddir(bucketRoot)) {
+      const dateDirPath = path.join(bucketRoot, dateDir)
+      for (const projDir of safeReaddir(dateDirPath)) {
+        const sidecar = path.join(dateDirPath, projDir, metaName)
+        if (fs.existsSync(sidecar)) {
+          try {
+            const meta = JSON.parse(fs.readFileSync(sidecar, 'utf8'))
+            return { ...meta, location: `${bucket}/${dateDir}/${projDir}` }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function safeReaddir(dir) {
+  try { return fs.readdirSync(dir) } catch { return [] }
+}
+
+function nsToScope(ns) {
+  if (ns === 'facts:global') return 'global'
+  if (ns.startsWith('facts:proj:')) return 'project'
+  return 'unknown'
 }
 
 async function handleQuery(body, db, log) {
@@ -389,4 +551,4 @@ function rerankByOutcomes(patterns, queryEmbedding, outcomesMap, simThreshold = 
   })
 }
 
-module.exports = { createQueryServer, rerankByOutcomes }
+module.exports = { createQueryServer, buildQueryServer, rerankByOutcomes }
