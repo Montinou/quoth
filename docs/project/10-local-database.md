@@ -1,6 +1,6 @@
 # Local Database (SQLite)
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-09
+**Version:** 1.0.4 | **Last updated:** 2026-04-10
 
 The Quoth plugin maintains a local SQLite database for pattern storage, trajectory tracking, agent coordination, and event sourcing. All data is stored on the user's machine at `~/.quoth/memory.db`.
 
@@ -17,7 +17,7 @@ The database is created and migrated on first access via the `createDb(dbPath)` 
 
 ## Tables
 
-The schema defines 6 core tables plus 5 V2 auxiliary tables, all created via `CREATE TABLE IF NOT EXISTS` on every startup.
+The schema defines 6 core tables plus 7 V2 auxiliary tables, all created via `CREATE TABLE IF NOT EXISTS` on every startup.
 
 ### patterns
 
@@ -37,6 +37,7 @@ Primary storage for learned and distilled patterns, scored using Bayesian confid
 | `decay_rate` | REAL | 0.005 | Hourly decay rate applied to alpha |
 | `embedding` | TEXT | NULL | JSON-serialized float array (local MiniLM-L6-v2 embeddings; see [12 — Embeddings & Search](./12-embeddings-search.md)) |
 | `version` | INTEGER | 1 | Schema version for forward compatibility |
+| `format_version` | INTEGER | 1 | Content format version (added via runtime migration) |
 | `tags` | TEXT | `'[]'` | JSON array of tag strings |
 | `source` | TEXT | `'distilled'` | Origin: `distilled`, `exolar-seeded`, `healer-learned`, `attributed`, `skill-derived` |
 | `status` | TEXT | `'active'` | Lifecycle state: `active`, `archived` |
@@ -227,6 +228,8 @@ Chunked project documentation with embeddings for semantic search during session
 | `content` | TEXT NOT NULL | -- | Chunk text content |
 | `embedding` | TEXT | NULL | JSON-serialized embedding (see [doc 12](./12-embeddings-search.md)) |
 | `content_hash` | TEXT | NULL | Hash of content for change detection |
+| `alpha` | REAL | 1 | Beta distribution alpha (Thompson prior for doc injection) |
+| `beta` | REAL | 1 | Beta distribution beta (Thompson prior for doc injection) |
 | `updated_at` | INTEGER | epoch ms | Last update timestamp |
 
 **Indexes:** `idx_doc_chunks_file` on `doc_file`
@@ -251,6 +254,37 @@ LLM cost tracking for daemon pipeline stages (JUDGE, DISTILL, CONSOLIDATE). Reco
 **Indexes:**
 - `idx_costs_stage` on `stage` -- filter by pipeline stage
 - `idx_costs_created` on `created_at DESC` -- reverse chronological queries
+
+### pipeline_errors
+
+Records pipeline execution errors for observability and debugging. Captures the stage, error details, and whether a fallback was attempted and succeeded.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | INTEGER PK | AUTOINCREMENT | Sequential error entry ID |
+| `stage` | TEXT NOT NULL | -- | Pipeline stage where the error occurred (e.g., `JUDGE`, `DISTILL`, `CONSOLIDATE`) |
+| `error_message` | TEXT NOT NULL | -- | Human-readable error message |
+| `error_stack` | TEXT | NULL | Full error stack trace |
+| `context` | TEXT | NULL | JSON-serialized context at the time of failure |
+| `model_attempted` | TEXT | NULL | LLM model identifier that was called when the error occurred |
+| `fallback_attempted` | INTEGER | 0 | 1 if a fallback strategy was tried |
+| `fallback_succeeded` | INTEGER | 0 | 1 if the fallback succeeded |
+| `created_at` | INTEGER | `strftime('%s','now') * 1000` | Creation timestamp (epoch ms) |
+
+### pattern_outcomes
+
+Links pattern injections to session-level intent and outcome for V2 attribution. Enables causal analysis of which patterns lead to successful sessions.
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | INTEGER PK | AUTOINCREMENT | Sequential outcome entry ID |
+| `pattern_id` | TEXT NOT NULL | -- | ID of the pattern that was injected |
+| `intention` | TEXT NOT NULL | -- | The user's stated or inferred intention at injection time |
+| `intention_embedding` | TEXT | NULL | JSON-serialized embedding of the intention text |
+| `outcome` | TEXT NOT NULL | -- | Observed outcome (`success`, `failure`, or reward string) |
+| `session_context` | TEXT | NULL | JSON-serialized session context snapshot |
+| `session_id` | TEXT | NULL | Claude Code session identifier |
+| `created_at` | INTEGER | `strftime('%s','now') * 1000` | Creation timestamp (epoch ms) |
 
 ## Key Methods
 
@@ -390,6 +424,8 @@ The `createDb()` constructor runs multiple migration blocks on every startup, ea
 6. **Beta repair (one-time):** Resets `alpha = 1, beta = 1, confidence = 0.5` for never-exposed active patterns where `beta > 2.0` (caused by an earlier aggressive decay that incremented beta hourly).
 7. **Trigram backfill (one-time):** Generates `pattern_trigrams` for any active pattern where the column is NULL.
 8. **MiniLM-L6 migration:** If the first stored embedding has a dimension mismatch, all embeddings are nulled out (migration from the previous cloud model to local MiniLM-L6-v2; see [12 — Embeddings & Search](./12-embeddings-search.md)) and `hnsw.index.json` is deleted.
+9. **Format version column:** `format_version INTEGER NOT NULL DEFAULT 1` added to `patterns` via try/catch ALTER TABLE (duplicate column errors silently swallowed).
+10. **Doc chunks Thompson priors:** `alpha REAL NOT NULL DEFAULT 1` and `beta REAL NOT NULL DEFAULT 1` added to `doc_chunks` via try/catch ALTER TABLE, enabling per-chunk Thompson sampling for V2 doc injection.
 
 This approach allows the schema to evolve without a formal migration framework.
 

@@ -1,6 +1,6 @@
 # API Reference
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-09
+**Version:** 1.0.4 | **Last updated:** 2026-04-10
 
 API reference index for the Quoth system.
 
@@ -51,8 +51,18 @@ Promote a local pattern to the Quoth cloud index.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `pattern` | object | Yes | Full pattern object (id, name, condition, action, confidence, tags, source) |
-| `projectId` | string | No | Originating project namespace |
+| `patternId` | string | Yes | Pattern identifier (12-char SHA-1 hash) |
+| `name` | string | Yes | Pattern name |
+| `condition` | string | Yes | When this pattern applies |
+| `action` | string | Yes | What to do when the pattern matches |
+| `content` | string | Yes | Formatted markdown content block for the cloud document |
+| `confidence` | number | Yes | Bayesian confidence score (0.0–1.0) |
+| `successCount` | integer | Yes | Total recorded successes |
+| `failureCount` | integer | Yes | Total recorded failures |
+| `tags` | string[] | Yes | Tag array (e.g., `["agent:coder"]`) |
+| `applicability` | string | Yes | `'narrow'` or `'broad'` |
+| `projectSlug` | string | No | Originating project namespace (omitted for `default` namespace) |
+| `embedding` | number[] | No | 384-dim MiniLM-L6-v2 embedding vector |
 
 **Response:**
 ```json

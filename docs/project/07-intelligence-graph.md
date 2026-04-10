@@ -1,6 +1,6 @@
 # Intelligence Graph
 
-<!-- version: 1.0.3 | last updated: 2026-04-09 -->
+<!-- version: 1.0.4 | last updated: 2026-04-10 -->
 
 The intelligence graph is Quoth's in-session knowledge retrieval system. It builds a weighted, directed graph from memory files and pattern entries, computes PageRank over the graph, and uses trigram-based text matching to surface relevant context at query time. All state is persisted as JSON files in `~/.quoth/intelligence/`.
 
@@ -295,7 +295,7 @@ The cache key is the node count -- if entries are added or removed, the cache is
 
 ## Diagnostics
 
-`getStats()` returns comprehensive intelligence diagnostics:
+`getStats(db)` returns comprehensive intelligence diagnostics. The optional `db` parameter (SQLite database handle) enables two additional sections populated from live pattern data.
 
 | Section | Fields |
 |---------|--------|
@@ -308,6 +308,10 @@ The cache key is the node count -- if entries are added or removed, the cache is
 | `snapshots` | Number of historical snapshots |
 | `topPatterns` | Top 10 entries with rank, summary, confidence, pageRank, accessCount |
 | `delta` | If 2+ snapshots exist: elapsed time, node delta, edge delta vs. previous |
+| `exposure` | *(requires db)* `total` active patterns, `exposed` (exposure_count > 0), `used` (success_count > 0), `avg_conversion_rate` |
+| `v2` | *(requires db)* V2 subsystem stats — `clusters` (count, avg/min/max confidence, total_attempts), `injections_7d` (total, explorations, avg_propensity, with_outcome, avg_reward), `judge_30d` (total, judged, cost_cents), `retired_total` |
+
+When `db` is not provided (e.g., called without a database handle), `exposure` and `v2` are `null`.
 
 ## MCP Tools
 

@@ -1,6 +1,6 @@
 # Configuration
 
-*Version: 1.0.3 | Last updated: 2026-04-09*
+*Version: 1.0.4 | Last updated: 2026-04-10*
 
 Complete reference for all configuration files, environment variables, file paths, and setup procedures in the Quoth system.
 
@@ -542,11 +542,11 @@ interface HandlerConfig {
 ```
 
 **Middleware execution order:**
-1. Request timeout enforcement
-2. Authentication (Clerk JWT or agent API key)
-3. Rate limiting (Upstash Redis sliding window)
-4. Zod input validation
-5. Error handling (RFC 7807 problem detail format)
+1. Authentication (Clerk JWT or agent API key)
+2. Rate limiting (Upstash Redis sliding window)
+3. Zod input validation (body / query)
+4. Handler execution wrapped in request timeout (`Promise.race` with `maxDuration` ms; default 30 000 ms)
+5. Error handling (RFC 7807 problem detail format) — wraps all of the above via a single try/catch
 
 **Example usage:**
 ```typescript
