@@ -1,4 +1,4 @@
-# Quoth Plugin v3.4.0 (Self-Learning)
+# Quoth Plugin v3.5.0 (Self-Learning)
 
 Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous self-learning, intelligence routing, and agent coordination. Modular architecture: 4 handler modules, 22 MCP tools.
 
@@ -6,12 +6,20 @@ Located at `quoth-plugin/`. A standalone Claude Code plugin providing autonomous
 ```bash
 node quoth-plugin/scripts/cli.js init    # Interactive wizard (recommended)
 bash quoth-plugin/scripts/setup.sh       # Non-interactive (legacy)
+
+# Migrate existing install from pre-v3.5 shared-file layout
+node quoth-plugin/scripts/migrate-session-isolation.js              # split legacy files
+node quoth-plugin/scripts/migrate-session-isolation.js --dry-run    # preview without writing
 ```
 Auto-detects `claude` CLI → sets mode (local/managed), writes `~/.quoth/.env`, installs hooks, starts daemon. Idempotent — safe to re-run.
 
 ## What It Does
-- Logs all agent trajectories to `~/.quoth/trajectories/{repo-name}-{date}.jsonl`
-- Background daemon processes trajectories via 3-stage pipeline (JUDGE → DISTILL → CONSOLIDATE)
+- Logs each agent session to its own JSONL at `~/.quoth/trajectories/active/<sessionId>.jsonl` with a sidecar `<sessionId>.meta.json` for status + metadata
+- On session end, hook atomically renames the pair into `~/.quoth/trajectories/processing/` — the rename IS the handoff to the daemon
+- Daemon processes each file individually, archives productive sessions to `done/YYYY-MM-DD/<project>/`, routine ones to `routine/`, empty (zero tool_use) to `empty/`, and failures to `error/`
+- 3-stage pipeline (JUDGE → DISTILL → CONSOLIDATE) extracts BOTH patterns (reusable techniques) and facts (stable session-independent knowledge)
+- Facts land in `memory_entries` under `facts:global` or `facts:proj:<project>` depending on scope (spec §6.6: only two scopes, no `facts:user`)
+- `session-restore` hook injects the top 5 facts per namespace into the new session's initial context
 - JUDGE: batch-evaluates 30 entries at once via Gemini 2.5 Flash, classifies domain (8 canonical agent types)
 - DISTILL: extracts patterns via Gemini 2.5 Flash Lite, generates MiniLM embeddings
 - CONSOLIDATE: merges duplicates via Claude Haiku 4.5 (`claude -p`)
@@ -23,6 +31,27 @@ Auto-detects `claude` CLI → sets mode (local/managed), writes `~/.quoth/.env`,
 - Injects domain-relevant patterns into subagents via `additionalContext`
 - Project identification via git remote origin (GitHub repo name)
 - On-demand semantic search via `quoth_search_patterns` MCP tool (embedding + cosine similarity)
+
+## Trajectory Layout (v3.5+)
+```
+~/.quoth/trajectories/
+  active/                        # in-progress sessions (written by trajectory-capture.js)
+  processing/                    # claimed by daemon (renamed from active/ on session-end)
+  done/YYYY-MM-DD/<project>/     # productive sessions with patterns/facts
+  routine/YYYY-MM-DD/<project>/  # routine sessions with no meaningful output
+  empty/YYYY-MM-DD/              # sessions with zero tool_use entries (no project subdir)
+  error/YYYY-MM-DD/              # EXTRACT failures (no project subdir)
+  migrated-legacy/               # pre-v3.5 files (one-shot migration target)
+```
+
+State machine: `active → processing → {done, routine, empty, error}`.
+
+Each `<sessionId>.jsonl` is paired with `<sessionId>.meta.json`. Sidecars contain `{session_id, project, status, first_seen_ts, last_seen_ts, tool_count, closed_marker, ...}`. Both files move together on every state change via `fs.renameSync` (POSIX atomic). Per spec §6.4 there is **no trivial gate** — every non-empty session passes through `processing/` regardless of entry count; a session that crashed after 2 Writes may be the most valuable kind of trajectory.
+
+Query the daemon via the local query server:
+- `GET /sessions/:sid/status` — returns sidecar + bucket location
+- `GET /facts/:namespace?limit=N` — returns structured facts (`facts:global`, `facts:proj:<project>`)
+- `DELETE /facts/:namespace/:topic` — soft-archives (status='archived')
 
 ## Global Configuration
 Quoth is configured once globally — no per-project setup needed:
@@ -43,6 +72,14 @@ Quoth is configured once globally — no per-project setup needed:
 - Bayesian confidence scoring: Beta(alpha, beta) distribution
 - Decision Attribution: tracks which patterns caused success/failure outcomes
 - Source tagging: distilled, exolar-seeded, healer-learned, attributed, skill-derived
+
+### New in v3.5
+- `QUOTH_STALE_TTL_MS` (default 1800000 / 30 min) — idle time after which an active session is considered stale and flushed to `processing/`. Applies to every non-empty session regardless of entry count (spec §6.4: no trivial gate)
+- `QUOTH_RETENTION_DONE_DAYS` (default 30) — nightly retention sweep deletes `done/` files older than this
+- `QUOTH_RETENTION_ROUTINE_DAYS` (default 7)
+- `QUOTH_RETENTION_EMPTY_DAYS` (default 3)
+- `QUOTH_RETENTION_ERROR_DAYS` (default 14)
+- `QUOTH_MANAGED_LOCAL_BACKGROUND` (default false) — when true in managed mode, the daemon runs EXTRACT locally and posts the result to the cloud as write-through confirmation (useful for debugging and air-gapped dev loops)
 
 ## MCP Tools (22 total via quoth-learning server)
 
@@ -110,6 +147,17 @@ npm run lint
 - Always validate user input at system boundaries
 
 ## Roadmap
+
+### Done in v3.5.0
+- ~~Per-session JSONL isolation~~ — `active/<sid>.jsonl → processing/ → {done,routine,empty,error}/` state machine, atomic rename handoff
+- ~~Facts extraction~~ — EXTRACT now emits both patterns and facts; facts persist in `memory_entries` under `facts:global` / `facts:proj:<project>`
+- ~~Facts injection on SessionStart~~ — `session-restore` hook surfaces top 5 facts per namespace
+- ~~Stale session detector rewrite~~ — SQL-first, no trivial gate, race-guarded
+- ~~Epoch suffix on resume~~ — `sessions(session_id, epoch)` PK protects archived files from being clobbered if a resumed session runs again
+- ~~Nightly retention sweep~~ — per-bucket TTLs with env overrides (done=30d, routine=7d, empty=3d, error=14d)
+- ~~Managed-mode local-background mode~~ — `QUOTH_MANAGED_LOCAL_BACKGROUND=true` runs EXTRACT locally and posts cloud confirmation
+- ~~Query server routes~~ — `GET /sessions/:sid/status`, `GET /facts/:ns?limit=N`, `DELETE /facts/:ns/:topic`
+- ~~Legacy migration script~~ — `scripts/migrate-session-isolation.js` splits pre-v3.5 `<project>-<date>.jsonl` files into per-session layout
 
 ### Done in v3.4.0
 - ~~Managed mode~~ — SaaS-ready daemon without user API keys (`POST /api/v1/pipeline/process`)
