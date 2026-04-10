@@ -11,9 +11,10 @@ const os = require('os')
 
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const TRAJECTORIES_DIR = path.join(QUOTH_HOME, 'trajectories')
+const ACTIVE_DIR = path.join(TRAJECTORIES_DIR, 'active')
 
-// Ensure directory exists
-if (!fs.existsSync(TRAJECTORIES_DIR)) fs.mkdirSync(TRAJECTORIES_DIR, { recursive: true })
+// Ensure active/ exists (covers both first run and fresh install).
+if (!fs.existsSync(ACTIVE_DIR)) fs.mkdirSync(ACTIVE_DIR, { recursive: true })
 
 // Read hook input from stdin
 let input = ''
@@ -104,10 +105,49 @@ process.stdin.on('end', () => {
       timestamp: Date.now()
     }
 
-    // Write to project-specific trajectory file
-    const date = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-    const trajFile = path.join(TRAJECTORIES_DIR, `${project}-${date}.jsonl`)
-    fs.appendFileSync(trajFile, JSON.stringify(entry) + '\n')
+    // Per-session file isolation: every session writes to its own JSONL
+    // under active/, plus a sidecar with metadata the daemon reads.
+    const sessionFile = path.join(ACTIVE_DIR, `${sessionId}.jsonl`)
+    const sidecarFile = path.join(ACTIVE_DIR, `${sessionId}.meta.json`)
+    const nowTs = Date.now()
+
+    // Append JSONL line first — if we crash between append and sidecar
+    // update, the detector can still rebuild sidecar from the JSONL.
+    fs.appendFileSync(sessionFile, JSON.stringify(entry) + '\n')
+
+    // Read-modify-write sidecar. Tolerate a missing or malformed file
+    // by treating it as a fresh session. We write via .tmp + rename
+    // for atomicity (see daemon/lib/sessions.js for the shared helper,
+    // but this hook stays dependency-free to keep startup cost near zero).
+    let meta = null
+    try {
+      meta = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'))
+    } catch {}
+    if (!meta || typeof meta !== 'object') {
+      meta = {
+        session_id: sessionId,
+        project,
+        status: 'active',
+        first_seen_ts: nowTs,
+        last_activity_ts: nowTs,
+        entry_count: 0,
+        has_summary: false,
+        source: 'hook',
+      }
+    }
+    meta.last_activity_ts = nowTs
+    meta.entry_count = (meta.entry_count || 0) + 1
+    // Keep project stable after first write — don't overwrite on later calls.
+    if (!meta.project) meta.project = project
+
+    const tmpPath = sidecarFile + '.tmp'
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(meta))
+      fs.renameSync(tmpPath, sidecarFile)
+    } catch {
+      // fire-and-forget; sidecar can be rebuilt from JSONL if needed
+      try { fs.unlinkSync(tmpPath) } catch {}
+    }
 
   } catch (err) {
     // Fire-and-forget: never fail the hook
