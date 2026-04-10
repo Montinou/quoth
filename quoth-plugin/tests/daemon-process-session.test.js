@@ -83,7 +83,8 @@ describe('processSessionFile — core dispatch', () => {
       extractFn: fakeExtract,
     })
 
-    const routineDir = path.join(home, 'trajectories', 'routine')
+    const today = new Date().toISOString().slice(0, 10)
+    const routineDir = path.join(home, 'trajectories', 'routine', today, 'quoth')
     const files = fs.readdirSync(routineDir)
     expect(files).toContain(`${sid}.jsonl`)
     expect(files).toContain(`${sid}.meta.json`)
@@ -112,7 +113,8 @@ describe('processSessionFile — core dispatch', () => {
       extractFn: fakeExtract,
     })
 
-    const routineDir = path.join(home, 'trajectories', 'routine')
+    const today = new Date().toISOString().slice(0, 10)
+    const routineDir = path.join(home, 'trajectories', 'routine', today, 'quoth')
     expect(fs.readdirSync(routineDir)).toContain(`${sid}.jsonl`)
   })
 
@@ -159,7 +161,8 @@ describe('processSessionFile — core dispatch', () => {
       extractFn: fakeExtract,
     })
 
-    const errorDir = path.join(home, 'trajectories', 'error')
+    const today = new Date().toISOString().slice(0, 10)
+    const errorDir = path.join(home, 'trajectories', 'error', today)
     expect(fs.readdirSync(errorDir)).toContain(`${sid}.jsonl`)
   })
 

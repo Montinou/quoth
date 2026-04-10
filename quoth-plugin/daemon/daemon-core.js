@@ -66,7 +66,7 @@ async function processSessionFile({ sessionFile, db, extractFn, log = noopLog })
       }
     } catch {}
     updateSidecarSafe(sessionFile, { status: 'error' })
-    try { await moveSessionFile(sessionFile, 'error', { dated: false }) } catch (moveErr) {
+    try { await moveSessionFile(sessionFile, 'error') } catch (moveErr) {
       log('error', 'move_to_error_failed', { sid, error: moveErr.message })
     }
     return
@@ -105,11 +105,7 @@ async function processSessionFile({ sessionFile, db, extractFn, log = noopLog })
     fact_count: facts.length,
   })
   try {
-    // done/ is dated+project-namespaced; routine/ is flat (no date subdir).
-    const moveOpts = bucket === 'done'
-      ? { project: summary.project || 'default' }
-      : { dated: false }
-    await moveSessionFile(sessionFile, bucket, moveOpts)
+    await moveSessionFile(sessionFile, bucket, { project: summary.project || 'default' })
   } catch (err) {
     log('error', `move_to_${bucket}_failed`, { sid, error: err.message })
   }

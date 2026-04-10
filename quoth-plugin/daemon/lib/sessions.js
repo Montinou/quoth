@@ -226,8 +226,8 @@ function moveSessionFile(firstArg, secondArg, thirdArg) {
   const d = date || new Date().toISOString().slice(0, 10)
   let toDir
   if (dated) {
-    // empty/ uses date only (no project subdir — spec §4.1)
-    toDir = to === 'empty'
+    // empty/ and error/ use date only (no project subdir — spec §4.1)
+    toDir = (to === 'empty' || to === 'error')
       ? path.join(trajectoriesDir, to, d)
       : path.join(trajectoriesDir, to, d, project || 'default')
   } else {
