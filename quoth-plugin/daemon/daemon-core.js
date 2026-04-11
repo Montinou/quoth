@@ -152,4 +152,208 @@ function inferProjectFromSidecar(jsonlPath) {
   }
 }
 
-module.exports = { processSessionFile }
+/**
+ * Claim-by-rename (spec §2.2 "Concurrency contract").
+ *
+ * Atomically renames `<dir>/<filename>` to
+ * `<dir>/<basename>.<pid>.<workerId>.jsonl` via POSIX `renameSync`. If the
+ * source file does not exist (another worker already claimed it, or the
+ * watcher fired after an unrelated delete), returns `null`. On success
+ * returns the absolute path to the claimed file.
+ *
+ * Why sync: `renameSync` is the only POSIX-atomic claim primitive in the
+ * fs API. Wrapping it in a Promise does not give us concurrency — JS is
+ * single-threaded — but it does let the worker loop await the result in a
+ * consistent style. The race is won by microtask ordering: the first call
+ * into this function succeeds, and every subsequent call on the same
+ * filename sees ENOENT.
+ */
+function tryClaim(dir, filename, workerId) {
+  const from = path.join(dir, filename)
+  const to = path.join(
+    dir,
+    filename.replace(/\.jsonl$/, `.${process.pid}.${workerId}.jsonl`),
+  )
+  try {
+    fs.renameSync(from, to)
+    return to
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Run `pipeline(item)` across `items` with at most `concurrency` in flight.
+ *
+ * Spec §2.2 "Worker Pool": each worker is an independent async loop that
+ * pulls from a shared queue via `queue.shift()`. `Array.prototype.shift`
+ * is atomic at the microtask level (single-threaded JS), so no lock is
+ * needed — the worst case is that two workers see a non-empty queue,
+ * both call `shift()`, and each ends up with a distinct item. Returning
+ * `undefined` from `shift()` is the termination signal for a worker.
+ *
+ * Pipeline errors are swallowed per-item: the caller is expected to log
+ * them inside the pipeline function itself (via `pipeline_errors` table).
+ * Raising here would halt the whole pool on a single bad session.
+ */
+async function runWorkerPool({ items, concurrency, pipeline }) {
+  const queue = Array.from(items)
+  async function worker() {
+    while (queue.length > 0) {
+      const item = queue.shift()
+      if (item === undefined) return
+      try {
+        await pipeline(item)
+      } catch {
+        // caller logs via pipeline_errors — don't crash the pool
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker))
+}
+
+// Lazy-loaded pipeline stage imports. Kept inside the function to avoid
+// side-effectful module loads at daemon-core import time (tests pin these
+// with fresh temp dirs via QUOTH_HOME).
+let _pipelineStages = null
+function _loadPipelineStages() {
+  if (_pipelineStages) return _pipelineStages
+  _pipelineStages = {
+    runTriage: require('./pipeline/triage.js').runTriage,
+    runExtract: require('./pipeline/extract.js').runExtract,
+    embedEntities: require('./pipeline/embed.js').embedEntities,
+    persistSession: require('./pipeline/persist.js').persistSession,
+  }
+  return _pipelineStages
+}
+
+// Module-level stage semaphores. Defaults match spec §2.2
+// "Concurrency-default rationale" and every value is tunable via env var.
+// The Semaphore class is pure / side-effect-free so importing it here is
+// safe at module load time.
+const { Semaphore } = require('./lib/semaphore.js')
+const _stageDefaults = {
+  triage: parseInt(process.env.QUOTH_TRIAGE_CONCURRENCY || '8', 10),
+  extract: parseInt(process.env.QUOTH_EXTRACT_CONCURRENCY || '3', 10),
+  embed: parseInt(process.env.QUOTH_EMBED_CONCURRENCY || '2', 10),
+  persist: 1, // HNSW.add not concurrency-safe; SQLite prefers single writer.
+}
+const sem = {
+  triage: new Semaphore(_stageDefaults.triage),
+  extract: new Semaphore(_stageDefaults.extract),
+  embed: new Semaphore(_stageDefaults.embed),
+  persist: new Semaphore(_stageDefaults.persist),
+}
+
+/**
+ * New pipeline orchestrator (spec §2.2). Chains
+ *   triage → (short-circuit on routine) → extract → embed → persist
+ * with each stage wrapped in its own Semaphore so that worker concurrency
+ * and stage concurrency are decoupled.
+ *
+ * Added alongside `processSessionFile` (legacy path). Task 13 will wire the
+ * file watcher to this function; the legacy function is removed in Task 24.
+ *
+ * Deps bag:
+ *   - hnsw: HNSW index handle (passed through to persistSession)
+ *   - llm:  { gemini, kimi } — callables matching the triage/extract DI
+ *           contract. Callers construct these with their own budget /
+ *           retry policy. If the fleet evolves to new providers, the
+ *           property names can grow without touching this function.
+ *   - log:  optional logger (level, msg, data)
+ *
+ * Returns the moved file path(s) on success, or `null` if the session was
+ * archived as routine / empty / error.
+ */
+async function processSessionWithPipeline(sessionFile, deps = {}) {
+  const { hnsw, llm = {}, log = noopLog } = deps
+  const sid = path.basename(sessionFile, '.jsonl').replace(/\.\d+\.[^.]+$/, '')
+  const stages = _loadPipelineStages()
+
+  let entries
+  try {
+    entries = readAllEntries(sessionFile)
+  } catch (err) {
+    log('error', 'read_entries_failed', { sid, error: err.message })
+    try { await moveSessionFile(sessionFile, 'error') } catch {}
+    return null
+  }
+
+  const toolEntries = entries.filter(e => e && e.event === 'tool_use')
+  if (toolEntries.length === 0) {
+    updateSidecarSafe(sessionFile, { status: 'empty' })
+    try { await moveSessionFile(sessionFile, 'empty') } catch (err) {
+      log('error', 'move_to_empty_failed', { sid, error: err.message })
+    }
+    return null
+  }
+
+  let summary = entries.find(e => e && e.event === 'session_summary') || null
+  if (!summary) {
+    summary = synthesizeSummaryFromEntries(toolEntries, {
+      session_id: sid,
+      project: inferProjectFromSidecar(sessionFile),
+    })
+  }
+  const project = summary.project || 'default'
+  const session = { session_id: sid, project, entries: toolEntries, summary }
+
+  try {
+    const triageOut = await sem.triage.run(() =>
+      stages.runTriage(session, { llm: llm.gemini }),
+    )
+    if (!triageOut || triageOut.productive === false) {
+      updateSidecarSafe(sessionFile, {
+        status: 'routine',
+        session_type: 'routine',
+        triage_reason: triageOut?.reason || 'not_productive',
+      })
+      try {
+        return await moveSessionFile(sessionFile, 'routine', { project })
+      } catch (err) {
+        log('error', 'move_to_routine_failed', { sid, error: err.message })
+        return null
+      }
+    }
+
+    const extractOut = await sem.extract.run(() =>
+      stages.runExtract(session, {
+        llm: llm.kimi,
+        urgency: triageOut.urgency,
+        suspected_kinds: triageOut.suspected_kinds,
+      }),
+    )
+    const entities = Array.isArray(extractOut?.entities) ? extractOut.entities : []
+
+    const embedded = await sem.embed.run(() => stages.embedEntities(entities))
+
+    await sem.persist.run(() =>
+      stages.persistSession({ sessionId: sid, entities: embedded }, { hnsw }),
+    )
+
+    updateSidecarSafe(sessionFile, {
+      status: 'done',
+      session_type: 'productive',
+      entity_count: embedded.length,
+    })
+    try {
+      return await moveSessionFile(sessionFile, 'done', { project })
+    } catch (err) {
+      log('error', 'move_to_done_failed', { sid, error: err.message })
+      return null
+    }
+  } catch (err) {
+    log('error', 'pipeline_failed', { sid, error: err.message })
+    updateSidecarSafe(sessionFile, { status: 'error' })
+    try { await moveSessionFile(sessionFile, 'error') } catch {}
+    return null
+  }
+}
+
+module.exports = {
+  processSessionFile,
+  tryClaim,
+  runWorkerPool,
+  processSessionWithPipeline,
+  sem,
+}
