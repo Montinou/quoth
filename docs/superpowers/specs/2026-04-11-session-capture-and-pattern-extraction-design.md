@@ -1,7 +1,7 @@
 # Session Capture & Pattern Extraction Redesign
 
 **Date**: 2026-04-11
-**Status**: Design (pending review)
+**Status**: Design (rev 2 — addressing reviewer feedback)
 **Author**: Claude (via brainstorming with Agustin)
 **Supersedes**: `2026-04-10-extract-v2-tool-calling.md`, `2026-04-10-session-isolation.md`, `2026-04-10-unified-injection-design.md` (partially), `2026-04-08-agent-type-pipeline-design.md`
 
@@ -144,6 +144,18 @@ The system is split into **three subsystems** that communicate through filesyste
 - Sanitization, sidecar update, atomic write semantics: unchanged from current implementation.
 - **Constraint**: hook must exit in <5 ms even when matcher-less, because it now fires 5–10× more often.
 
+**Dedup sidecar lifecycle:**
+
+| File | Path | Created | Updated | Moved with session? | Cleaned up |
+|---|---|---|---|---|---|
+| JSONL | `active/<sid>.jsonl` | First tool call | Each non-deduped tool call | Yes (atomic rename to processing/) | Archived to terminal bucket |
+| Meta sidecar | `active/<sid>.meta.json` | First tool call | Every tool call | Yes | Archived alongside JSONL |
+| **Dedup sidecar** | `active/<sid>.dedup` | First tool call | Every tool call (in-place write) | **Yes — moved with session-end rename** | **Deleted by daemon after triage stage** |
+
+The dedup sidecar is `<sid>.dedup` (single-line JSON: `{"last_hash": "<sha1>", "ts": <ms>}`). It moves with the JSONL/meta pair on session-end rename. The daemon deletes it after triage completes (or it gets moved to the terminal bucket and aged out by retention sweep).
+
+If the dedup file is missing or corrupt, capture treats the next entry as fresh (no dedup applied). If the dedup file disagrees with the JSONL tail (e.g. crash mid-write), capture rebuilds it from the last JSONL line on the next call.
+
 **`hooks/hook-dispatch.js session-end`** (small change, ~30 LOC delta)
 
 - Same atomic rename `active/<sid>.* → processing/<sid>.*`
@@ -160,8 +172,8 @@ This is where "process multiple sessions at the same time" lives. The design use
                          │
                          ▼
                   ┌─────────────┐
-                  │ FileWatcher │  fs.watch + 500ms debounce
-                  └──────┬──────┘
+                  │ FileWatcher │  fs.watch + 5s polling fallback
+                  └──────┬──────┘  (debounced 500ms)
                          │
                          ▼
                   ┌─────────────┐
@@ -196,6 +208,42 @@ This is where "process multiple sessions at the same time" lives. The design use
 - **PERSIST is serialized** (semaphore=1) because the pure-JS HNSW index isn't concurrency-safe and SQLite write contention thrashes disk under load. Persist is cheap (~10 ms per session), so serialization doesn't bottleneck.
 - **Claim-by-rename** prevents two workers from grabbing the same file: each worker tries `fs.renameSync('processing/<sid>.jsonl', 'processing/<sid>.<pid>.<wid>.jsonl')`, POSIX-atomic, fails fast on race.
 
+**Concurrency-default rationale (not just numbers):**
+
+| Default | Why |
+|---|---|
+| `QUOTH_CONCURRENCY=4` | Matches typical 4-vCPU dev machine; each worker ≈ one in-flight LLM call so no thread thrash. Tunable per machine. |
+| `QUOTH_TRIAGE_CONCURRENCY=8` | Vercel AI Gateway tier-1 rate limit is ~10 req/s for Gemini Flash Lite — 8 leaves headroom and matches expected burst on multi-session days. |
+| `QUOTH_EXTRACT_CONCURRENCY=3` | Moonshot Kimi K2.5 tier-1 rate limit is ~5 req/min — 3 in flight guarantees we never trip 429s under sustained load. |
+| `QUOTH_EMBED_CONCURRENCY=2` | Local MiniLM is CPU-bound; 2 in flight saturates a 4-core machine without starving the workers. |
+| `persist` semaphore = 1 | HNSW.add is not concurrency-safe; SQLite WAL prefers single writer. Persist is ~10 ms so serialization is invisible. |
+
+These are defaults, not contracts — every value is tunable via env var.
+
+**FileWatcher polling fallback (WSL2 reliability):**
+
+`fs.watch` is unreliable on WSL2 (the inotify→9P bridge drops events under load) and on network filesystems. The watcher therefore runs **two redundant detectors**:
+
+1. **Primary**: `fs.watch(processing/, {persistent: true, recursive: false})`. 500ms debounced. Best-case latency.
+2. **Polling fallback**: `setInterval(() => readdirSync('processing/'), QUOTH_POLL_INTERVAL_MS)` (default 5000ms). Computes the diff against an in-memory `Set` of known files. Any file the watcher missed gets enqueued by the polling sweep.
+
+Both detectors push into the same claim queue; the queue dedupes by filename. Polling is cheap (`readdirSync` on a directory with <100 files is sub-millisecond).
+
+A `pipeline_errors` row with `severity='degraded'` is written if the polling sweep ever picks up a file the watcher missed — so we can spot watcher reliability problems instead of papering over them.
+
+**Daemon SIGTERM / orphan recovery:**
+
+On SIGTERM the daemon does:
+1. Stop accepting new claims (close the watcher + polling).
+2. Wait up to `QUOTH_SHUTDOWN_GRACE_MS` (default 30000ms) for in-flight workers to finish their current persist call.
+3. For any worker still mid-extract at deadline: SIGTERM the LLM call (kills child processes for `claude -p` fallback), roll the file back to `processing/<sid>.jsonl` (strip the `<pid>.<wid>` suffix).
+4. Exit cleanly.
+
+On startup (`daemon.js` boot path):
+1. Scan `processing/` for any file matching `*.jsonl` with a `<pid>.<wid>` suffix (orphaned claims from a crashed previous run).
+2. For each orphan: if the suffixed PID is no longer alive (`process.kill(pid, 0)` throws `ESRCH`), strip the suffix via `fs.renameSync` and re-enqueue. Write `pipeline_errors` row `severity='warn', stage='claim', resolution='recovered'`.
+3. If the PID is still alive (e.g. another daemon instance), leave the file alone — that daemon owns it.
+
 **`daemon/pipeline/triage.js`** (new, ~150 LOC)
 
 - One LLM call per session, **Gemini 2.5 Flash Lite** via Vercel AI Gateway
@@ -220,16 +268,47 @@ This is where "process multiple sessions at the same time" lives. The design use
 - Already exists as `daemon/lib/embed.js`. Extended to embed all four entity kinds in a single batched MiniLM call (one MiniLM run per session, not per kind).
 - Output: 384d Float32Array per entity, written into `knowledge_entities.embedding` as a BLOB.
 
-**`daemon/pipeline/persist.js`** (new, ~200 LOC)
+**`daemon/pipeline/persist.js`** (new, ~250 LOC)
 
-- One SQLite transaction per session: insert entities into `knowledge_entities`, update HNSW index, write `pipeline_costs` row.
-- Single global lock (the persist semaphore in the daemon).
-- Failure mode: if persist throws, the file gets rolled back to `processing/<sid>.jsonl` (un-claimed) and re-queued.
+- One SQLite `BEGIN IMMEDIATE` transaction per session covering: entity upserts, `pipeline_costs` row, `pipeline_runs` row that records `(source_session_id, run_id, status='committed')`.
+- HNSW index update happens **inside** the same persist semaphore but **outside** the SQLite transaction. Persist sequence is:
+  1. `BEGIN IMMEDIATE`
+  2. Check `pipeline_runs` for existing committed row with this `source_session_id` → if found, this is a retry, abort persist as no-op (idempotent).
+  3. Upsert entities (see idempotency contract below)
+  4. Insert `pipeline_runs` row
+  5. `COMMIT`
+  6. HNSW.add for each new entity id
+  7. If HNSW.add throws on any id → write `pipeline_errors` row `severity='degraded'`, mark entity row `embedding_indexed=0`. Nightly sweep rebuilds the index from SQLite (see §5.8 HNSW recovery).
+- **Idempotency contract**: every entity id is `sha1(kind + canonical_content)[:16]` (16 hex chars, not 12 — see §3.1 collision math). Upsert key is `(id, source_session_id)`: if `(id, source_session_id)` already exists, no-op. If `id` exists from a *different* session, run a Bayesian merge (`alpha += 1`) and update `last_exposed_at`. This makes retries on the same session safe (alpha never double-increments).
+- **Single global lock**: the persist semaphore (cap=1) serializes all of the above. SQLite WAL handles single-writer semantics; HNSW pure-JS has no internal lock so the semaphore is what protects it.
+- **Failure modes**:
+  - SQLite txn aborts → file rolled back to `processing/<sid>.jsonl` (un-claimed via `fs.renameSync` strip-suffix), re-queued.
+  - HNSW.add throws after txn committed → entities are durable in SQLite, marked `embedding_indexed=0`, file moves to `done/` normally. Recovery is the nightly HNSW rebuild sweep.
+  - Process crash mid-persist → on next boot, persist's idempotency check sees the committed `pipeline_runs` row (or doesn't), and replays from a clean slate either way. **No alpha double-counting.**
 
-**`daemon/lib/llm-budget.js`** (new, ~100 LOC)
+**HNSW recovery on boot** (`daemon.js` startup hook): scan `knowledge_entities WHERE embedding_indexed=0 OR (id NOT IN HNSW)`. Re-add to HNSW. If `~/.quoth/hnsw.bin` is missing or corrupt on boot, rebuild the entire index from SQLite — durable source of truth is always SQLite, never the HNSW file. Boot-time rebuild target: <5 s for 100K rows.
 
-- Tracks `daily_spend_usd` in SQLite (`llm_budget` table, one row per UTC date)
-- Hard ceiling enforced **inside** the stage semaphores: if a triage call would push spend over `QUOTH_DAILY_LLM_BUDGET_USD` (default $1.00), the file gets re-queued and the daemon logs `budget_exhausted`. Budget resets at UTC midnight.
+**`daemon/lib/llm-budget.js`** (new, ~120 LOC)
+
+- Tracks `daily_spend_usd` in SQLite (`llm_budget` table, one row per UTC date).
+- **Race-free reservation pattern**: instead of "read spend → check limit → call LLM → write spend" (which races across 4 workers), the budget is **reserved** before the LLM call:
+
+  ```sql
+  -- Reserve budget atomically
+  BEGIN IMMEDIATE;
+  INSERT INTO llm_budget (date, spend_usd, ...) VALUES (?, 0, ...) ON CONFLICT DO NOTHING;
+  UPDATE llm_budget
+     SET spend_usd = spend_usd + ?,           -- estimated cost (max for this stage)
+         updated_at = ?
+   WHERE date = ?
+     AND spend_usd + ? <= ?;                  -- only update if under cap
+  -- changes() == 0 means we'd exceed cap; raise BudgetExhausted
+  COMMIT;
+  ```
+
+  After the LLM call returns, a second update reconciles `estimated_cost` → `actual_cost` (positive or negative delta). The conditional `UPDATE` is atomic under SQLite's `BEGIN IMMEDIATE` lock; only one worker can be inside at a time, so two workers cannot both observe "spend < cap" and both proceed.
+
+- If reservation fails (`BudgetExhausted`): file gets unclaimed (rename strip-suffix), `pipeline_errors` row written `severity='warn', stage='budget'`. Daemon sleeps 60 s before retrying that file (or until UTC midnight if multiple budget exhaustions in a row).
 - The "no caps on stored entities" decision stays true; the cap is on **LLM spend**, not stored output.
 
 ### 2.3 Inject layer
@@ -238,11 +317,11 @@ This is where "process multiple sessions at the same time" lives. The design use
 
 New endpoint: `GET /inject?prompt=<text>&kinds=<csv>&limit=<n>&project=<name>&agentType=<type>`
 
-- Embeds `prompt` via local MiniLM (cached: same prompt → same embedding for 60 s)
+- Embeds `prompt` via local MiniLM. **Cache key is `sha1(prompt + project + kinds_csv)`** (TTL 60 s) — never just `prompt`, so a project A prompt and an identical project B prompt cannot share a cached result and leak entities across projects.
 - HNSW search filtered by `kind IN (...)` and `(scope='global' OR scope='project:<name>')`
   - Pure-JS HNSW doesn't support filtered search natively, so we **over-fetch K×3** and filter in JS afterward
 - Re-ranks results by `recency_decay × confidence × cosine_similarity × kind_weight`
-- `kind_weight` defaults: `anti_pattern=1.5`, `decision=1.3`, `pattern=1.0`, `fact=0.8`. Tunable via `QUOTH_KIND_WEIGHT_*` env vars.
+- `kind_weight` defaults: `anti_pattern=1.5`, `decision=1.3`, `pattern=1.0`. **Facts are excluded from `/inject` entirely** — they are session-start-only (see `session-restore` below). The `fact` kind never appears in `/inject` results, so it gets no weight constant. Tunable via `QUOTH_KIND_WEIGHT_*` env vars for the three kinds that appear here.
 - Returns top-K JSON with `{kind, content, score, source_session_id}` per item
 
 **Existing endpoints kept**: `GET /sessions/:sid/status`, `GET /facts/:ns?limit=N`, `DELETE /facts/:ns/:topic`. New `GET /health` endpoint added (see §5.5).
@@ -251,9 +330,27 @@ New endpoint: `GET /inject?prompt=<text>&kinds=<csv>&limit=<n>&project=<name>&ag
 
 - Removes the eager daemon spawn-and-wait. New flow:
   1. Try to connect to daemon socket with **200 ms timeout** (`QUOTH_DAEMON_SOCKET_TIMEOUT_MS`)
-  2. If timeout/refused: return immediately, no injection. Spawn daemon detached so the *next* prompt has a warm daemon.
+  2. If timeout/refused: return immediately, no injection. Spawn daemon **fully detached** (see contract below) so the *next* prompt has a warm daemon.
   3. If connected: query `/inject` with the prompt text. Daemon responds with top-K. Inject as `additionalContext`.
 - The "Daemon failed to start within 5s" warning never appears because we never wait that long.
+
+**Daemon detach contract** (critical — Claude Code waits for the hook subprocess; a half-detached child keeps the hook alive and stalls the user's prompt):
+
+```js
+// hooks/hook-dispatch.js — spawnDaemonDetached()
+const child = spawn(process.execPath, [daemonScriptPath], {
+  detached: true,                      // becomes a process group leader
+  stdio: ['ignore', 'ignore', 'ignore'], // no inherited streams keeping us alive
+  cwd: os.homedir(),
+  env: { ...process.env, QUOTH_SPAWNED_BY_HOOK: '1' },
+})
+child.unref()                          // remove from event loop's reference count
+// hook returns immediately; child becomes orphan adopted by init/systemd
+```
+
+Test contract: a `tests/integration/daemon-detach.test.js` test spawns the hook subprocess, asserts the hook process exits within 250 ms even though the daemon child is still booting, and asserts the daemon process is alive 2 s later (orphaned successfully).
+
+If `detached + stdio: 'ignore' + unref()` are not all three present, the hook stalls. The test enforces this.
 
 **`hooks/hook-dispatch.js session-restore`** (small change)
 
@@ -284,7 +381,7 @@ One table holds patterns, decisions, anti-patterns, and facts. Same shape on SQL
 
 ```sql
 CREATE TABLE knowledge_entities (
-  id                TEXT PRIMARY KEY,             -- sha1(kind + content)[:12]
+  id                TEXT PRIMARY KEY,             -- sha1(kind + canonical_content)[:16]  -- 16 hex chars = 64 bits, collision risk negligible at 16M+ rows
   kind              TEXT NOT NULL,                -- 'pattern'|'decision'|'anti_pattern'|'fact'
   scope             TEXT NOT NULL,                -- 'global' | 'project:<name>'
   summary           TEXT NOT NULL,                -- ≤120 chars, for display & ranking
@@ -302,7 +399,8 @@ CREATE TABLE knowledge_entities (
   created_at        INTEGER NOT NULL,             -- ms epoch
   updated_at        INTEGER NOT NULL,
   last_exposed_at   INTEGER,                      -- last time injected into a hook context
-  exposure_count    INTEGER NOT NULL DEFAULT 0
+  exposure_count    INTEGER NOT NULL DEFAULT 0,
+  embedding_indexed INTEGER NOT NULL DEFAULT 0    -- 0 = not in HNSW (needs reindex), 1 = in HNSW
 );
 
 CREATE INDEX idx_ke_kind          ON knowledge_entities(kind);
@@ -444,7 +542,69 @@ LIMIT 15;
 
 ### 3.7 SaaS-side delta
 
-The Postgres schema in `src/lib/db/schema.ts` mirrors `knowledge_entities` 1:1. The existing Postgres `patterns` table is dropped. The `POST /api/v1/pipeline/process` endpoint stops returning pattern objects and starts returning `knowledge_entities` objects with `kind` set. API key auth, rate limiting, multi-tenancy (`org_id`) all stay.
+The plugin lands first; the SaaS update is a follow-up PR using this same spec. This subsection enumerates what the SaaS PR will touch so the plugin work doesn't accidentally break the cloud contract.
+
+**Postgres schema migration** (`src/lib/db/migrations/`):
+
+```sql
+-- New polymorphic table mirrors plugin schema 1:1, plus org_id
+CREATE TABLE knowledge_entities (
+  id                 TEXT NOT NULL,
+  org_id             UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL CHECK (kind IN ('pattern','decision','anti_pattern','fact')),
+  scope              TEXT NOT NULL,             -- 'global' | 'project:<name>'
+  summary            TEXT NOT NULL,
+  content            TEXT NOT NULL,
+  metadata           JSONB NOT NULL,
+  embedding          vector(384),               -- pgvector, MiniLM 384d
+  tags               JSONB NOT NULL DEFAULT '[]',
+  confidence         REAL NOT NULL DEFAULT 0.5,
+  alpha              REAL NOT NULL DEFAULT 1.0,
+  beta               REAL NOT NULL DEFAULT 1.0,
+  polarity           TEXT NOT NULL DEFAULT 'positive',
+  status             TEXT NOT NULL DEFAULT 'active',
+  source             TEXT NOT NULL,
+  source_session_id  TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_exposed_at    TIMESTAMPTZ,
+  exposure_count     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (org_id, id)
+);
+
+CREATE INDEX idx_ke_org_kind_scope ON knowledge_entities (org_id, kind, scope, status);
+CREATE INDEX idx_ke_org_session    ON knowledge_entities (org_id, source_session_id);
+CREATE INDEX idx_ke_embedding      ON knowledge_entities USING hnsw (embedding vector_cosine_ops)
+                                     WITH (m=16, ef_construction=200);
+```
+
+**Drizzle schema files (`src/lib/db/schema/`):**
+- DELETE: `patterns.ts`, `memory_entries.ts`, anything else under `src/lib/db/schema/` referencing the old shape
+- ADD: `knowledgeEntities.ts` mirroring the table above
+
+**API endpoints (`src/app/api/v1/`):**
+- DELETE: `patterns/route.ts`, `patterns/[id]/route.ts`, `patterns/promote/route.ts`, `patterns/search/route.ts`
+- REWRITE: `pipeline/process/route.ts` — input shape unchanged; output shape switches from `{patterns: [...], facts: [...]}` to `{entities: [{kind, scope, content, metadata, embedding, ...}]}`. Daemon's `pipeline-api.js` parses the new shape.
+- ADD: `entities/route.ts` (list/search by kind+scope), `entities/[id]/route.ts` (get/update/score), `health/route.ts` (per-org health)
+
+**Embedding provider:**
+- The cloud already uses voyage-4-lite — switch to **server-side MiniLM** to match the plugin's 384d embedding space. Without matched embeddings, pushing entities from plugin to cloud is incoherent (vectors don't compare). The migration is: replace `src/lib/embeddings/gateway.ts` voyage call with a call to a containerized MiniLM-L6 service (Vercel Function with the model loaded from a CDN-cached `/tmp/`).
+- Per the project Phase-2 roadmap, Venice.ai BGE-M3 was an alternative — explicitly rejected here because it's 1024d, doesn't match the plugin.
+
+**Auth/multi-tenancy:**
+- API key auth (`qth_*`) unchanged.
+- Rate limiting via Upstash unchanged.
+- Every query gets `WHERE org_id = $auth_org_id` injected at the route layer (no exceptions). The plugin's `scope` column stays as-is; multi-tenancy is the orthogonal `org_id` column.
+
+**Pipeline endpoint contract:**
+- Plugin's `daemon/lib/pipeline-api.js` POSTs `{ session_id, jsonl_text, project, scope_hint, urgency }` to `POST /api/v1/pipeline/process`.
+- Server runs the same TRIAGE → EXTRACT → EMBED pipeline (server-side, server-billed) and returns `{ entities: [...], cost_usd, urgency_used }`.
+- Plugin persists the returned entities locally (managed mode mirrors writes to local SQLite for offline reads).
+
+**SaaS PR is explicitly out of scope for the plugin landing.** It blocks on:
+1. Plugin spec landed and stable
+2. Server-side MiniLM rollout (separate spike)
+3. Migration playbook for any cloud customers with stored old `patterns` rows (greenfield is fine for plugin, **not** for the cloud — paying customers have data we can't drop)
 
 ## 4. Data Flow
 
@@ -619,39 +779,125 @@ Reads the JSONL from `error/`, runs the pipeline against it without writing to t
 
 Default off. Everything else lives in the DB and you query it via `quoth_health()`.
 
+### 5.8 HNSW recovery — durable source of truth is SQLite
+
+The HNSW index is treated as a **derived cache**, never as the source of truth. SQLite is the only durable store. This makes split-brain (SQLite committed, HNSW lost) recoverable rather than fatal.
+
+**Boot-time rebuild path:**
+
+```
+daemon.js boot
+  └─> hnsw.loadOrInit():
+        try { load ~/.quoth/hnsw.bin }
+        catch (corrupt or missing) {
+          // rebuild from SQLite
+          for batch of QUOTH_HNSW_REBUILD_BATCH rows:
+            SELECT id, embedding FROM knowledge_entities WHERE status='active' AND embedding IS NOT NULL
+            hnsw.add(id, embedding)
+            UPDATE knowledge_entities SET embedding_indexed=1 WHERE id=?
+          hnsw.save()
+        }
+```
+
+**Catch-up sweep** (runs at boot AND nightly):
+
+```sql
+SELECT id, embedding FROM knowledge_entities
+ WHERE status='active'
+   AND embedding IS NOT NULL
+   AND embedding_indexed = 0
+ LIMIT QUOTH_HNSW_REBUILD_BATCH;
+```
+
+For each row: `hnsw.add(id, embedding); UPDATE ... SET embedding_indexed=1`. Repeat until empty.
+
+**Rebuild target**: <5 s for 100K rows on a typical dev machine. If a 1M-row rebuild ever exceeds 60 s the daemon writes a `pipeline_errors` row `severity='warn', stage='daemon-startup'` so we can spot scaling problems before they bite.
+
+**MiniLM-failure recovery**: when `embed.js` throws on a session, persist still writes the entities (with `embedding_indexed=0`) and the catch-up sweep re-embeds them on the next nightly run. No entity is ever silently dropped because of a transient embedding failure.
+
 ## 6. Cleanup & Migration
 
 ### 6.1 Code to delete
 
-**Plugin (`quoth-plugin/`):**
+**Plugin (`quoth-plugin/`) — files to delete (verified to exist as of 2026-04-11):**
 ```
-daemon/lib/judge.js                       # pairwise judge subsystem (Gemini Flash)
+daemon/lib/judge.js                       # pairwise judge (Gemini Flash) — superseded by triage.js
 daemon/lib/snips.js                       # SNIPS cluster posterior
 daemon/lib/clustering.js                  # cluster-level Thompson sampling
 daemon/lib/bandit-v2.js                   # Thompson sampling cluster selector
-daemon/lib/sampler.js                     # if only used by bandit-v2
-daemon/lib/curation.js                    # 30d archive lifecycle
-daemon/lib/mutate.js                      # pattern mutation experiments (unused)
+daemon/lib/sampler.js                     # only used by bandit-v2
+daemon/lib/curation.js                    # 30d archive lifecycle (replaced by retention.js)
+daemon/lib/mutate.js                      # pattern mutation experiments
 daemon/lib/propensity.js                  # IPS reweighting
 daemon/lib/attribute.js                   # decision attribution v1
-daemon/lib/attribution.js                 # duplicate
-daemon/lib/doc-update-api.js              # cloud doc-updater (separate, out of scope)
-daemon/lib/doc-updater.js
-daemon/lib/doc-manifest.js
-daemon/lib/pull.js                        # if only used by cloud doc-updater
+daemon/lib/attribution.js                 # duplicate of attribute.js
+daemon/lib/doc-update-api.js              # cloud doc-updater (out of scope)
+daemon/lib/doc-updater.js                 # cloud doc-updater
+daemon/lib/doc-manifest.js                # cloud doc-updater
+daemon/lib/doc-chunks.js                  # doc chunk Thompson priors (cloud)
+daemon/lib/pull.js                        # used by cloud doc-updater
 daemon/lib/skill-extract.js               # skills subsystem removed
-daemon/pipeline/extract.js                # rewritten — see §2.2
+daemon/lib/scoring.js                     # legacy SNIPS-based scoring (replaced by §2.3 re-rank)
+daemon/lib/injection.js                   # legacy hierarchicalSelect; replaced by /inject endpoint
+daemon/lib/pattern-cache.js               # in-memory pattern cache (legacy)
+daemon/lib/flags.js                       # feature flags for retired subsystems
+daemon/lib/sessions.js                    # legacy sessions helper; subsumed by daemon-core
+daemon/lib/promote.js                     # legacy nightly promotion (rewritten under §11 future seam)
+daemon/lib/tool-executor.js               # if only used by judge/extract — verify before deletion
+daemon/lib/embed.js                       # MOVED to daemon/pipeline/embed.js, not deleted
 
-mcp/handlers/skills.js                    # skills MCP handlers removed
+mcp/handlers/intelligence.js              # intelligence_init/context/consolidate/stats/feedback removed
+mcp/handlers/skills.js                    # skills handlers removed
+mcp/lib/graph.js                          # PageRank intelligence graph (replaced by per-entity scoring)
 
 scripts/migrate-session-isolation.js      # one-shot migration, no longer needed
-scripts/setup.sh                          # legacy non-interactive installer
+scripts/migrate-v2-quality.js             # one-shot migration
+scripts/cleanup-patterns.js               # legacy patterns table cleanup
+scripts/reembed-patterns.js               # voyage-4-lite re-embedding
+scripts/backfill-embeddings.js            # voyage-4-lite backfill
+scripts/run-nightly-now.js                # legacy nightly trigger (rewritten)
+scripts/calibrate-dedup.js                # SNIPS dedup calibration
+scripts/ab-compare.js                     # bandit-v2 A/B compare
+scripts/setup.sh                          # legacy non-interactive installer (replaced by cli.js init)
 
-trajectories/processing-deferred/         # 5684 quarantined files
+# Tests for deleted subsystems (delete with the source they cover):
+tests/judge-v2.test.js
+tests/clustering.test.js
+tests/clustering-v2.test.js
+tests/bandit-v2.test.js
+tests/sampler.test.js
+tests/snips.test.js
+tests/curation.test.js
+tests/mutate.test.js
+tests/propensity.test.js
+tests/attribute.test.js
+tests/attribution.test.js
+tests/scoring.test.js
+tests/calibrate-dedup.test.js
+tests/skill-extract.test.js
+tests/doc-update-api.test.js
+tests/shared-pull.test.js
+tests/migrate-session-isolation.test.js
+tests/injection.test.js                    # legacy injection; replaced by /inject endpoint tests
+tests/injection-log.test.js
+tests/injection-tags.test.js
+tests/unified-injection.test.js
+tests/outcome-reranking.test.js            # SNIPS reranking
+tests/pattern-cache.test.js
+tests/pattern-outcomes.test.js
+tests/flags.test.js
+tests/sessions-helpers.test.js
+tests/routing-v2.test.js                   # if only tests the legacy routing pipeline
+tests/schema-v2.test.js                    # legacy schema migration test
+
+# Filesystem state (deleted on first boot of new daemon, with backup — see §6.6):
+trajectories/processing-deferred/         # ~5684 quarantined files from migration
 ~/.quoth/intelligence/*.json              # graph cache (regenerated)
 ~/.quoth/hnsw.bin                         # rebuilt empty
 ~/.quoth/memory.db                        # rebuilt empty
 ```
+
+**Verification before deletion**: each file in this list MUST be checked for inbound `require()`/`import` references with `Grep` before deletion. The implementation plan will include a "verify-no-callers" step per file. Some files (e.g. `tool-executor.js`) may turn out to be used by `extract.js` and need to be kept; they will be reclassified as "rewrite" rather than "delete" if so.
 
 **SaaS (`src/`):**
 ```
@@ -666,16 +912,23 @@ src/lib/embeddings/voyage.ts              # if voyage-4-lite still referenced
 
 | File | Change |
 |---|---|
-| `daemon/daemon.js` | Worker pool + stage semaphores + new pipeline orchestration |
-| `daemon/daemon-core.js` | `processSessionFile()` → `processSessionWithPipeline()`, async stages |
-| `daemon/db.js` | New schema, drop old tables, migration as a single one-shot |
-| `daemon/pipeline/extract.js` | Rewritten — four-entity Kimi prompt, urgency-based prompt depth |
+| `daemon/daemon.js` | Worker pool + stage semaphores + polling fallback + SIGTERM handler + orphan recovery |
+| `daemon/daemon-core.js` | `processSessionFile()` → `processSessionWithPipeline()`, async stages, persist serialization |
+| `daemon/db.js` | New schema, drop old tables, migration as a single one-shot, HNSW boot rebuild |
+| `daemon/pipeline/extract.js` | Rewritten — four-entity Kimi prompt, urgency-tuned prompt depth (`extract.js` is **only** in this rewrite list, not in §6.1 delete list) |
+| `daemon/pipeline/embed.js` | New file (moved from `daemon/lib/embed.js`); batched 4-kind MiniLM call |
 | `daemon/lib/llm.js` | Keep Kimi + Gemini Flash Lite + claude -p; remove judge code paths |
 | `daemon/lib/query-server.js` | Add `/inject`, `/health`; existing endpoints stay |
-| `hooks/trajectory-capture.js` | Matcher-less + dedup |
-| `hooks/hook-dispatch.js` | route hook fast-path; session-restore drops pattern injection; subagent-start uses /inject |
+| `daemon/lib/llm-budget.js` | New file — race-free reservation pattern (see §2.2) |
+| `daemon/lib/hnsw.js` | Add boot rebuild + per-id reindex helper |
+| `daemon/retention.js` | Add HNSW reindex sweep; honor new env vars |
+| `daemon/stale-detector.js` | Honor new orphan-recovery contract; no logic change |
+| `hooks/trajectory-capture.js` | Matcher-less + dedup sidecar lifecycle |
+| `hooks/hook-dispatch.js` | route hook fast-path + detach contract; session-restore drops pattern injection; subagent-start uses /inject |
 | `mcp/handlers/patterns.js` | Renamed → `entities.js`; tools renamed (see 6.3) |
-| `scripts/cli.js` | `init` wizard updated for new env vars |
+| `mcp/handlers/index.js` | Wire up new handlers, drop intelligence/skills handlers |
+| `mcp/lib/routing.js` | Keep keyword routing (in scope, used by `route` hook) |
+| `scripts/cli.js` | `init` wizard updated for new env vars + reset prompt |
 
 ### 6.3 MCP tool migration
 
@@ -705,7 +958,16 @@ src/lib/embeddings/voyage.ts              # if voyage-4-lite still referenced
 - `quoth_health()`
 - `quoth_replay_session(session_id)`
 
-**Net count**: 22 → ~14 tools.
+**Net count math (no hand-wave):**
+
+| Group | Tools |
+|---|---|
+| Kept | `quoth_log_outcome`, `quoth_daemon_status`, `quoth_route_task`, `quoth_agent_register`, `quoth_agent_heartbeat`, `quoth_agent_list`, `quoth_assign_task` (7) |
+| Renamed (entity tools) | `quoth_score_entity`, `quoth_top_entities`, `quoth_search_entities`, `quoth_promote_entity` (4) |
+| New | `quoth_recall_decisions`, `quoth_recall_anti_patterns`, `quoth_log_decision`, `quoth_log_anti_pattern`, `quoth_recall_global`, `quoth_health`, `quoth_replay_session` (7) |
+| **Total** | **18** |
+
+22 → 18 tools (down by 4 net: deleted 11 — `score_pattern`/`top_patterns`/`search_patterns`/`project_patterns`/`promote_global`/`seed_from_exolar`/`propose_update`/`ingest_trajectory`/`extract_skill`/`list_skills`/`intelligence_*` family/etc — added 7, kept 7, renamed 4 in place).
 
 ### 6.4 Env vars
 
@@ -730,7 +992,10 @@ QUOTH_DAEMON_SOCKET_TIMEOUT_MS=200    # how long /inject waits for daemon
 QUOTH_KIND_WEIGHT_PATTERN=1.0
 QUOTH_KIND_WEIGHT_DECISION=1.3
 QUOTH_KIND_WEIGHT_ANTI_PATTERN=1.5
-QUOTH_KIND_WEIGHT_FACT=0.8
+# (no QUOTH_KIND_WEIGHT_FACT — facts are session-start only, never re-ranked)
+QUOTH_POLL_INTERVAL_MS=5000           # FileWatcher polling fallback interval
+QUOTH_SHUTDOWN_GRACE_MS=30000         # SIGTERM grace period before force-rollback
+QUOTH_HNSW_REBUILD_BATCH=500          # boot-time index rebuild batch size
 ```
 
 **Kept:**
@@ -757,19 +1022,53 @@ QUOTH_MANAGED_LOCAL_BACKGROUND
 - `2026-04-09-intent-outcome-temporal.md`
 - Any spec referencing JUDGE→DISTILL→CONSOLIDATE, bandit-v2, SNIPS, voyage-4-lite
 
-**Verification step**: `scripts/verify-cleanup.sh` greps the entire repo (excluding `_archive/`) for stale terms — `JUDGE`, `DISTILL`, `CONSOLIDATE`, `voyage-4-lite`, `bandit-v2`, `SNIPS`, `judge_queue`, `cluster_posterior`. Fails CI if any references remain.
+**Verification step**: `scripts/verify-cleanup.sh` greps the repo for stale terms — `JUDGE`, `DISTILL`, `CONSOLIDATE`, `voyage-4-lite`, `bandit-v2`, `SNIPS`, `judge_queue`, `cluster_posterior`. Fails CI if any references remain.
+
+**Exclusion list (mandatory — without it the script self-fails on this very spec):**
+
+```bash
+# scripts/verify-cleanup.sh
+EXCLUDE_PATHS=(
+  '_archive/'                                                    # archived old specs/code
+  'docs/superpowers/specs/archive/'                              # archived spec dir
+  'docs/superpowers/specs/2026-04-11-session-capture-and-pattern-extraction-design.md'  # this spec doc
+  'docs/superpowers/plans/'                                      # implementation plans reference old terms by necessity
+  'docs/superpowers/implementations/'                            # implementation logs
+  'CHANGELOG.md'                                                 # historical changelog
+  '.git/'
+  'node_modules/'
+  'tests/migration/'                                             # migration tests reference old schema by name
+  'scripts/verify-cleanup.sh'                                    # the script itself contains the term list
+)
+
+STALE_TERMS=(
+  '\bJUDGE\b'                                                    # word-boundary so we don't match `judge_queue` substrings outside the term list
+  '\bDISTILL\b'
+  '\bCONSOLIDATE\b'
+  'voyage-4-lite'
+  'bandit-v2'
+  '\bSNIPS\b'
+  'judge_queue'
+  'cluster_posterior'
+)
+```
+
+The script must fail loudly if any of these terms appear outside the exclusion list. CI runs this in the integration test job.
 
 ### 6.6 Cutover sequence
 
-1. Implement new code on a feature branch (no deletion yet)
-2. Run new daemon against a wiped `~/.quoth-test/` in a sandbox
-3. Verify capture/extract/inject end-to-end on real sessions
-4. Run `verify-cleanup.sh` — should still fail (old code present)
-5. Delete old files in one commit
-6. Run `verify-cleanup.sh` — should pass
-7. Wipe production `~/.quoth/` (with explicit user confirm)
-8. Restart daemon on new code
-9. SaaS deploys in a follow-up PR using the same spec
+1. Implement new code on a feature branch (no deletion yet).
+2. Run new daemon against a wiped `~/.quoth-test/` in a sandbox.
+3. Verify capture/extract/inject end-to-end on real sessions.
+4. Run `verify-cleanup.sh` — should still fail (old code present).
+5. Delete old files in one commit (per the §6.1 list, after `Grep` confirms zero callers).
+6. Run `verify-cleanup.sh` — should pass.
+7. **Backup before reset** — `cli.js init` (or a new `cli.js reset` subcommand) tars existing `~/.quoth/` to `~/.quoth-backup-<ISOdate>.tar.gz` before wiping. The tarball is **not** auto-deleted; the operator removes it manually after verifying the new daemon is healthy. The `cli.js init` prompt explicitly says "this creates ~/.quoth-backup-<date>.tar.gz; the operator is responsible for cleaning it up."
+8. Wipe production `~/.quoth/` (with explicit user confirm; backup exists).
+9. Restart daemon on new code.
+10. Verify health: `quoth_health()` returns clean state, first session round-trips through capture → extract → done/, first prompt after a session-end successfully injects.
+11. **Rollback path**: if health check fails, kill daemon, `tar -xzf ~/.quoth-backup-<date>.tar.gz -C ~/`, restart old daemon binary (kept in `_archive/` for one release cycle).
+12. SaaS deploys in a follow-up PR using the same spec.
 
 ### 6.7 Archive directories
 
@@ -795,17 +1094,23 @@ Archive directories are ignored by `verify-cleanup.sh`. Git history preserves ev
 - `matcher-less-perf.test.js` — 1000 PostToolUse calls in <100 ms total
 
 **Pipeline stages (`tests/unit/pipeline/`):**
-- `triage.test.js` — fake LLM returns canned responses; routing decisions verified
-- `extract.test.js` — fake Kimi returns each entity shape; parser drops malformed; project name from sidecar overrides LLM
-- `embed.test.js` — batched call covers all 4 kinds in one shot
-- `persist.test.js` — duplicate id strengthens; new id inserts; HNSW.add called once per new id; rollback on partial failure
-- `llm-budget.test.js` — spend accumulates; midnight reset; over-limit triggers requeue
+- `triage.test.js` — fake LLM returns canned responses; routing decisions verified; retry-on-error path covered
+- `extract.test.js` — fake Kimi returns each entity shape; parser drops malformed; **project name from sidecar overrides LLM** (anti-leak guarantee); invalid-JSON retry path; both-Kimi-and-fallback-fail → archived to error/
+- `embed.test.js` — batched call covers all 4 kinds in one shot; MiniLM throw → entities persisted with `embedding_indexed=0`
+- `persist.test.js` — duplicate id strengthens; new id inserts; HNSW.add called once per new id; rollback on partial failure; **idempotency: persist same session twice → alpha NOT double-incremented** (regression test for the critical issue); **crash mid-persist: SIGKILL between txn commit and HNSW.add → next boot rebuilds index, no data loss**
+- `llm-budget.test.js` — spend accumulates; midnight reset; over-limit triggers requeue; **race test: 4 parallel reservations against budget=$0.005 cost=$0.002 → exactly 2 succeed**; reconciliation delta (estimated → actual)
 
 **Daemon orchestration (`tests/unit/daemon/`):**
 - `worker-pool.test.js` — N workers each pull from claim queue; no double-claim
 - `stage-semaphores.test.js` — 8 concurrent triages allowed, 9th waits; extract semaphore=3 doesn't block triage of 4 more
 - `claim-by-rename.test.js` — two workers race → exactly one wins
 - `persist-serialization.test.js` — 10 concurrent persist calls execute one at a time
+- `polling-fallback.test.js` — drop a file into `processing/` while `fs.watch` is mocked dead → polling sweep catches it within `QUOTH_POLL_INTERVAL_MS + 200ms`; `pipeline_errors` row written with `severity='degraded'`
+- `orphan-recovery.test.js` — write `processing/<sid>.<dead-pid>.<wid>.jsonl` → daemon boot sees orphan with non-existent PID, strips suffix, re-enqueues; live-PID orphan is left alone
+- `sigterm-graceful.test.js` — start daemon with one in-flight extract, send SIGTERM, assert exit within `QUOTH_SHUTDOWN_GRACE_MS`, file rolled back to `processing/<sid>.jsonl`
+- `daemon-detach.test.js` — spawn `hook-dispatch.js route` from a child_process, assert hook subprocess exits within 250 ms even when daemon child is still booting, daemon process alive 2 s later
+- `hnsw-rebuild-on-boot.test.js` — populate DB with N entities, delete `hnsw.bin`, boot daemon, assert all N appear in HNSW search within 5 s
+- `startup-failed-flag.test.js` — corrupt `~/.quoth/memory.db`, boot daemon → exit code 1 + `STARTUP_FAILED` flag file → next hook run reads flag and prints one-line warning
 
 **Inject (`tests/unit/inject/`):**
 - `kind-weight-ranking.test.js` — anti-patterns rank above patterns at equal cosine score
