@@ -42,12 +42,24 @@ function sha1(s) {
  * @param {object}   opts.db               - db handle from createDb()
  * @param {function} [opts.log]            - log(level, msg, meta) sink
  * @param {?string}  [opts.trajectoriesDir] - absolute path to ~/.quoth/trajectories
- *                                            (required for /sessions/:sid/status)
+ *                                            (required for /sessions/:sid/status
+ *                                            and /health stuck_files scan)
+ * @param {function} [opts.embedPrompt]    - (text) => Promise<Float32Array|null>
+ *                                            DI'd for /inject tests
+ * @param {function} [opts.getDaemonState] - () => { queue_depth, in_flight }
+ *                                            DI'd for /health; wired by daemon-core
+ *                                            in prod (Task 17). Defaults to zeros.
  * @returns {import('http').Server}
  */
-function buildQueryServer({ db, log = () => {}, trajectoriesDir = null, embedPrompt = null } = {}) {
+function buildQueryServer({
+  db,
+  log = () => {},
+  trajectoriesDir = null,
+  embedPrompt = null,
+  getDaemonState = () => ({ queue_depth: 0, in_flight: 0 }),
+} = {}) {
   return http.createServer((req, res) =>
-    _handleRequest(req, res, db, log, { trajectoriesDir, embedPrompt })
+    _handleRequest(req, res, db, log, { trajectoriesDir, embedPrompt, getDaemonState })
   )
 }
 
@@ -101,12 +113,17 @@ function _handleRequest(req, res, db, log, ctx = {}) {
   res.setHeader('Content-Type', 'application/json')
 
   if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200)
-    res.end(JSON.stringify({
-      status: 'ok',
-      pid: process.pid,
-      uptime: process.uptime(),
-    }))
+    try {
+      const body = handleHealth(db, ctx)
+      res.writeHead(200)
+      res.end(JSON.stringify(body))
+    } catch (err) {
+      log('error', '/health handler error', { error: err && err.message })
+      if (!res.writableEnded) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ error: 'Internal error' }))
+      }
+    }
     return
   }
 
@@ -434,6 +451,146 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
 
   res.writeHead(200)
   res.end(JSON.stringify({ results: scored }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /health — spec §5.5 observability surface
+// ---------------------------------------------------------------------------
+//
+// Synchronous aggregation of daemon state, last-24h pipeline_errors by
+// stage+severity, today's llm_budget row, stuck processing/ files, and the
+// five most recent error/degraded rows. Everything fits in a handful of
+// prepared statements — no embedding, no HNSW, no timeout wrapper needed.
+
+const HEALTH_STAGES = ['triage', 'extract', 'persist']
+const HEALTH_SEVERITIES = ['error', 'warn', 'degraded']
+
+function _healthUtcDate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function _healthBudgetLimit() {
+  return parseFloat(process.env.QUOTH_DAILY_LLM_BUDGET_USD ?? '1.00')
+}
+
+function _healthProcessingMaxAgeHours() {
+  const v = parseFloat(process.env.QUOTH_PROCESSING_MAX_AGE_HOURS ?? '24')
+  return Number.isFinite(v) && v > 0 ? v : 24
+}
+
+function _healthErrors24h(db) {
+  // Initialize the nested shape with zeros so every stage/severity is present.
+  const out = {}
+  for (const stage of HEALTH_STAGES) {
+    out[stage] = { error: 0, warn: 0, degraded: 0 }
+  }
+  const since = Date.now() - 86_400_000
+  const rows = db.prepare(`
+    SELECT stage, severity, COUNT(*) AS count
+      FROM pipeline_errors
+     WHERE ts IS NOT NULL
+       AND ts >= ?
+       AND stage IN ('triage', 'extract', 'persist')
+     GROUP BY stage, severity
+  `).all(since)
+  for (const r of rows) {
+    if (!out[r.stage]) continue // defensive; stage IN (...) already filters
+    if (!HEALTH_SEVERITIES.includes(r.severity)) continue // drop unknowns silently
+    out[r.stage][r.severity] = r.count
+  }
+  return out
+}
+
+function _healthBudget(db) {
+  const date = _healthUtcDate()
+  const limit_usd = _healthBudgetLimit()
+  let row
+  try {
+    row = db.prepare(`SELECT date, spend_usd FROM llm_budget WHERE date = ?`).get(date)
+  } catch {
+    row = null
+  }
+  if (!row) {
+    return { date, spend_usd: 0, limit_usd }
+  }
+  return {
+    date: row.date,
+    spend_usd: Number(row.spend_usd) || 0,
+    limit_usd,
+  }
+}
+
+function _healthStuckFiles(trajectoriesDir) {
+  if (!trajectoriesDir) return []
+  const procDir = path.join(trajectoriesDir, 'processing')
+  let entries
+  try {
+    entries = fs.readdirSync(procDir)
+  } catch {
+    return []
+  }
+  const thresholdMs = _healthProcessingMaxAgeHours() * 3600_000
+  const now = Date.now()
+  const stuck = []
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue // ignore .meta.json sidecars + anything else
+    const full = path.join(procDir, name)
+    let stat
+    try { stat = fs.statSync(full) } catch { continue }
+    if (!stat.isFile()) continue
+    const ageMs = now - stat.mtimeMs
+    if (ageMs < thresholdMs) continue
+    // Strip `.jsonl` and any `.PID.WORKER` claim suffix (Task 12/13 naming):
+    //   abc-123.jsonl                → abc-123
+    //   abc-123.12345.worker-2.jsonl → abc-123
+    let sid = name.slice(0, -'.jsonl'.length)
+    const claimMatch = sid.match(/^(.*?)\.\d+\.[^.]+$/)
+    if (claimMatch) sid = claimMatch[1]
+    stuck.push({
+      session_id: sid,
+      age_hours: ageMs / 3600_000,
+    })
+  }
+  return stuck
+}
+
+function _healthRecentFailures(db) {
+  try {
+    const rows = db.prepare(`
+      SELECT ts, stage, severity, session_id, error_message
+        FROM pipeline_errors
+       WHERE severity IN ('error', 'degraded')
+       ORDER BY ts DESC
+       LIMIT 5
+    `).all()
+    return rows.map((r) => ({
+      ts: r.ts,
+      stage: r.stage,
+      severity: r.severity,
+      session_id: r.session_id,
+      error_message: r.error_message,
+    }))
+  } catch {
+    return []
+  }
+}
+
+function handleHealth(db, ctx) {
+  const daemonState = (ctx && ctx.getDaemonState)
+    ? ctx.getDaemonState()
+    : { queue_depth: 0, in_flight: 0 }
+  return {
+    daemon: {
+      pid: process.pid,
+      uptime_s: Math.floor(process.uptime()),
+      queue_depth: Number(daemonState.queue_depth) || 0,
+      in_flight: Number(daemonState.in_flight) || 0,
+    },
+    errors_24h: _healthErrors24h(db),
+    budget: _healthBudget(db),
+    stuck_files: _healthStuckFiles(ctx && ctx.trajectoriesDir),
+    recent_failures: _healthRecentFailures(db),
+  }
 }
 
 function findSessionInBuckets(sid, trajectoriesDir) {
