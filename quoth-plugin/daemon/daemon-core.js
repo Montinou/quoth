@@ -1,7 +1,9 @@
 'use strict'
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
+const { EventEmitter } = require('events')
 const {
   readAllEntries,
   synthesizeSummaryFromEntries,
@@ -350,10 +352,261 @@ async function processSessionWithPipeline(sessionFile, deps = {}) {
   }
 }
 
+/**
+ * FileWatcher with polling fallback (spec §2.2 "FileWatcher polling fallback").
+ *
+ * Runs two redundant detectors against a directory:
+ *   1. `fs.watch` (primary, event-driven; can be disabled via opts.disableFsWatch)
+ *   2. `setInterval(readdirSync)` polling fallback (default 5000 ms)
+ *
+ * On start, an in-memory `knownFiles` Set is seeded from `readdirSync(dir)`
+ * BEFORE either detector runs — the "warmup" — so pre-existing files never
+ * fire events (they would otherwise look like "the watcher missed these"
+ * and pollute pipeline_errors). The first polling tick after start is also
+ * marked as warmup and skips the `onDegraded` callback.
+ *
+ * `onDegraded` is invoked only when the polling sweep picks up a file that
+ * `fs.watch` never surfaced (i.e. real event loss). When `disableFsWatch` is
+ * true, polling IS the primary detector and degraded events are never fired.
+ *
+ * Emits `file` events with the basename (not full path). Consumers dedupe by
+ * filename at the claim layer (tryClaim).
+ */
+class FileWatcher extends EventEmitter {
+  constructor(dir, opts = {}) {
+    super()
+    this.dir = dir
+    this.pollIntervalMs = opts.pollIntervalMs ?? 5000
+    this.disableFsWatch = opts.disableFsWatch === true
+    this.onDegraded = typeof opts.onDegraded === 'function' ? opts.onDegraded : null
+    this.knownFiles = new Set()
+    // Files that fs.watch has surfaced since last poll — used to detect
+    // "polling saw it but fs.watch did not" = degraded event-loss signal.
+    this._watchSeen = new Set()
+    this._watcher = null
+    this._timer = null
+    this._warmupPollTickDone = false
+  }
+
+  async start() {
+    // Warmup: seed the known set with everything already in the directory
+    // so we never emit an event for pre-existing files.
+    try {
+      for (const f of fs.readdirSync(this.dir)) {
+        this.knownFiles.add(f)
+      }
+    } catch {
+      // Directory may not exist yet; polling will retry.
+    }
+
+    if (!this.disableFsWatch) {
+      try {
+        this._watcher = fs.watch(this.dir, { persistent: false }, (_event, filename) => {
+          if (!filename) return
+          this._watchSeen.add(filename)
+          this._maybeEmit(filename, { fromWatch: true })
+        })
+      } catch {
+        // fs.watch may fail on some filesystems; polling will carry us.
+        this._watcher = null
+      }
+    }
+
+    this._timer = setInterval(() => this._pollTick(), this.pollIntervalMs)
+    // Avoid blocking Node event loop exit in tests.
+    if (this._timer && typeof this._timer.unref === 'function') this._timer.unref()
+  }
+
+  _pollTick() {
+    let current
+    try {
+      current = fs.readdirSync(this.dir)
+    } catch {
+      return
+    }
+    const warmup = !this._warmupPollTickDone
+    for (const filename of current) {
+      if (this.knownFiles.has(filename)) continue
+      // New-to-us via polling. If fs.watch also saw it, that's not degraded.
+      const watchSawIt = this._watchSeen.has(filename)
+      if (
+        !warmup &&
+        !watchSawIt &&
+        !this.disableFsWatch &&
+        this.onDegraded
+      ) {
+        try {
+          this.onDegraded({ filename, dir: this.dir })
+        } catch {
+          // Callback failure must not break the watcher.
+        }
+      }
+      this._maybeEmit(filename, { fromWatch: false })
+    }
+    // Reset the per-tick watcher-saw bookkeeping — any fresh events arriving
+    // between ticks will re-populate it.
+    this._watchSeen.clear()
+    this._warmupPollTickDone = true
+  }
+
+  _maybeEmit(filename, _meta) {
+    if (this.knownFiles.has(filename)) return
+    this.knownFiles.add(filename)
+    this.emit('file', filename)
+  }
+
+  stop() {
+    if (this._watcher) {
+      try { this._watcher.close() } catch {}
+      this._watcher = null
+    }
+    if (this._timer) {
+      clearInterval(this._timer)
+      this._timer = null
+    }
+  }
+}
+
+/**
+ * Orphan recovery (spec §2.2 "SIGTERM / orphan recovery", boot path).
+ *
+ * Scans `dir` for files matching the claim-suffix pattern
+ * `<basename>.<pid>.<workerId>.jsonl`. For each, probes the PID with
+ * `process.kill(pid, 0)`:
+ *
+ *   - `ESRCH` (no such process)           → strip suffix via `fs.renameSync`
+ *   - alive / EPERM (foreign-owned alive) → leave alone
+ *   - any other error                     → leave alone (safer default)
+ *
+ * Files that do not match the `<base>.<pid-number>.<worker>.jsonl` shape are
+ * ignored entirely. Silent on success; returns the number of files recovered.
+ */
+function recoverOrphans(dir) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir)
+  } catch {
+    return 0
+  }
+  let recovered = 0
+  for (const filename of entries) {
+    if (!filename.endsWith('.jsonl')) continue
+    // Expect exactly `.${pid}.${worker}.jsonl` suffix: at least 4 dot-parts.
+    const base = filename.slice(0, -'.jsonl'.length)
+    const parts = base.split('.')
+    if (parts.length < 3) continue
+    const workerPart = parts[parts.length - 1]
+    const pidPart = parts[parts.length - 2]
+    if (!/^\d+$/.test(pidPart)) continue
+    if (!workerPart || /^\d+$/.test(workerPart)) {
+      // worker id should be non-numeric (e.g. "w1") so we don't rewrite
+      // legitimate timestamp-suffixed files. Be conservative.
+      continue
+    }
+    const pid = parseInt(pidPart, 10)
+    let alive
+    try {
+      process.kill(pid, 0)
+      alive = true
+    } catch (err) {
+      if (err && err.code === 'ESRCH') alive = false
+      else if (err && err.code === 'EPERM') alive = true
+      else alive = true // unknown — play it safe and leave it
+    }
+    if (alive) continue
+    const originalBase = parts.slice(0, parts.length - 2).join('.')
+    const original = `${originalBase}.jsonl`
+    const from = path.join(dir, filename)
+    const to = path.join(dir, original)
+    try {
+      fs.renameSync(from, to)
+      recovered += 1
+    } catch {
+      // If rename fails (target exists, permissions, etc.) leave the orphan
+      // on disk so a later sweep can try again.
+    }
+  }
+  return recovered
+}
+
+/**
+ * Graceful shutdown (spec §2.2 "SIGTERM / orphan recovery", shutdown path).
+ *
+ * Waits up to `graceMs` for in-flight claims to drain, then invokes
+ * `state.rollback(claim)` for any claim still in `state.inFlight`. The
+ * rollback callback is expected to `fs.renameSync` the claimed file back
+ * to its original name so a subsequent daemon boot can re-pick it up.
+ *
+ * This function is intentionally minimal — the real production wiring
+ * (racing worker-pool drain against the grace timer, killing LLM child
+ * processes, closing DB handles) lives in the daemon.js boot path. This
+ * helper isolates the deadline + rollback-callback contract so it can be
+ * unit-tested and reused.
+ */
+async function gracefulShutdown(state, opts = {}) {
+  const graceMs = opts.graceMs ?? 30000
+  await new Promise(resolve => setTimeout(resolve, graceMs))
+  const stillInFlight = Array.isArray(state && state.inFlight) ? state.inFlight : []
+  if (typeof state?.rollback !== 'function') return
+  for (const claim of stillInFlight) {
+    try {
+      state.rollback(claim)
+    } catch {
+      // rollback failure must not prevent rolling back the rest
+    }
+  }
+}
+
+/**
+ * Startup-failure sentinel (spec §7 error handling table,
+ * "daemon-startup → DB migration failed → leave a `~/.quoth/STARTUP_FAILED`
+ * flag file").
+ *
+ * On a fatal boot error the daemon writes the reason string verbatim to
+ * `${QUOTH_HOME}/STARTUP_FAILED`. The next hook invocation reads the file
+ * via `checkStartupFlag()` and surfaces a one-line warning. The flag is
+ * sticky — it persists until an operator clears it (or a successful boot
+ * removes it).
+ */
+function _resolveQuothHome() {
+  return process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
+}
+
+function writeStartupFailed(reason) {
+  const home = _resolveQuothHome()
+  try {
+    fs.mkdirSync(home, { recursive: true })
+  } catch {}
+  const flagPath = path.join(home, 'STARTUP_FAILED')
+  const body = `${new Date().toISOString()} ${String(reason)}\n`
+  try {
+    fs.writeFileSync(flagPath, body)
+  } catch {
+    // Best-effort; if we cannot write the flag the caller is already
+    // exiting with a non-zero code.
+  }
+}
+
+function checkStartupFlag() {
+  const home = _resolveQuothHome()
+  const flagPath = path.join(home, 'STARTUP_FAILED')
+  try {
+    if (!fs.existsSync(flagPath)) return null
+    return fs.readFileSync(flagPath, 'utf8')
+  } catch {
+    return null
+  }
+}
+
 module.exports = {
   processSessionFile,
   tryClaim,
   runWorkerPool,
   processSessionWithPipeline,
   sem,
+  FileWatcher,
+  recoverOrphans,
+  gracefulShutdown,
+  writeStartupFailed,
+  checkStartupFlag,
 }
