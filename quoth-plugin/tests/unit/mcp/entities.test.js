@@ -96,6 +96,30 @@ describe('mcp/handlers/entities', () => {
     })
   })
 
+  describe('error paths', () => {
+    it('quoth_search_entities returns fail-open shape when daemon socket is missing', async () => {
+      const { entities, db } = loadFresh()
+      // No server stood up under this home → socket does not exist.
+      const res = await entities.handle('quoth_search_entities', { query: 'x' }, db)
+      expect(res.count).toBe(0)
+      expect(res.entities).toEqual([])
+      expect(res.error).toBeTruthy()
+    })
+    it('quoth_score_entity rejects unknown outcome values', async () => {
+      const { entities, ke, db } = loadFresh()
+      const e = ke.upsertEntity({ kind: 'pattern', scope: 'global', summary: 's', content: 'cX', metadata: {}, tags: [], source: 'extracted', source_session_id: 'sX' })
+      const res = await entities.handle('quoth_score_entity', { id: e.id, outcome: 'maybe' }, db)
+      expect(res.error).toMatch(/outcome/i)
+    })
+    it('quoth_top_entities coerces string limit to number', async () => {
+      const { entities, ke, db } = loadFresh()
+      ke.upsertEntity({ kind: 'pattern', scope: 'global', summary: 'a', content: 'a', metadata: {}, tags: [], source: 'extracted', source_session_id: 'sa' })
+      ke.upsertEntity({ kind: 'pattern', scope: 'global', summary: 'b', content: 'b', metadata: {}, tags: [], source: 'extracted', source_session_id: 'sb' })
+      const res = await entities.handle('quoth_top_entities', { limit: '1' }, db)
+      expect(res.count).toBe(1)
+    })
+  })
+
   describe('quoth_score_entity', () => {
     it('applies Bayesian success update (alpha += 1)', async () => {
       const { entities, ke, db } = loadFresh()

@@ -27,16 +27,19 @@ const http = require('http')
 const path = require('path')
 const os = require('os')
 
-const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
-const SOCK_PATH = path.join(QUOTH_HOME, 'daemon.sock')
-const TRAJECTORIES_DIR = path.join(QUOTH_HOME, 'trajectories')
+const TRAJECTORIES_DIR = path.join(process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth'), 'trajectories')
 
 function daemonSocketPath() {
   // Recompute each call so test QUOTH_HOME changes are honored.
   return path.join(process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth'), 'daemon.sock')
 }
 
-function fetchDaemon(urlPath, timeoutMs = 1500) {
+function defaultTimeoutMs() {
+  const v = parseInt(process.env.QUOTH_MCP_DAEMON_TIMEOUT_MS ?? '1500', 10)
+  return Number.isFinite(v) && v > 0 ? v : 1500
+}
+
+function fetchDaemon(urlPath, timeoutMs = defaultTimeoutMs()) {
   return new Promise((resolve, reject) => {
     const req = http.request({
       socketPath: daemonSocketPath(),
@@ -67,8 +70,9 @@ function buildInjectUrl({ prompt, project, kinds, limit }) {
 }
 
 function canonicalizeDecision({ situation, options = [], choice, reasoning }) {
-  // Canonical content = what gets embedded. Include every material input so
-  // near-duplicate decisions collapse to the same id.
+  // Verbatim hash — no normalization. Two logs differing only in whitespace or
+  // case produce distinct ids. Acceptable because agent_logged decisions are
+  // rare and human-curated; the agent is responsible for canonical form.
   const opts = Array.isArray(options) ? options : []
   return [
     `situation: ${situation || ''}`,
@@ -228,7 +232,8 @@ async function handle(name, args, db) {
 
   switch (name) {
     case 'quoth_top_entities': {
-      const limit = Number.isFinite(args.limit) && args.limit > 0 ? args.limit : 5
+      const n = Number(args.limit)
+      const limit = Number.isFinite(n) && n > 0 ? n : 5
       let rows
       if (args.kind) {
         rows = ke.searchByKind(args.kind, limit)
@@ -387,9 +392,12 @@ async function handle(name, args, db) {
     }
 
     case 'quoth_replay_session': {
+      // TODO: spec §5.6 calls for re-running the pipeline in dry-run and
+      // returning a diff. This stub only reports file metadata. The full
+      // harness is out of scope for Task 20; `cli.js replay` is the canonical
+      // path once the pipeline exposes a dry-run mode.
       const sid = args.session_id
       if (!sid) return { error: 'session_id required', found: false }
-      // Search error/YYYY-MM-DD/ buckets for a matching JSONL.
       const errorRoot = path.join(TRAJECTORIES_DIR, 'error')
       let foundFile = null
       try {
@@ -399,13 +407,13 @@ async function handle(name, args, db) {
             if (fs.existsSync(candidate)) { foundFile = candidate; break }
           }
         }
-      } catch {}
+      } catch (err) { console.error('[quoth_replay_session] scan failed:', err.message) }
       if (!foundFile) return { session_id: sid, found: false }
       let entryCount = 0
       try {
         const content = fs.readFileSync(foundFile, 'utf8')
         entryCount = content.split('\n').filter((l) => l.trim().length > 0).length
-      } catch {}
+      } catch (err) { console.error('[quoth_replay_session] read failed:', err.message) }
       return {
         session_id: sid,
         found: true,
