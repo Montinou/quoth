@@ -719,15 +719,23 @@ async function runExtract(session, opts = {}) {
     // loop with strict=true. If not, drop out of the loop.
   }
 
-  // Anti-leak: the LLM cannot be trusted to set `project` or `scope` on entities.
-  // We authoritatively stamp scope from the sidecar session.project and scrub any
-  // project/scope fields the model tried to inject into metadata.
+  // Anti-leak: the LLM cannot be trusted to set `project`, `scope`, `source`,
+  // or `source_session_id` on entities. We authoritatively stamp them from the
+  // sidecar session and scrub any project/scope fields the model tried to
+  // inject into metadata. Persist requires source + source_session_id to be
+  // non-null (spec §3.1 source enum) so we stamp 'extracted' here.
   const scope = `project:${project ?? 'unknown'}`
   const cleanEntities = lastEntities.map(e => {
     const meta = { ...(e.metadata || {}) }
     delete meta.project
     delete meta.scope
-    return { ...e, scope, metadata: meta }
+    return {
+      ...e,
+      scope,
+      metadata: meta,
+      source: 'extracted',
+      source_session_id: session_id,
+    }
   })
 
   reconcile({ stage: 'extract', estimated_usd, actual_usd: actualCost })

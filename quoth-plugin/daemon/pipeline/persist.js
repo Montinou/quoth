@@ -28,6 +28,18 @@
 const { openDb, logPipelineError } = require('../db.js')
 const { computeEntityId, markIndexed } = require('../lib/knowledge-entities.js')
 
+// The `embedding BLOB` column requires a Buffer / TypedArray for binding.
+// better-sqlite3 treats a plain JS array as a "bound array" and spreads its
+// elements into sequential placeholders, producing "Too many parameter values
+// were provided". `embed.js` returns plain arrays, so we normalize here.
+function toBlobEmbedding(v) {
+  if (v == null) return null
+  if (Buffer.isBuffer(v)) return v
+  if (ArrayBuffer.isView(v)) return Buffer.from(v.buffer, v.byteOffset, v.byteLength)
+  if (Array.isArray(v)) return Buffer.from(new Float32Array(v).buffer)
+  return null
+}
+
 async function persistSession({ sessionId, entities }, { hnsw }) {
   if (!entities || entities.length === 0) return { inserted: 0 }
 
@@ -80,7 +92,7 @@ async function persistSession({ sessionId, entities }, { hnsw }) {
         e.summary,
         e.content,
         meta,
-        e.embedding ?? null,
+        toBlobEmbedding(e.embedding),
         tagsJson,
         e.kind === 'anti_pattern' ? 'negative' : 'positive',
         e.source,
