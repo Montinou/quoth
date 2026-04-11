@@ -62,8 +62,12 @@ class HnswIndex {
    * Get distance between two nodes by id, or between a vector and a node.
    */
   _distance(a, b) {
-    const vecA = Array.isArray(a) ? a : this.nodes.get(a).vector
-    const vecB = Array.isArray(b) ? b : this.nodes.get(b).vector
+    // A query-vector argument is any numeric sequence (plain Array OR a
+    // TypedArray like Float32Array from decodeEmbedding / generateEmbedding).
+    // Anything else is treated as a node id and dereferenced.
+    const isVec = (x) => Array.isArray(x) || ArrayBuffer.isView(x)
+    const vecA = isVec(a) ? a : this.nodes.get(a).vector
+    const vecB = isVec(b) ? b : this.nodes.get(b).vector
     return cosineDistance(vecA, vecB)
   }
 
@@ -456,12 +460,8 @@ function _rebuildFromKnowledgeEntities(db, idx) {
       cursor = row.id
       const vec = decodeEmbedding(row.embedding)
       if (!vec || vec.length !== idx.dimensions) continue
-      // HnswIndex._distance uses `Array.isArray(query)` to discriminate query
-      // vectors from node ids — Float32Array fails that check, so any second
-      // rebuilt node crashes `add`. Normalise to a plain Array.
-      const plainVec = Array.isArray(vec) ? vec : Array.from(vec)
       try {
-        idx.add(row.id, plainVec)
+        idx.add(row.id, vec)
         markIndexed.run(row.id)
       } catch {
         // Skip malformed vectors; persist.js will log failures.

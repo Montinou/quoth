@@ -17,7 +17,17 @@ const HANDLER_TIMEOUT_MS = 400
 
 // --- /inject cache (spec §2.3): sha1(prompt + project + kinds_csv), 60s TTL ---
 const INJECT_CACHE_TTL_MS = 60_000
+const INJECT_CACHE_MAX = 512
 const injectCache = new Map()
+
+function _injectCachePut(key, value) {
+  // Map iteration order is insertion order — when over cap, drop the oldest.
+  if (injectCache.size >= INJECT_CACHE_MAX) {
+    const firstKey = injectCache.keys().next().value
+    if (firstKey !== undefined) injectCache.delete(firstKey)
+  }
+  injectCache.set(key, value)
+}
 
 function sha1(s) {
   return crypto.createHash('sha1').update(s).digest('hex')
@@ -174,14 +184,33 @@ function _handleRequest(req, res, db, log, ctx = {}) {
 
       // GET /inject?prompt=&project=&kinds=&limit= (spec §2.3)
       if (parts[0] === 'inject' && parts.length === 1) {
-        handleInject(req, res, db, log, ctx, parsedUrl).catch((err) => {
-          if (res.writableEnded) return
-          log('error', '/inject handler error', { error: err && err.message })
+        let responded = false
+        const timeout = setTimeout(() => {
+          if (responded) return
+          responded = true
           try {
-            res.writeHead(500)
-            res.end(JSON.stringify({ error: 'Internal error' }))
+            res.writeHead(504)
+            res.end(JSON.stringify({ error: 'Handler timeout' }))
           } catch {}
-        })
+        }, HANDLER_TIMEOUT_MS)
+        handleInject(req, res, db, log, ctx, parsedUrl)
+          .then(() => {
+            if (!responded) {
+              responded = true
+              clearTimeout(timeout)
+            }
+          })
+          .catch((err) => {
+            if (responded) return
+            responded = true
+            clearTimeout(timeout)
+            log('error', '/inject handler error', { error: err && err.message })
+            if (res.writableEnded) return
+            try {
+              res.writeHead(500)
+              res.end(JSON.stringify({ error: 'Internal error' }))
+            } catch {}
+          })
         return
       }
 
@@ -280,7 +309,7 @@ function _rowsForIds(db, ids, kinds, scopeArg) {
   const placeholders = ids.map(() => '?').join(',')
   const kindPlaceholders = kinds.map(() => '?').join(',')
   const sql = `
-    SELECT id, kind, summary, content, metadata, confidence, updated_at
+    SELECT id, kind, summary, content, metadata, confidence, updated_at, source_session_id
       FROM knowledge_entities
      WHERE status = 'active'
        AND kind IN (${kindPlaceholders})
@@ -322,16 +351,12 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
     const { generateEmbedding } = require('./embed.js')
     return generateEmbedding(text)
   })
-  const rawVec = await embedPrompt(prompt)
-  if (!rawVec) {
+  const vec = await embedPrompt(prompt)
+  if (!vec) {
     res.writeHead(200)
     res.end(JSON.stringify({ results: [] }))
     return
   }
-  // HNSW._distance uses `Array.isArray(query)` to tell a query vector from a
-  // node id — a Float32Array (or TypedArray) fails that check and crashes.
-  // Normalise to a plain Array.
-  const vec = Array.isArray(rawVec) ? rawVec : Array.from(rawVec)
 
   // Load HNSW singleton (keyed by QUOTH_HOME, shared across requests).
   const { loadOrInit } = require('./hnsw.js')
@@ -342,19 +367,20 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
   const defaultEf = parseInt(process.env.QUOTH_HNSW_EF_SEARCH ?? '50', 10)
 
   // First HNSW probe.
-  let annResults = hnsw.search(vec, overFetch, defaultEf)
-  let distanceById = new Map(annResults.map((r) => [r.id, r.distance]))
-  let ids = annResults.map((r) => r.id)
+  const annResults = hnsw.search(vec, overFetch, defaultEf)
+  const distanceById = new Map(annResults.map((r) => [r.id, r.distance]))
 
-  let rows = _rowsForIds(db, ids, kinds, scopeArg)
+  let rows = _rowsForIds(db, [...distanceById.keys()], kinds, scopeArg)
 
-  // Under-fetch fallback: re-probe with wider efSearch.
+  // Under-fetch fallback: re-probe with wider efSearch. Union the id sets so
+  // first-probe hits stay candidates even if the wider probe doesn't revisit
+  // them (HNSW's k-ANN isn't monotonic in ef).
   if (rows.length < limit) {
     const annResults2 = hnsw.search(vec, overFetch, 200)
-    // Merge new distances (prefer freshly-computed distance on collision).
-    for (const r of annResults2) distanceById.set(r.id, r.distance)
-    const ids2 = annResults2.map((r) => r.id)
-    rows = _rowsForIds(db, ids2, kinds, scopeArg)
+    for (const r of annResults2) {
+      if (!distanceById.has(r.id)) distanceById.set(r.id, r.distance)
+    }
+    rows = _rowsForIds(db, [...distanceById.keys()], kinds, scopeArg)
     if (rows.length < limit) {
       try {
         const { logPipelineError } = require('../db.js')
@@ -397,13 +423,14 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
         content: r.content,
         metadata,
         confidence: conf,
+        source_session_id: r.source_session_id,
         score,
       }
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 
-  injectCache.set(cacheKey, { ts: Date.now(), results: scored })
+  _injectCachePut(cacheKey, { ts: Date.now(), results: scored })
 
   res.writeHead(200)
   res.end(JSON.stringify({ results: scored }))
