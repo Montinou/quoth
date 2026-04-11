@@ -25,6 +25,13 @@ describe('route hook — daemon-down fast fail', () => {
 
   beforeEach(async () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'quoth-route-hang-'))
+    // Pre-write STARTUP_FAILED so the fail-open branch's spawnDaemonDetached
+    // short-circuits (daemon-core.checkStartupFlag → true). Without this,
+    // every hanging-socket test would spawn a real orphan daemon bound to a
+    // tmp QUOTH_HOME that gets rm'd in afterEach, accumulating reparented
+    // children under init. The detach primitive itself is verified by code
+    // review (spec §2.3); this test covers the latency contract only.
+    fs.writeFileSync(path.join(home, 'STARTUP_FAILED'), 'test-hang\n')
     // Fake daemon: accept but never respond, so the hook MUST time out.
     server = net.createServer((sock) => { /* hold the socket open */ })
     await new Promise((resolve, reject) => {

@@ -136,14 +136,35 @@ async function ensureDaemon() {
 
 // --- Task 17: route fast-path helpers (spec §2.3) ---
 //
-// fetchInject(): unix-socket GET /inject with a hard-coded 200ms timeout.
+// Default 200ms, tunable via QUOTH_DAEMON_SOCKET_TIMEOUT_MS (spec §2.3 / config
+// example line 1049). Parsed at each call so tests and ops can flip it at
+// runtime without module reload.
+function getInjectTimeoutMs() {
+  const raw = process.env.QUOTH_DAEMON_SOCKET_TIMEOUT_MS
+  const n = raw == null ? NaN : Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : 200
+}
+
+// GET /inject URLs encode the full prompt into the query string. Node's
+// default http parser caps request header size at ~16KB, so a pasted stack
+// trace can deterministically fail the socket. Truncating the prompt at the
+// hook boundary is safer than renegotiating to POST: injection results don't
+// need the last 30KB of a prompt to match relevant entities.
+const MAX_PROMPT_BYTES = 4096
+function truncatePrompt(prompt) {
+  if (prompt == null) return prompt
+  const s = String(prompt)
+  return s.length > MAX_PROMPT_BYTES ? s.slice(0, MAX_PROMPT_BYTES) : s
+}
+
+// fetchInject(): unix-socket GET /inject with a configurable timeout.
 // Returns the parsed JSON response. Any error (ENOENT, ECONNREFUSED,
 // timeout, malformed JSON) is surfaced so the caller can fall back to the
 // daemon-detach path.
 function fetchInject({ prompt, project, kinds, limit }, timeoutMs) {
   return new Promise((resolve, reject) => {
     const params = new URLSearchParams()
-    if (prompt != null) params.set('prompt', String(prompt))
+    if (prompt != null) params.set('prompt', truncatePrompt(prompt))
     if (project != null) params.set('project', String(project))
     if (kinds != null) params.set('kinds', String(kinds))
     if (limit != null) params.set('limit', String(limit))
@@ -216,7 +237,7 @@ function spawnDaemonDetached() {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore'],
     cwd: os.homedir(),
-    env: { ...process.env, QUOTH_SPAWNED_BY_HOOK: '1' },
+    env: process.env,
   })
   child.unref()
 }
@@ -288,7 +309,7 @@ const handlers = {
         project,
         kinds: 'pattern,decision,anti_pattern',
         limit: 8,
-      }, 200)
+      }, getInjectTimeoutMs())
       const text = formatInjectResults(resp && resp.results)
       if (text) emitAdditionalContext(text)
     } catch {

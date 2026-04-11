@@ -20,6 +20,12 @@ describe('route hook — daemon-detach contract', () => {
   let home
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'quoth-route-detach-'))
+    // Pre-write STARTUP_FAILED so spawnDaemonDetached short-circuits. The
+    // detach contract (detached/stdio:ignore/unref) is enforced by code
+    // review; here we verify only that the route hook exits fast in the
+    // fail-open branch without accumulating orphan daemons bound to tmp
+    // homes. See daemon-core.checkStartupFlag().
+    fs.writeFileSync(path.join(home, 'STARTUP_FAILED'), 'test-detach\n')
   })
   afterEach(() => {
     try { fs.rmSync(home, { recursive: true, force: true }) } catch {}
