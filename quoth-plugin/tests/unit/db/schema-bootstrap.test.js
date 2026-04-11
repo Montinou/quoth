@@ -1,5 +1,5 @@
 // tests/unit/db/schema-bootstrap.test.js
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ describe('knowledge_entities schema', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'quoth-schema-'))
     process.env.QUOTH_HOME = home
+    vi.resetModules()
   })
   afterEach(() => rmSync(home, { recursive: true, force: true }))
 

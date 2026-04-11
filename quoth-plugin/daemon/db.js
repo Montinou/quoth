@@ -4,6 +4,7 @@ const Database = require('better-sqlite3')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
+const os = require('os')
 const { HnswIndex } = require('./lib/hnsw.js')
 const { trigrams } = require('./lib/injection.js')
 
@@ -1410,7 +1411,7 @@ function createDb(dbPath) {
 }
 
 function openDb() {
-  const home = process.env.QUOTH_HOME || path.join(require('os').homedir(), '.quoth')
+  const home = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
   const dbPath = path.join(home, 'memory.db')
   return createDb(dbPath)
 }
