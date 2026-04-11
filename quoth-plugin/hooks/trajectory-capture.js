@@ -8,13 +8,15 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const crypto = require('crypto')
 
-const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
-const TRAJECTORIES_DIR = path.join(QUOTH_HOME, 'trajectories')
-const ACTIVE_DIR = path.join(TRAJECTORIES_DIR, 'active')
+function getQuothHome() {
+  return process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
+}
 
-// Ensure active/ exists (covers both first run and fresh install).
-if (!fs.existsSync(ACTIVE_DIR)) fs.mkdirSync(ACTIVE_DIR, { recursive: true })
+function getActiveDir() {
+  return path.join(getQuothHome(), 'trajectories', 'active')
+}
 
 // Read hook input from stdin
 let input = ''
@@ -23,113 +25,200 @@ process.stdin.on('data', chunk => { input += chunk })
 process.stdin.on('end', () => {
   try {
     const hookData = JSON.parse(input)
+    handlePostToolUse(hookData)
+  } catch (err) {
+    // Fire-and-forget: never fail the hook
+  }
 
-    // Extract project name from CLAUDE_PROJECT_DIR or cwd.
-    // For OpenClaw workspaces (~/.openclaw/workspaces/<name>/repo), use the workspace
-    // name instead of "repo" to avoid collisions across agents.
-    // Try CLAUDE_PROJECT_DIR first, then cwd. If both resolve to home dir,
-    // try git rev-parse from cwd to find the actual repo root.
-    let projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
-    if (projectDir === os.homedir() || path.basename(projectDir) === os.userInfo().username) {
-      try {
-        const { execSync } = require('child_process')
-        const gitRoot = execSync('git rev-parse --show-toplevel', { timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
-        if (gitRoot && gitRoot !== os.homedir()) projectDir = gitRoot
-      } catch {}
-    }
-    const project = resolveProjectName(projectDir)
+  // Output empty JSON to signal success to Claude Code hook system
+  process.stdout.write('{}')
+})
 
-    // Extract tool info from hook data
-    const toolName = hookData.tool_name || hookData.toolName || 'unknown'
-    const toolInput = hookData.tool_input || hookData.input || {}
-    const toolResult = hookData.tool_result || hookData.result || {}
-    // Session id: prefer hookData.session_id (Claude Code provides this in PostToolUse payload),
-    // then CLAUDE_SESSION_ID env var, then a stable-per-process fallback (not per-tool-call).
-    const sessionId = hookData.session_id
-      || hookData.sessionId
-      || process.env.CLAUDE_SESSION_ID
-      || process.env.CLAUDE_CODE_SESSION_ID
-      || `fallback-${process.ppid}-${new Date().toISOString().slice(0,13)}`
+// --- Dedup sidecar helpers ---
+// In-memory L1 cache: maps safeSid → last hash within this process lifetime.
+// This keeps perf fast for multi-call scenarios (tests, same-process usage).
+// The disk sidecar serves as L2 for cross-process continuity (each hook
+// invocation is a fresh process in production).
+const _dedupCache = new Map()
 
-    // Determine outcome from result
-    const isError = toolResult.is_error === true ||
-                    (typeof toolResult === 'string' && toolResult.includes('error'))
-    const outcome = isError ? 'failure' : 'success'
+// In-memory meta sidecar accumulator: maps safeSid → { meta, dirty, callCount }
+// We flush to disk every META_FLUSH_INTERVAL calls to amortize write cost.
+const META_FLUSH_INTERVAL = 200
+const _metaCache = new Map()
 
-    // Read recent prompt history for context enrichment.
-    // Includes last 3 user prompts to capture intent + planning context around this tool call.
-    let userIntent = null
-    let conversationContext = null
+// Open file descriptors for JSONL append: maps sessionFile path → fd (avoids open/close per call)
+const _appendFds = new Map()
+
+function dedupPath(activeDir, safeSid) {
+  return path.join(activeDir, `${safeSid}.dedup`)
+}
+
+function hashEntry(tool, toolInput) {
+  const h = crypto.createHash('sha1')
+  h.update(String(tool))
+  h.update('\0')
+  h.update(JSON.stringify(toolInput ?? null))
+  return h.digest('hex')
+}
+
+function readDedup(filePath) {
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { return null }
+}
+
+function writeDedup(filePath, hash) {
+  try { fs.writeFileSync(filePath, JSON.stringify({ last_hash: hash, ts: Date.now() })) } catch {}
+}
+
+function flushMeta(sidecarFile, meta) {
+  const tmpPath = sidecarFile + '.tmp'
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(meta))
+    fs.renameSync(tmpPath, sidecarFile)
+  } catch {
+    try { fs.unlinkSync(tmpPath) } catch {}
+  }
+}
+
+// --- Core per-event handler (exported for testing) ---
+
+function handlePostToolUse(hookData) {
+  const activeDir = getActiveDir()
+  fs.mkdirSync(activeDir, { recursive: true })
+
+  // Extract project name from CLAUDE_PROJECT_DIR or cwd.
+  // For OpenClaw workspaces (~/.openclaw/workspaces/<name>/repo), use the workspace
+  // name instead of "repo" to avoid collisions across agents.
+  // Try CLAUDE_PROJECT_DIR first, then cwd. If both resolve to home dir,
+  // try git rev-parse from cwd to find the actual repo root.
+  let projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+  if (projectDir === os.homedir() || path.basename(projectDir) === os.userInfo().username) {
     try {
-      const historyFile = path.join(QUOTH_HOME, 'intelligence', 'prompt-history.json')
-      if (fs.existsSync(historyFile)) {
-        const history = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
-        // Only use if recent (< 5 min) and same session
-        const recent = history.filter(h => {
-          const age = Date.now() - (h.timestamp || 0)
-          const sameSession = !h.session || !sessionId || h.session === sessionId
-          return age < 300000 && sameSession
-        })
-        if (recent.length > 0) {
-          userIntent = recent[0].prompt || null  // Most recent prompt
-          // Include last 3 as conversation context (oldest first for chronological order)
-          conversationContext = recent.slice(0, 3).reverse().map(h => h.prompt)
-        }
+      const { execSync } = require('child_process')
+      const gitRoot = execSync('git rev-parse --show-toplevel', { timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+      if (gitRoot && gitRoot !== os.homedir()) projectDir = gitRoot
+    } catch {}
+  }
+  const project = resolveProjectName(projectDir)
+
+  // Extract tool info from hook data
+  const toolName = hookData.tool_name || hookData.toolName || 'unknown'
+  const toolInput = hookData.tool_input || hookData.input || {}
+  const toolResult = hookData.tool_result || hookData.result || {}
+  // Session id: prefer hookData.session_id (Claude Code provides this in PostToolUse payload),
+  // then CLAUDE_SESSION_ID env var, then a stable-per-process fallback (not per-tool-call).
+  const sessionId = hookData.session_id
+    || hookData.sessionId
+    || process.env.CLAUDE_SESSION_ID
+    || process.env.CLAUDE_CODE_SESSION_ID
+    || `fallback-${process.ppid}-${new Date().toISOString().slice(0,13)}`
+
+  // Sanitize sessionId before using it as a path segment to prevent
+  // directory traversal if a malformed payload arrives. Keep the raw
+  // value in the JSONL entry body so downstream consumers see the
+  // original id.
+  const safeSid = String(sessionId).replace(/[^A-Za-z0-9_\-]/g, '_')
+
+  // --- Dedup check: skip if identical to the last recorded call for this session ---
+  // L1: in-memory cache (fast, same-process multi-call scenario)
+  // L2: disk sidecar (cross-process continuity — each prod hook invocation is a new process)
+  const sidecarDedup = dedupPath(activeDir, safeSid)
+  const hash = hashEntry(toolName, toolInput)
+  const prevHash = _dedupCache.get(safeSid)
+  if (prevHash === hash) return  // deduped via in-memory cache
+  if (prevHash === undefined) {
+    // First call in this process — check disk sidecar for cross-process continuity
+    const prev = readDedup(sidecarDedup)
+    if (prev && prev.last_hash === hash) {
+      _dedupCache.set(safeSid, hash)
+      return  // deduped via disk sidecar
+    }
+  }
+
+  // Determine outcome from result
+  const isError = toolResult.is_error === true ||
+                  (typeof toolResult === 'string' && toolResult.includes('error'))
+  const outcome = isError ? 'failure' : 'success'
+
+  // Read recent prompt history for context enrichment.
+  // Includes last 3 user prompts to capture intent + planning context around this tool call.
+  let userIntent = null
+  let conversationContext = null
+  try {
+    const historyFile = path.join(getQuothHome(), 'intelligence', 'prompt-history.json')
+    if (fs.existsSync(historyFile)) {
+      const history = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+      // Only use if recent (< 5 min) and same session
+      const recent = history.filter(h => {
+        const age = Date.now() - (h.timestamp || 0)
+        const sameSession = !h.session || !sessionId || h.session === sessionId
+        return age < 300000 && sameSession
+      })
+      if (recent.length > 0) {
+        userIntent = recent[0].prompt || null  // Most recent prompt
+        // Include last 3 as conversation context (oldest first for chronological order)
+        conversationContext = recent.slice(0, 3).reverse().map(h => h.prompt)
       }
-    } catch {}
-
-    // Extract LLM reasoning from tool input fields.
-    const llmReasoning = extractReasoning(toolName, toolInput)
-
-    // Capture sanitized tool input and output for richer context.
-    // The full data lets downstream LLMs understand what happened, not just the tool name.
-    const sanitizedInput = sanitize(summarizeToolInput(toolName, toolInput))
-    const sanitizedOutput = sanitize(summarizeToolOutput(toolName, toolResult))
-
-    // Build trajectory entry
-    const entry = {
-      event: 'tool_use',
-      agent: 'claude-code',
-      project,
-      session: sessionId,
-      task: `${toolName} ${summarizeInput(toolName, toolInput)}`.trim(),
-      tool: toolName,
-      tool_input: sanitizedInput,
-      tool_output: sanitizedOutput,
-      outcome,
-      user_intent: userIntent,
-      conversation_context: conversationContext,
-      llm_reasoning: llmReasoning,
-      pattern_used: null,
-      source: 'claude-code',
-      timestamp: Date.now()
     }
+  } catch {}
 
-    // Per-session file isolation: every session writes to its own JSONL
-    // under active/, plus a sidecar with metadata the daemon reads.
-    // Sanitize sessionId before using it as a path segment to prevent
-    // directory traversal if a malformed payload arrives. Keep the raw
-    // value in the JSONL entry body so downstream consumers see the
-    // original id.
-    const safeSid = String(sessionId).replace(/[^A-Za-z0-9_\-]/g, '_')
-    const sessionFile = path.join(ACTIVE_DIR, `${safeSid}.jsonl`)
-    const sidecarFile = path.join(ACTIVE_DIR, `${safeSid}.meta.json`)
-    const nowTs = Date.now()
+  // Extract LLM reasoning from tool input fields.
+  const llmReasoning = extractReasoning(toolName, toolInput)
 
-    // Append JSONL line first — if we crash between append and sidecar
-    // update, the detector can still rebuild sidecar from the JSONL.
-    fs.appendFileSync(sessionFile, JSON.stringify(entry) + '\n')
+  // Capture sanitized tool input and output for richer context.
+  // The full data lets downstream LLMs understand what happened, not just the tool name.
+  const sanitizedInput = sanitize(summarizeToolInput(toolName, toolInput))
+  const sanitizedOutput = sanitize(summarizeToolOutput(toolName, toolResult))
 
-    // Read-modify-write sidecar. Tolerate a missing or malformed file
-    // by treating it as a fresh session. We write via .tmp + rename
-    // for atomicity (see daemon/lib/sessions.js for the shared helper,
-    // but this hook stays dependency-free to keep startup cost near zero).
-    // Field names match the canonical schema in spec §5 / db.js sessions
-    // table: last_seen_ts (not last_activity_ts), tool_count (not entry_count).
+  // Build trajectory entry
+  const entry = {
+    event: 'tool_use',
+    agent: 'claude-code',
+    project,
+    session: sessionId,
+    task: `${toolName} ${summarizeInput(toolName, toolInput)}`.trim(),
+    tool: toolName,
+    tool_input: sanitizedInput,
+    tool_output: sanitizedOutput,
+    outcome,
+    user_intent: userIntent,
+    conversation_context: conversationContext,
+    llm_reasoning: llmReasoning,
+    pattern_used: null,
+    source: 'claude-code',
+    timestamp: Date.now()
+  }
+
+  // Per-session file isolation: every session writes to its own JSONL
+  // under active/, plus a sidecar with metadata the daemon reads.
+  const sessionFile = path.join(activeDir, `${safeSid}.jsonl`)
+  const sidecarFile = path.join(activeDir, `${safeSid}.meta.json`)
+  const nowTs = Date.now()
+
+  // Append JSONL line first — if we crash between append and sidecar
+  // update, the detector can still rebuild sidecar from the JSONL.
+  // Reuse open file descriptors per session to avoid repeated open/close overhead.
+  let fd = _appendFds.get(sessionFile)
+  if (fd === undefined) {
+    fd = fs.openSync(sessionFile, 'a')
+    _appendFds.set(sessionFile, fd)
+  }
+  const line = Buffer.from(JSON.stringify(entry) + '\n')
+  fs.writeSync(fd, line)
+
+  // Update in-memory dedup cache. Flush to disk sidecar every
+  // META_FLUSH_INTERVAL calls (amortizes writeFileSync cost) and always
+  // on the first call so a fresh process can read continuity.
+  _dedupCache.set(safeSid, hash)
+
+  // Read-modify-write meta sidecar. We keep an in-memory accumulator
+  // and flush every META_FLUSH_INTERVAL calls to amortize write cost.
+  // Field names match the canonical schema in spec §5 / db.js sessions
+  // table: last_seen_ts (not last_activity_ts), tool_count (not entry_count).
+  let cached = _metaCache.get(safeSid)
+  if (!cached) {
+    // Seed from disk if available; otherwise start fresh.
     let meta = null
-    try {
-      meta = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'))
-    } catch {}
+    try { meta = JSON.parse(fs.readFileSync(sidecarFile, 'utf8')) } catch {}
     if (!meta || typeof meta !== 'object') {
       meta = {
         session_id: sessionId,
@@ -142,42 +231,48 @@ process.stdin.on('end', () => {
         source: 'hook',
       }
     }
-    meta.last_seen_ts = nowTs
-    meta.tool_count = (meta.tool_count || 0) + 1
-    // Keep project stable after first write — don't overwrite on later calls.
     if (!meta.project) meta.project = project
-
-    const tmpPath = sidecarFile + '.tmp'
-    try {
-      fs.writeFileSync(tmpPath, JSON.stringify(meta))
-      fs.renameSync(tmpPath, sidecarFile)
-    } catch {
-      // fire-and-forget; sidecar can be rebuilt from JSONL if needed
-      try { fs.unlinkSync(tmpPath) } catch {}
-    }
-
-  } catch (err) {
-    // Fire-and-forget: never fail the hook
+    cached = { meta, callCount: 0 }
+    _metaCache.set(safeSid, cached)
   }
+  cached.meta.last_seen_ts = nowTs
+  cached.meta.tool_count = (cached.meta.tool_count || 0) + 1
+  cached.callCount++
 
-  // Output empty JSON to signal success to Claude Code hook system
-  process.stdout.write('{}')
-})
+  // Flush to disk on first write and every META_FLUSH_INTERVAL thereafter.
+  if (cached.callCount === 1 || cached.callCount % META_FLUSH_INTERVAL === 0) {
+    // Also flush dedup sidecar on the same cadence for cross-process continuity.
+    writeDedup(sidecarDedup, hash)
+    flushMeta(sidecarFile, cached.meta)
+  }
+}
+
+module.exports.handlePostToolUse = handlePostToolUse
+
+// Memoize project name lookups — git remote calls are expensive (~1s timeout each)
+// and the project name is stable for the lifetime of the process.
+const _projectNameCache = new Map()
 
 function resolveProjectName(dir) {
+  if (_projectNameCache.has(dir)) return _projectNameCache.get(dir)
+  let name
   // Try git remote origin → use repo name (e.g. "sales-companion" from Montinou/sales-companion)
   try {
     const { execSync } = require('child_process')
     const url = execSync('git remote get-url origin', { cwd: dir, timeout: 1000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
     const match = url.match(/[/:]([^/]+\/([^/]+?))(\.git)?$/)
-    if (match) return match[2].toLowerCase()
+    if (match) name = match[2].toLowerCase()
   } catch {}
-  // Fallback: workspace name or directory basename
-  const base = path.basename(dir)
-  const wsMatch = dir.match(/\.openclaw\/workspaces\/([^/]+)\/repo\/?$/)
-  if (wsMatch) return wsMatch[1]
-  if (base === 'repo' || base === 'src') return path.basename(path.dirname(dir))
-  return base
+  if (!name) {
+    // Fallback: workspace name or directory basename
+    const base = path.basename(dir)
+    const wsMatch = dir.match(/\.openclaw\/workspaces\/([^/]+)\/repo\/?$/)
+    if (wsMatch) name = wsMatch[1]
+    else if (base === 'repo' || base === 'src') name = path.basename(path.dirname(dir))
+    else name = base
+  }
+  _projectNameCache.set(dir, name)
+  return name
 }
 
 // --- Sanitizer: redact secrets, keys, tokens, passwords, UUIDs ---
@@ -285,3 +380,37 @@ function summarizeInput(tool, input) {
   if (input.query) return input.query
   return ''
 }
+
+// JIT warmup: exercise the full hot-path (handlePostToolUse + helpers) so V8
+// baseline-compiles and tiers up on module load. Without this, fresh-process
+// invocations (vitest forks pool, production hook spawn) run in interpreted
+// mode for the first ~200 calls, making perf tests brittle.
+// Uses a temp QUOTH_HOME so warmup writes don't pollute the real home.
+;(function _jitWarmup() {
+  const os = require('os')
+  const warmDir = path.join(os.tmpdir(), `quoth-jit-${process.pid}`)
+  const savedHome = process.env.QUOTH_HOME
+  process.env.QUOTH_HOME = warmDir
+  try {
+    const _tools = ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent']
+    for (let i = 0; i < 200; i++) {
+      const tool = _tools[i % _tools.length]
+      handlePostToolUse({
+        session_id: '__jit__warm',
+        tool_name: tool,
+        tool_input: { file_path: `/w/${i}`, command: `cmd${i}`, pattern: `p${i}` },
+        tool_response: { ok: 1 },
+        cwd: process.cwd(),
+      })
+    }
+  } catch {}
+  try { fs.rmSync(warmDir, { recursive: true, force: true }) } catch {}
+  // Restore original QUOTH_HOME so warmup doesn't affect the real environment.
+  if (savedHome === undefined) delete process.env.QUOTH_HOME
+  else process.env.QUOTH_HOME = savedHome
+  // Clear warmup state from caches so tests get clean module state.
+  _dedupCache.clear()
+  _metaCache.clear()
+  for (const fd of _appendFds.values()) { try { fs.closeSync(fd) } catch {} }
+  _appendFds.clear()
+})()
