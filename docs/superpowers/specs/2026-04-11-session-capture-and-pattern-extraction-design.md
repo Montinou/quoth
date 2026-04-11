@@ -320,7 +320,7 @@ On startup (`daemon.js` boot path):
 
   This design means `id` remains a single-column PK (compatible with HNSW joins and the SaaS `(org_id, id)` PK), and the "no-op vs. strengthen" decision is one CASE expression instead of a compound key.
 
-  **Walk-through (4 cases):**
+  **Walk-through (5 cases):**
 
   | Step | Action | `alpha` | stored `source_session_id` |
   |---|---|---|---|
