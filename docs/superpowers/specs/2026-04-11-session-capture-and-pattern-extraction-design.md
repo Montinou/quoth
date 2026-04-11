@@ -1,7 +1,7 @@
 # Session Capture & Pattern Extraction Redesign
 
 **Date**: 2026-04-11
-**Status**: Design (rev 3 — addressing rev 2 reviewer feedback)
+**Status**: Design (rev 4 — addressing rev 3 reviewer feedback)
 **Author**: Claude (via brainstorming with Agustin)
 **Supersedes**: `2026-04-10-extract-v2-tool-calling.md`, `2026-04-10-session-isolation.md`, `2026-04-10-unified-injection-design.md` (partially), `2026-04-08-agent-type-pipeline-design.md`
 
@@ -287,21 +287,50 @@ On startup (`daemon.js` boot path):
 
   ```sql
   INSERT INTO knowledge_entities (id, kind, scope, summary, content, metadata,
-                                  embedding, tags, source, source_session_id, ...)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ...)
+                                  embedding, tags, source, source_session_id,
+                                  alpha, beta, confidence, ...)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, 1.0, 0.5, ...)
   ON CONFLICT(id) DO UPDATE SET
     -- Same session re-running: pure no-op (idempotent retry — protects against
     -- alpha double-counting when persist crashes/retries on the same session)
     alpha = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
                  THEN knowledge_entities.alpha
                  ELSE knowledge_entities.alpha + 1 END,
-    -- Different session strengthening: bump alpha + refresh updated_at
+    -- Critical: bump source_session_id to the NEW session on strengthening so
+    -- a later retry of the *new* session is still detected as same-session and
+    -- no-ops. Without this rewrite, S2 retrying would compute
+    -- excluded.source_session_id (=S2) != stored (=S1) and wrongly bump alpha
+    -- a second time.
+    source_session_id = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
+                             THEN knowledge_entities.source_session_id
+                             ELSE excluded.source_session_id END,
+    -- Recompute confidence from the updated alpha (beta unchanged)
+    confidence = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
+                      THEN knowledge_entities.confidence
+                      ELSE (knowledge_entities.alpha + 1) /
+                           (knowledge_entities.alpha + 1 + knowledge_entities.beta) END,
+    -- updated_at refresh on strengthening
     updated_at = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
                       THEN knowledge_entities.updated_at
                       ELSE excluded.updated_at END;
   ```
 
-  This design means `id` remains a single-column PK (compatible with HNSW joins and the SaaS `(org_id, id)` PK), and the "no-op vs. strengthen" decision is one CASE expression instead of a compound key. Walk-through: Session S1 inserts entity E1 → alpha=1. Session S1 retries (crash recovery) → ON CONFLICT, `excluded.source_session_id == knowledge_entities.source_session_id` → CASE → alpha unchanged. Session S2 produces same E1 → CASE → alpha=2. Persist is exactly-once per (entity, session).
+  **Intentionally unchanged on both branches** (the SET clause does not touch them):
+  `beta`, `last_exposed_at`, `exposure_count`, `summary`, `content`, `embedding`, `tags`, `metadata`, `kind`, `scope`, `polarity`, `status`, `source`, `created_at`, `embedding_indexed`. Rationale: `id = sha1(kind + canonical_content)` already guarantees `summary`/`content`/`embedding`/`kind` are byte-identical (collisions are 1 in 2^64), so re-writing them would be a no-op anyway. `metadata` and `tags` are kept from the first session that produced this entity — strengthening means "another session confirmed this knowledge", not "another session has a better description of it". Exposure stats are updated by `/inject`, never by persist.
+
+  This design means `id` remains a single-column PK (compatible with HNSW joins and the SaaS `(org_id, id)` PK), and the "no-op vs. strengthen" decision is one CASE expression instead of a compound key.
+
+  **Walk-through (4 cases):**
+
+  | Step | Action | `alpha` | stored `source_session_id` |
+  |---|---|---|---|
+  | 1 | Session S1 inserts entity E1 (fresh) | 1 | S1 |
+  | 2 | S1 retries after crash | CASE: excluded(S1) = stored(S1) → no-op | 1 | S1 |
+  | 3 | Session S2 produces same E1 | CASE: excluded(S2) ≠ stored(S1) → +1 | 2 | **S2** ← rewritten |
+  | 4 | S2 retries after crash | CASE: excluded(S2) = stored(S2) → no-op | 2 | S2 |
+  | 5 | Session S3 produces same E1 | CASE: excluded(S3) ≠ stored(S2) → +1 | 3 | S3 |
+
+  Persist is exactly-once per (entity, session). The S2-retry-after-S2-strengthening case (step 4) is the one that breaks if `source_session_id` is *not* rewritten in step 3.
 - **Single global lock**: the persist semaphore (cap=1) serializes all of the above. SQLite WAL handles single-writer semantics; HNSW pure-JS has no internal lock so the semaphore is what protects it.
 - **Failure modes**:
   - SQLite txn aborts → file rolled back to `processing/<sid>.jsonl` (un-claimed via `fs.renameSync` strip-suffix), re-queued. **Cost note**: a transient persist failure causes the next attempt to re-run extract (paying LLM again). The idempotency contract only protects *successful* commits — it does not refund money on failed commits. If this becomes a problem we can write an `INSERT INTO pipeline_runs (status='in_progress')` row before extract begins and short-circuit retries that find one, but that's not in scope for v1.
@@ -404,7 +433,7 @@ One table holds patterns, decisions, anti-patterns, and facts. Same shape on SQL
 
 ```sql
 CREATE TABLE knowledge_entities (
-  id                TEXT PRIMARY KEY,             -- sha1(kind + canonical_content)[:16]  -- 16 hex chars = 64 bits, collision risk negligible at 16M+ rows
+  id                TEXT PRIMARY KEY,             -- sha1(kind + canonical_content)[:16]  -- 16 hex chars = 64 bits; birthday-bound 50% collision near 2^32 ≈ 4B rows
   kind              TEXT NOT NULL,                -- 'pattern'|'decision'|'anti_pattern'|'fact'
   scope             TEXT NOT NULL,                -- 'global' | 'project:<name>'
   summary           TEXT NOT NULL,                -- ≤120 chars, for display & ranking
