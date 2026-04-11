@@ -1,6 +1,6 @@
 # Local Database (SQLite)
 
-**Version:** 1.0.4 | **Last updated:** 2026-04-10
+**Version:** 1.0.5 | **Last updated:** 2026-04-11
 
 The Quoth plugin maintains a local SQLite database for pattern storage, trajectory tracking, agent coordination, and event sourcing. All data is stored on the user's machine at `~/.quoth/memory.db`.
 

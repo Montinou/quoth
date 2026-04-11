@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-**Version:** 1.0.3 — 2026-04-09
+**Version:** 1.0.4 — 2026-04-11
 
 Quoth exposes 22 MCP tools through a single server (`quoth-learning`) using the JSON-RPC 2.0 protocol over stdio. Tools are organized into 4 handler modules: Patterns, Intelligence, Agents, and Skills.
 

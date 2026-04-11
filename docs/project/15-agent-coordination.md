@@ -1,6 +1,6 @@
 # Agent Coordination
 
-_v1.0.3 — Last updated: 2026-04-09_
+_v1.0.4 — Last updated: 2026-04-11_
 
 Documentation of the agent coordination system spanning both the local Quoth plugin (SQLite) and the cloud SaaS platform (Neon Postgres).
 

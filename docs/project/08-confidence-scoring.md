@@ -1,4 +1,4 @@
-<!-- version: 1.0.3 | updated: 2026-04-09 -->
+<!-- version: 1.0.4 | updated: 2026-04-11 -->
 
 # Confidence Scoring
 
@@ -97,11 +97,15 @@ This updates the JSON-based intelligence graph entries with +0.05 confidence.
 for (const id of result.boosted) {
   const patternId = id.startsWith('pat-') ? id.slice(4) : null
   if (patternId) {
-    db.applyBayesianUpdate(patternId, 'success')
+    if (patternId.startsWith('doc:')) {
+      db.updateDocChunkAlphaBeta(patternId.slice(4), 'success')
+    } else {
+      db.applyBayesianUpdate(patternId, 'success')
+    }
   }
 }
 ```
-Only IDs with the `pat-` prefix (pattern entries) are updated in SQLite. Memory entries (`mem-` prefix) and insight entries (`insight-` prefix) are only updated in the intelligence graph JSON.
+Only IDs with the `pat-` prefix are routed to SQLite. Within those, `doc:` prefixed IDs update the `doc_chunks` table via `db.updateDocChunkAlphaBeta()`, while regular IDs update the `patterns` table. Memory entries (`mem-` prefix) and insight entries (`insight-` prefix) are only updated in the intelligence graph JSON.
 
 The IDs come from `last-matched.json`, which was written by the most recent `getContext` call during routing. This creates a feedback loop: patterns that were surfaced as relevant context and then led to a successful task completion get reinforced.
 
@@ -344,7 +348,7 @@ The `post-task` handler is the critical bridge between the two systems. When a s
 
 1. `applyFeedback(true)` updates all last-matched intelligence graph entries (+0.05 confidence in JSON)
 2. For entries with `pat-` prefixed IDs, extracts the real pattern ID
-3. Calls `db.applyBayesianUpdate(patternId, 'success')` on each, updating the SQLite Bayesian scores
+3. Routes to the correct table: `doc:` prefixed IDs call `db.updateDocChunkAlphaBeta(chunkId, 'success')` (doc_chunks table); all others call `db.applyBayesianUpdate(patternId, 'success')` (patterns table)
 
 This means a subagent completion reinforces patterns in both systems simultaneously, keeping them roughly aligned.
 

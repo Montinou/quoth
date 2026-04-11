@@ -2,7 +2,7 @@
 
 The Quoth daemon is a long-running Node.js process that watches trajectory files, processes them through batch-level LLM distillation (DISTILL + CONSOLIDATE per session), and maintains the pattern database. Individual tool-use entries are accumulated and processed in batch when a session summary arrives. It also manages periodic maintenance tasks including confidence decay, HNSW index persistence, agent cleanup, cloud sync, and nightly deep consolidation with cloud promotion.
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-09
+**Version:** 1.0.4 | **Last updated:** 2026-04-11
 
 ## Table of Contents
 

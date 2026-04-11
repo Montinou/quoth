@@ -1,6 +1,6 @@
 # Embeddings & Search
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-09
+**Version:** 1.0.4 | **Last updated:** 2026-04-11
 
 Quoth uses local embeddings for semantic pattern search, with a pure-JS HNSW index for approximate nearest-neighbor retrieval.
 
@@ -16,7 +16,7 @@ Local MiniLM-L6-v2 via `@xenova/transformers` (ONNX runtime). Zero API calls, ~5
 | Normalization | L2 (cosine-ready) |
 | Quantized | Yes (faster inference) |
 
-Previously used `voyage/voyage-4-lite` (1024d) via Vercel AI Gateway at $0.02/MTok. Replaced with local inference to eliminate API cost and latency.
+Previously used `voyage/voyage-4-lite` (1536d) via Vercel AI Gateway at $0.02/MTok. Replaced with local inference to eliminate API cost and latency.
 
 ## Embedding API (`daemon/lib/embed.js`)
 

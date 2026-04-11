@@ -1,10 +1,10 @@
-<!-- version: 1.1.1 | updated: 2026-04-09 -->
+<!-- version: 1.1.2 | updated: 2026-04-11 -->
 
 # V2 Subsystems: Bandit-Based Learning Pipeline
 
 The V2 subsystem replaces V1's simple Bayesian update + trigram matching with a hierarchical Thompson sampling bandit, pattern clustering, propensity-scored injection, and counterfactual off-policy evaluation via SNIPS. These components work together to make pattern selection statistically principled: patterns are grouped into clusters, clusters compete via Thompson sampling, injection slots carry propensity scores for debiased reward estimation, and a curation pipeline maintains knowledge base quality.
 
-**Version:** 1.1.1 | **Last updated:** 2026-04-09
+**Version:** 1.1.2 | **Last updated:** 2026-04-11
 
 Source files:
 - `quoth-plugin/daemon/lib/flags.js` -- V2 feature flag infrastructure

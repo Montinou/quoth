@@ -2,7 +2,7 @@
 
 Quoth's task routing system classifies incoming tasks by keyword matching and recommends the optimal agent type for execution. It is a lightweight, zero-latency classifier that runs entirely in-process with no API calls or model inference.
 
-<!-- v1.0.3 — Last updated: 2026-04-09 -->
+<!-- v1.0.4 — Last updated: 2026-04-11 -->
 
 Source files:
 - `quoth-plugin/mcp/lib/routing.js` -- agent definitions, pattern matching, alternative selection

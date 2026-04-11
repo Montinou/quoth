@@ -1,4 +1,4 @@
-# Hook System <!-- v1.0.3 | 2026-04-09 -->
+# Hook System <!-- v1.0.4 | 2026-04-11 -->
 
 Quoth's hook system integrates with Claude Code's lifecycle events to provide intelligence routing, trajectory capture, pattern injection, and command safety checks. All hooks are declared in `hooks/hooks.json` and execute via two entry points: the unified dispatcher (`hook-dispatch.js`) and the standalone trajectory capture script (`trajectory-capture.js`).
 
@@ -269,7 +269,7 @@ Routes the user's prompt to an optimal agent type and displays relevant intellig
 1. **Persist prompt history:** Save the user's prompt (truncated to 500 chars) to `~/.quoth/intelligence/prompt-history.json` as a rolling buffer of the last 5 prompts. The buffer resets when the session ID changes. This allows `trajectory-capture.js` to include nearby user intents with each tool call.
 2. **Record in session memory:** Call `createSessionMemory()` (from `./session-memory.js`) and invoke `sm.recordPrompt(prompt)` for context-aware injection in later hooks.
 3. **Query daemon for routing + injection:** Call `ensureDaemon()`, then `queryDaemon({ type: 'route+inject', prompt, project, session_id, limit: 5 })`. The daemon performs embedding generation, HNSW search, V1/V2 injection path selection, and keyword routing in a single round-trip. The response includes `patterns`, `doc_chunks`, `agent`, `agent_confidence`, `agent_reason`, `alternatives`, `embedding_ms`, and `search_ms`.
-4. **Output pattern injection:** If `resp.patterns` is non-empty, record exposures via `recordExposure(db, ids)`, track in session memory, and print:
+4. **Output pattern injection:** Combine pattern IDs and doc chunk IDs (those with `score > 0.2`) into `allIds`. Call `recordExposure(db, allIds)` (internally filters `doc:` prefixed IDs — only pattern exposure counts are updated in the `patterns` table) and `sm.recordInjection(allIds)` (includes both patterns and doc chunks for session-level feedback tracking). If `resp.patterns` is non-empty, print:
    ```
    [Quoth] Patterns for this prompt:
    - [0.48] Update documentation with version and last updated timestamp: Update documentation...
@@ -341,14 +341,21 @@ Initializes the intelligence graph, injects project context files, and injects h
    - **Fallback summary** (`quoth-plugin/context/project-summary.md`): Only used if no project-specific file was found AND the current project is `quoth` itself. Prevents the generic summary from being injected in non-quoth sessions.
    - **Project-local context** (`{CLAUDE_PROJECT_DIR}/.quoth-context.md`): Checked independently — injected in addition to the above if it exists. Allows project-local overrides without modifying the plugin.
 3. **Report doc auto-updates:** Read `~/.quoth/intelligence/doc-manifest.json`. Filter `recentUpdates` entries newer than `manifest.lastReportedAt`. Print unseen updates (up to 5 shown, remainder counted) and update `lastReportedAt` to prevent re-reporting on the next session.
-4. **Inject patterns via daemon:** Load last session's context snapshot from `last-context-{project}.json` to build a `queryText` from recent prompts and top topics. Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: queryText || 'session start', project, session_id, limit: 7 })`. The daemon performs V1/V2 injection path selection server-side. Record exposures via `recordExposure(db, ids)` and track in session memory.
-5. Output pattern summaries:
+4. **Inject patterns via daemon:** Load last session's context snapshot from `last-context-{project}.json` to build a `queryText` from recent prompts and top topics. Call `ensureDaemon()`, then `queryDaemon({ type: 'inject', prompt: queryText || 'session start', project, session_id, limit: 7 })`. The daemon performs V1/V2 injection path selection server-side. Combine pattern IDs and doc chunk IDs (those with `score > 0.2`) into `allIds`. Call `recordExposure(db, allIds)` (filters `doc:` IDs internally) and `sm.recordInjection(allIds)`.
+5. Output pattern summaries and doc chunks:
    ```
    [Quoth] 3 patterns loaded for project "quoth":
    - [0.85] auth-resilience: Use DB fallback for optional JWT claims
    - [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres ANY()
    - [0.61] some-pattern: Exploration candidate
    ```
+   If relevant doc chunks were returned (score > 0.2), also print with content truncated to 150 chars:
+   ```
+   [Quoth Docs] Session context:
+     • [hook-system] ## Hook Events Reference...
+     • [configuration] ## Setup Script...
+   ```
+   Labels are derived from `doc_file` (e.g., `04-hook-system.md` → `hook-system`).
 
 **Context injection lookup order:**
 
@@ -400,7 +407,7 @@ Consolidates the intelligence graph, writes a session summary to the trajectory 
    The `user_intents` field collects unique prompts from `user_intent` fields across tool entries. The `llm_reasonings` field collects unique reasoning snippets (last 10, deduped). `outcome` is `"success"` (zero failures), `"partial"` (successes > failures), or `"failure"` (failures ≥ successes).
 4. **Signal daemon:** Read `~/.quoth/daemon.pid` and send `SIGUSR1` to trigger immediate processing of the session summary via batch distill.
 5. **Feedback loop + context snapshot:**
-   - **V2 path** (`isSubFlag('injection')`): Compute session-level reward via `sessionOutcomeReward(events)` from `../daemon/lib/attribution.js`. For each injected pattern, call `db.updateInjectionOutcome(sessionId, pid, reward)`. Patterns that were explicitly used (`wasUsed`) receive `reward=1.0`; others receive the session-level reward.
+   - **V2 path** (`isSubFlag('injection')`): Compute session-level reward via `sessionOutcomeReward(events)` from `../daemon/lib/attribution.js`. Compute an intention embedding from the last 3 session prompts (max 200 chars) via `generateEmbedding()`. For each injected pattern ID (`pid`): call `db.updateInjectionOutcome(sessionId, pid, reward)` (used patterns receive `reward=1.0`, others receive the session-level reward). Route Bayesian updates: `doc:` prefixed IDs call `db.updateDocChunkAlphaBeta(chunkId, outcome)` (`'success'` if reward ≥ 0.7, `'failure'` if reward ≤ 0.3, no-op otherwise); regular pattern IDs call `db.applyBayesianUpdate(pid, outcome)` with the same thresholds. For non-doc patterns with sufficient intention text, check `db.isDuplicateOutcome()` and if not a duplicate, call `db.insertOutcome()` with intention text, embedding, outcome label, and session context, then `db.pruneOutcomes(pid, 20)`. Partial outcomes (used + session failed) also apply `beta += 0.5` half-penalty.
    - **V1 path**: Collect stale (un-used) injections from session memory via `sm.getStaleInjections(0)`. Apply soft-negative via `applySoftNegative(db, stale)` from `../daemon/lib/scoring.js`.
    - Write context snapshot to `~/.quoth/intelligence/last-context-{project}.json` for the next `session-restore` to use as `queryText`.
    - Clear session memory file via `sm.clear()`.
@@ -439,10 +446,11 @@ Applies positive Bayesian feedback to patterns that were matched during the suba
    - Return the list of boosted IDs.
 2. For each boosted ID with a `pat-` prefix (indicating a SQLite pattern):
    - Strip the `pat-` prefix to get the real pattern ID.
-   - Call `db.applyBayesianUpdate(patternId, 'success')` to increment the alpha parameter and recalculate Bayesian confidence in the SQLite database.
+   - If the real ID starts with `doc:`, strip the `doc:` prefix and call `db.updateDocChunkAlphaBeta(chunkId, 'success')` — routes the success update to the `doc_chunks` table.
+   - Otherwise, call `db.applyBayesianUpdate(patternId, 'success')` to increment the alpha parameter and recalculate Bayesian confidence in the `patterns` table.
 3. **Session memory feedback:** Find recently-injected patterns not yet marked as used (within last 5 min) via `sm._state().injectedPatterns`. For each:
    - Call `sm.markPatternUsed(id)`.
-   - **V2 path** (`isSubFlag('injection')`): `db.updateInjectionOutcome(sessionId, id, 1.0)` — strong reward signal recorded in `injection_log` for nightly SNIPS aggregation.
+   - **V2 path** (`isSubFlag('injection')`): `db.updateInjectionOutcome(sessionId, id, 1.0)` — strong reward signal recorded in `injection_log`. Also routes Bayesian update: `doc:` IDs call `db.updateDocChunkAlphaBeta(id.slice(4), 'success')`; regular IDs call `db.applyBayesianUpdate(id, 'success')`.
    - **V1 path**: `db.applyBayesianUpdate(id, 'success')` on the pattern directly.
 4. Output: `[OK] Task completed`
 
@@ -484,10 +492,15 @@ Injects domain-relevant patterns from the SQLite database into the subagent's co
    ```
 6. If no patterns in `resp.patterns`, return silently.
 7. Record exposures via `recordExposure(db, ids)` and track in session memory via `sm.recordInjection(ids)`.
-8. Output JSON with `additionalContext` field for Claude Code to inject:
+8. If `resp.doc_chunks` contains chunks with `score > 0.2`, append them to `additionalContext` in the format:
+   ```
+   [Quoth Docs] Relevant documentation:
+   - [doc] Section Header: chunk content (100 chars)...
+   ```
+9. Output JSON with `additionalContext` field for Claude Code to inject:
    ```json
    {
-     "additionalContext": "[Quoth] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search."
+     "additionalContext": "[Quoth] 3 patterns for coder agent (project: quoth):\n- [0.85] auth-resilience: Use DB fallback for optional JWT claims\n- [0.72] drizzle-arrays: Format JS arrays as {id1,id2} for Postgres\nUse quoth_search_patterns for deeper semantic search.\n\n[Quoth Docs] Relevant documentation:\n- [doc] Hook Events Reference: ## Hook Events Reference..."
    }
    ```
 

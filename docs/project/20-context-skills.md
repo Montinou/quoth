@@ -2,7 +2,7 @@
 
 Two subsystems added in v3.3.0 and extended in v3.4.0: a project context injection mechanism that enriches session start with relevant architecture summaries, and a set of built-in skills that ship with the plugin.
 
-**Version:** 1.0.3 | **Last updated:** 2026-04-09
+**Version:** 1.0.4 | **Last updated:** 2026-04-11
 
 Source files:
 - `quoth-plugin/context/` — context markdown files injected at SessionStart
@@ -81,7 +81,15 @@ The daemon is queried with `{ type: 'inject', limit: 7 }` and matching patterns 
 - [0.82] pattern-name: action description...
 ```
 
-Pattern IDs are recorded via `recordExposure()` and `session-memory.js` so that `session-end` can apply the appropriate feedback (V1 soft-negative on stale injections, V2 reward-weighted via `injection_log`). The `last-context-{project}.json` snapshot itself is written by `session-end` from the `createSessionMemory` summary.
+Pattern IDs and doc chunk IDs (score > 0.2) are combined into `allIds` for `recordExposure()` and `sm.recordInjection()` so that `session-end` can apply the appropriate feedback. If the daemon response includes relevant doc chunks, they are also printed as:
+
+```
+[Quoth Docs] Session context:
+  • [hook-system] ## Hook Events Reference...
+  • [configuration] ## Setup Script...
+```
+
+Labels are derived from `doc_file` (e.g., `04-hook-system.md` → `hook-system`). Content is truncated to 150 chars. The `last-context-{project}.json` snapshot itself is written by `session-end` from the `createSessionMemory` summary.
 
 ### Project-Local Context Override
 

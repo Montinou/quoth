@@ -1,6 +1,6 @@
 # API Reference
 
-**Version:** 1.0.4 | **Last updated:** 2026-04-10
+**Version:** 1.0.5 | **Last updated:** 2026-04-11
 
 API reference index for the Quoth system.
 
