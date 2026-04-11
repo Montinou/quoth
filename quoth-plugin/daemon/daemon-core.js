@@ -223,6 +223,7 @@ function _loadPipelineStages() {
   _pipelineStages = {
     runTriage: require('./pipeline/triage.js').runTriage,
     runExtract: require('./pipeline/extract.js').runExtract,
+    runExtractWithFallback: require('./pipeline/extract.js').runExtractWithFallback,
     embedEntities: require('./pipeline/embed.js').embedEntities,
     persistSession: require('./pipeline/persist.js').persistSession,
   }
@@ -319,8 +320,9 @@ async function processSessionWithPipeline(sessionFile, deps = {}) {
     }
 
     const extractOut = await sem.extract.run(() =>
-      stages.runExtract(session, {
+      stages.runExtractWithFallback(session, {
         llm: llm.kimi,
+        sonnetFallback: llm.sonnet,
         urgency: triageOut.urgency,
         suspected_kinds: triageOut.suspected_kinds,
       }),

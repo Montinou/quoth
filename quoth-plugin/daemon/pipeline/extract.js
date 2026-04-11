@@ -817,11 +817,20 @@ async function runExtractWithFallback(session, opts = {}) {
 
     const parsed = parseExtractEntities(fallbackRes?.text ?? '')
     const scope = `project:${project ?? 'unknown'}`
+    // Same anti-leak + authoritative stamping as the primary path (see
+    // runExtract above). persist.js requires source + source_session_id to be
+    // non-null (spec §3.1).
     const cleanEntities = parsed.entities.map(e => {
       const meta = { ...(e.metadata || {}) }
       delete meta.project
       delete meta.scope
-      return { ...e, scope, metadata: meta }
+      return {
+        ...e,
+        scope,
+        metadata: meta,
+        source: 'extracted',
+        source_session_id: session_id,
+      }
     })
 
     logPipelineError({
