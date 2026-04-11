@@ -477,6 +477,13 @@ function createDb(dbPath) {
         extract_calls INTEGER NOT NULL DEFAULT 0,
         updated_at    INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS pipeline_runs (
+        source_session_id TEXT PRIMARY KEY,
+        run_id            TEXT NOT NULL,
+        status            TEXT NOT NULL,
+        created_at        INTEGER NOT NULL
+      );
     `)
   } catch (e) { console.error('[db] knowledge_entities create failed:', e.message); throw e }
 
