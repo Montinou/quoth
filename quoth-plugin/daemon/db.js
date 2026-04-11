@@ -414,6 +414,48 @@ function createDb(dbPath) {
   v2Migrate('add doc_chunks alpha', () => db.exec('ALTER TABLE doc_chunks ADD COLUMN alpha REAL NOT NULL DEFAULT 1'))
   v2Migrate('add doc_chunks beta', () => db.exec('ALTER TABLE doc_chunks ADD COLUMN beta REAL NOT NULL DEFAULT 1'))
 
+  // --- knowledge_entities: polymorphic 4-kind knowledge store ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_entities (
+        id                TEXT PRIMARY KEY,
+        kind              TEXT NOT NULL,
+        scope             TEXT NOT NULL,
+        summary           TEXT NOT NULL,
+        content           TEXT NOT NULL,
+        metadata          TEXT NOT NULL,
+        embedding         BLOB,
+        tags              TEXT NOT NULL DEFAULT '[]',
+        confidence        REAL NOT NULL DEFAULT 0.5,
+        alpha             REAL NOT NULL DEFAULT 1.0,
+        beta              REAL NOT NULL DEFAULT 1.0,
+        polarity          TEXT NOT NULL DEFAULT 'positive',
+        status            TEXT NOT NULL DEFAULT 'active',
+        source            TEXT NOT NULL,
+        source_session_id TEXT,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        last_exposed_at   INTEGER,
+        exposure_count    INTEGER NOT NULL DEFAULT 0,
+        embedding_indexed INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_ke_kind       ON knowledge_entities(kind);
+      CREATE INDEX IF NOT EXISTS idx_ke_scope      ON knowledge_entities(scope);
+      CREATE INDEX IF NOT EXISTS idx_ke_kind_scope ON knowledge_entities(kind, scope, status);
+      CREATE INDEX IF NOT EXISTS idx_ke_session    ON knowledge_entities(source_session_id);
+      CREATE INDEX IF NOT EXISTS idx_ke_created    ON knowledge_entities(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ke_confidence ON knowledge_entities(kind, confidence DESC) WHERE status='active';
+
+      CREATE TABLE IF NOT EXISTS llm_budget (
+        date          TEXT PRIMARY KEY,
+        spend_usd     REAL NOT NULL DEFAULT 0,
+        triage_calls  INTEGER NOT NULL DEFAULT 0,
+        extract_calls INTEGER NOT NULL DEFAULT 0,
+        updated_at    INTEGER NOT NULL
+      );
+    `)
+  } catch (e) { console.error('[db] knowledge_entities create failed:', e.message); throw e }
+
   // --- HNSW index state ---
   const hnsw = new HnswIndex(384)
   let hnswHealthy = false
@@ -1367,4 +1409,10 @@ function createDb(dbPath) {
   return db
 }
 
-module.exports = { createDb }
+function openDb() {
+  const home = process.env.QUOTH_HOME || path.join(require('os').homedir(), '.quoth')
+  const dbPath = path.join(home, 'memory.db')
+  return createDb(dbPath)
+}
+
+module.exports = { createDb, openDb }
