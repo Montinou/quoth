@@ -1,8 +1,8 @@
 # Spec: Extract Pipeline v2 — Thinking + Tool Calling + Rich Persistence
 
-**Version**: 1.1
+**Version**: 1.2
 **Date**: 2026-04-10
-**Status**: Approved (spec review passed, v1.1)
+**Status**: Approved (spec review passed, v1.2 — factual corrections applied)
 **Builds on**: 2026-04-09-intent-outcome-temporal.md (EXTRACT pipeline)
 
 ## Problem
@@ -12,19 +12,20 @@ The current EXTRACT pipeline produces generic, tautological patterns. Analysis o
 1. **Patterns are obvious** — "Preserve existing code structure during edits", "Search for specific keywords across files" describe what any LLM does by default. They add zero signal.
 2. **condition/action are broken** — `condition` is hardcoded to `Session: {task.slice(0,100)}` which is just tool counts (e.g. "Session (synthetic): 17 tool calls (Bash:14, Write:2)"). `action` is an exact copy of `name`. Both fields are useless.
 3. **intention is discarded** — The LLM returns an `intention` field describing *when/why* to use the pattern. It's never persisted.
-4. **The LLM has no context** — `tool_output` is always empty (Claude Code hook payload doesn't include results). The LLM sees tool names and truncated inputs but not *what happened*. It guesses generically.
+4. **The LLM has no context** — `tool_input` and `tool_output` are captured in trajectory JSONL by `trajectory-capture.js` (via `summarizeToolInput()` / `summarizeToolOutput()` with sanitization), but `buildPrompt()` in `extract.js` never passes them to the LLM. It only uses `e.task` (a short 100-char summary like "Bash grep -r foo") and `e.llm_reasoning`. The LLM sees tool names and truncated task summaries but not the actual inputs, outputs, or file contents. It guesses generically.
 5. **Thinking is disabled** — `callMoonshot()` passes `thinking: { type: 'disabled' }`. K2.5's reasoning capability is wasted.
 6. **JSON parsing is fragile** — Regex-based extraction (`parseJson()`) instead of using K2.5's native JSON mode.
 
 ### Root Cause Chain
 
 ```
-tool_output always empty
-  → LLM only sees "Bash: find /path..." not what was found
-    → LLM generates generic descriptions of tool calls
-      → condition = session task string (useless)
-      → action = copy of name (redundant)
-        → patterns are noise
+tool_input/tool_output available in JSONL but not passed to extraction LLM
+  → buildPrompt() only uses e.task (truncated 100-char summary) + e.llm_reasoning
+    → LLM sees "Bash grep -r foo" not what was found or what files were edited
+      → LLM generates generic descriptions of tool calls
+        → condition = session task string (useless)
+        → action = copy of name (redundant)
+          → patterns are noise
 ```
 
 ## Design: EXTRACT v2
@@ -83,7 +84,7 @@ Split the LLM call into system message (cacheable, static) and user message (per
 |---|---|
 | `thinking: { type: 'disabled' }` | Thinking enabled (default K2.5 behavior) |
 | Regex JSON parsing + `jsonPrefill` hack | Attempt `response_format: json_object` first; if API rejects (combo with tools), fall back to `jsonPrefill` + `parseJson()` |
-| 30 tool entries, no tool_input content | 60 tool entries with full tool_input |
+| 30 tool entries, input buried in `e.task` (truncated 100 chars), raw `tool_input`/`tool_output` from JSONL unused | 60 tool entries with raw `tool_input` content (up to 300 chars) |
 | LLM can't see file contents or results | `read_file` + `grep_codebase` tools |
 | Static `max_tokens: 600` | `max_tokens: 16384` (thinking needs headroom) |
 | Single-turn LLM call | Multi-turn tool calling loop |
@@ -248,6 +249,8 @@ Respond with JSON:
 Return {"patterns": []} if no genuine technique emerged.
 ```
 
+**Note:** The current extract.js uses a `session_type` field ("productive" | "routine") to short-circuit routine sessions before pattern validation. The v2 schema drops `session_type` — an empty `patterns` array serves the same purpose. The `parsePatterns()` function should treat both `{"patterns": []}` and `{"session_type": "routine", "patterns": []}` as valid empty results for backward compatibility during the transition.
+
 ### 5. User Message (Per-Session)
 
 ```
@@ -377,7 +380,11 @@ description: distilled.condition,              // = condition duplicated here fo
 
 **Why `name` = `action`:** The `name` column is used by `findDuplicateByName()` for prefix-based dedup matching. Two patterns with the same technique (action) but triggered by different situations (condition) should dedup — the technique is what matters for dedup, not the trigger. This preserves compatibility with existing name-based dedup logic, which compares technique descriptions against technique descriptions.
 
-**Embedding text for dedup:** `findDuplicateByEmbedding()` uses the `embedding` column. In v2, embeddings are generated from `condition + " → " + action`, giving richer semantic signal than just the action alone. The 0.92 cosine similarity threshold may need tuning after deployment (v1 patterns embedded action-only text).
+**Embedding text for dedup:** `findDuplicateByEmbedding()` uses the `embedding` column. In v2, embeddings are generated from `condition + " → " + action`, giving richer semantic signal than just the action alone.
+
+**Transition period risk:** During rollout, new patterns (embedded from `condition → action` text) will be compared against existing patterns (embedded from `pattern` text only). These represent different embedding distributions — cosine similarity between them will be systematically lower, risking duplicate creation. Mitigation options:
+1. **Recommended:** On first daemon restart after deployment, re-embed all active patterns using the new `condition + " → " + action` text format (use existing `name` + `action` columns as source since `name ≈ action` in v1 patterns). This is a one-time batch of ~500 embeddings via MiniLM (local, ~2 seconds).
+2. **Alternative:** Temporarily lower the dedup threshold from 0.92 to 0.85 for the first 48 hours, then restore after the v1 pattern population has been re-embedded or displaced.
 
 ### 9. Prompt Caching
 
@@ -416,7 +423,7 @@ Key implementation details:
 - `prompt_cache_key` passed when provided
 - Does NOT use the `jsonPrefill` hack (JSON mode or regex fallback handles this)
 
-The existing `callMoonshot()` is unchanged — other daemon tasks depend on it.
+The existing `callMoonshot()` is unchanged — other daemon tasks depend on it. Note: `extract.js` currently calls `callMoonshot(prompt, 600, { jsonPrefill: true })` which uses the partial prefill hack (assistant message starting with `{`). The v2 migration removes this dependency entirely — `callMoonshotWithTools()` uses JSON mode or regex fallback instead.
 
 ### 11. Fallback Behavior
 
@@ -440,9 +447,21 @@ The existing `callMoonshot()` is unchanged — other daemon tasks depend on it.
 
 Tool calls need a project root path to resolve relative paths and as default `grep_codebase` directory. The trajectory entries contain `project` (a git remote name like "ips" or "quoth") but not the filesystem path.
 
+**Note:** The existing `detectProjectFromTask()` in `daemon.js` maps file path patterns → project names (e.g. `/IPS_audit\/IPS/` → `'ips'`). It does the *reverse* of what's needed here. A **new** reverse mapping must be built for `resolveProjectRoot()`.
+
 Resolution strategy in `tool-executor.js`:
 1. Extract file paths from the session's tool entries (`tool_input` fields). Find the common ancestor directory.
-2. If no paths found, use the `detectProjectFromTask()` mapping in `daemon.js` (which maps "ips" → `/home/lord_montino/IPS_audit/IPS`, etc.) — expose this as a `resolveProjectRoot(project)` function.
+2. If no paths found, use a new `resolveProjectRoot(project)` function with an explicit name→path mapping:
+   ```javascript
+   const PROJECT_ROOTS = {
+     'ips': '/home/lord_montino/IPS_audit/IPS',
+     'quoth': '/home/lord_montino/projects/agents-tools/quoth',
+     'exolar': '/home/lord_montino/projects/agents-tools/exolar',
+     'triqual': '/home/lord_montino/projects/agents-tools/triqual',
+     // Add as needed — or auto-discover via `find ~ -name .git -type d`
+   }
+   ```
+   This is distinct from `detectProjectFromTask()` which maps paths→names.
 3. Pass the resolved project root to `executeToolCall()` so `grep_codebase` has a default search directory.
 
 ## Files Modified
@@ -456,23 +475,28 @@ Resolution strategy in `tool-executor.js`:
 
 ## Cost Impact
 
+**Kimi K2.5 pricing (Moonshot API, as of 2026-04):**
+- Input: $1.40/MTok (non-cached), $0.70/MTok (cached)
+- Output: $5.60/MTok (non-thinking), thinking tokens billed at output rate
+- Reference: https://platform.moonshot.ai/docs/pricing
+
 **Per session extraction (current):**
 - 1 K2.5 call, ~2K input tokens, ~500 output tokens, thinking disabled
-- ~$0.0027/session
+- ~$0.006/session ($1.40×2K/1M + $5.60×500/1M)
 
 **Per session extraction (v2, average case — 11-30 entries, ~3 tool calls):**
 - 1 initial K2.5 call: ~6K input tokens (richer prompt), ~4K output (thinking + content)
 - 3 tool call rounds: ~2K input tokens each (tool results + history), ~1K output each
-- Total: ~15K input, ~7K output ≈ $0.030/session
-- With prompt caching on burst: ~$0.024/session
+- Total: ~12K input, ~7K output ≈ $0.056/session
+- With prompt caching on burst (~50% cache hit on system message): ~$0.048/session
 
 **Per session (worst case — 31+ entries, 8 tool calls, large files):**
-- ~50K input, ~15K output ≈ $0.075/session
-- Token budget cap (100K) prevents runaway beyond ~$0.12/session absolute max
+- ~50K input, ~15K output ≈ $0.154/session
+- Token budget cap (100K) prevents runaway beyond ~$0.22/session absolute max
 
-**Daily cap of 50 sessions:** typical ~$1.50/day, max ~$3.75/day (vs ~$0.14/day current).
+**Daily cap of 50 sessions:** typical ~$2.80/day, max ~$7.70/day (vs ~$0.30/day current).
 
-**Mitigation:** Dynamic budget concentrates cost on complex sessions. Small sessions (≤10 entries, 2 tool calls) cost ~$0.01. The 100K token budget cap prevents outliers.
+**Mitigation:** Dynamic budget concentrates cost on complex sessions. Small sessions (≤10 entries, 2 tool calls) cost ~$0.02. The 100K token budget cap prevents outliers.
 
 ## Migration
 
@@ -481,7 +505,8 @@ Resolution strategy in `tool-executor.js`:
 3. New patterns will have proper condition/action/description fields
 4. No schema migration needed — `condition`, `action`, `description` columns already exist in patterns table
 5. Embedding dimension unchanged (384d MiniLM) — HNSW index compatible
-6. Restart daemon: `kill -TERM $(cat ~/.quoth/daemon.pid)` — session-start hook auto-restarts it
+6. **Re-embed existing patterns:** On first startup, re-embed all active patterns using `condition + " → " + action` text format (from existing `name` + `action` columns). ~500 patterns × MiniLM local = ~2 seconds. This prevents dedup drift during the transition (see §8 transition period risk).
+7. Restart daemon: `kill -TERM $(cat ~/.quoth/daemon.pid)` — session-start hook auto-restarts it
 
 ## Success Criteria
 
