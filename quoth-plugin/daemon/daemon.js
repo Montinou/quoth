@@ -28,9 +28,8 @@ for (const envPath of [
 }
 
 const { createDb } = require('./db.js')
-const { extract, QUALITY_PRIORS } = require('./pipeline/extract.js')
+const { QUALITY_PRIORS } = require('./pipeline/extract.js')
 const { promotePattern } = require('./lib/promote.js')
-const { callPipelineAPI } = require('./lib/pipeline-api.js')
 const { callDocUpdateAPI } = require('./lib/doc-update-api.js')
 const { scanDocs } = require('./lib/doc-manifest.js')
 const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
@@ -39,13 +38,13 @@ const { updateDoc, commitAndPush } = require('./lib/doc-updater.js')
 // 'local' = full local LLM pipeline (needs AI_GATEWAY_API_KEY or claude CLI)
 // 'managed' = cloud pipeline via Quoth API (only needs QUOTH_API_KEY)
 const QUOTH_MODE = process.env.QUOTH_MODE || 'local'
+const MANAGED_LOCAL_BG = process.env.QUOTH_MANAGED_LOCAL_BACKGROUND === 'true'
 
 // --- Paths ---
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const TRAJECTORIES_DIR = path.join(QUOTH_HOME, 'trajectories')
 const PID_FILE = path.join(QUOTH_HOME, 'daemon.pid')
 const LOG_FILE = path.join(QUOTH_HOME, 'daemon.log')
-const LOCK_FILE = path.join(QUOTH_HOME, 'processing.lock')
 const DB_PATH = path.join(QUOTH_HOME, 'memory.db')
 const STATE_DIR = path.join(QUOTH_HOME, 'intelligence')
 
@@ -65,10 +64,6 @@ let decayTimer = null
 let deepConsolidateTimer = null
 let hnswSaveTimer = null
 let agentCleanupTimer = null
-
-const DAILY_EXTRACT_CAP = parseInt(process.env.QUOTH_DAILY_EXTRACT_CAP || process.env.QUOTH_DAILY_DISTILL_CAP || '50', 10)
-let dailyExtractCount = 0
-let dailyExtractDate = new Date().toISOString().slice(0, 10)
 
 // --- Logging ---
 function log(level, msg, data) {
@@ -103,16 +98,8 @@ if (fs.existsSync(PID_FILE)) {
 fs.writeFileSync(PID_FILE, String(process.pid))
 process.on('exit', () => {
   try { fs.unlinkSync(PID_FILE) } catch {}
-  try { fs.unlinkSync(LOCK_FILE) } catch {}
   try { fs.unlinkSync(SOCK_PATH) } catch {}
 })
-// Clean stale lock from previous crash
-if (fs.existsSync(LOCK_FILE)) {
-  try {
-    const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
-    try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE); log('info', 'Cleaned stale lock', { stalePid: lockPid }) }
-  } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
-}
 
 // --- Signal handlers ---
 let queryServer = null
@@ -126,8 +113,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGUSR1', async () => {
   log('info', 'SIGUSR1: flush triggered')
-  scanAndEnqueue()
-  processQueue()
+  scanProcessingDir()
 })
 
 process.on('SIGUSR2', async () => {
@@ -149,73 +135,82 @@ process.on('uncaughtException', (err) => {
 
 // --- File watcher ---
 function watchTrajectories() {
+  const processingDir = path.join(TRAJECTORIES_DIR, 'processing')
+  fs.mkdirSync(processingDir, { recursive: true })
+
+  log('info', 'Watching trajectories/processing/ for session handoffs', { dir: processingDir })
   try {
-    fs.watch(TRAJECTORIES_DIR, { persistent: true }, (event, filename) => {
-      if (filename && filename.endsWith('.jsonl')) {
-        setTimeout(() => { scanAndEnqueue(); processQueue() }, 500)
-      }
+    fs.watch(processingDir, { persistent: true }, (eventType, filename) => {
+      if (!filename || !filename.endsWith('.jsonl')) return
+      const fullPath = path.join(processingDir, filename)
+      setTimeout(() => { enqueueSessionFile(fullPath) }, 50)
     })
-    log('info', 'Watching trajectories', { dir: TRAJECTORIES_DIR, mode: QUOTH_MODE })
   } catch (err) {
-    log('error', 'Failed to start watcher', { error: err.message })
+    log('error', 'fs.watch on processing/ failed', { error: err.message })
+  }
+
+  scanProcessingDir()
+}
+
+function scanProcessingDir() {
+  const processingDir = path.join(TRAJECTORIES_DIR, 'processing')
+  try {
+    const files = fs.readdirSync(processingDir).filter(f => f.endsWith('.jsonl'))
+    for (const f of files) enqueueSessionFile(path.join(processingDir, f))
+  } catch (err) {
+    log('error', 'initial scan of processing/ failed', { error: err.message })
   }
 }
 
-// --- Scan JSONL files for unprocessed entries ---
-function scanAndEnqueue() {
-  let added = 0
+const _sessionQueue = []
+let _workerBusy = false
+
+function enqueueSessionFile(fullPath) {
+  if (_sessionQueue.includes(fullPath)) return
+  if (!fs.existsSync(fullPath)) return
+  _sessionQueue.push(fullPath)
+  runWorker()
+}
+
+async function runWorker() {
+  if (_workerBusy) return
+  _workerBusy = true
+  // Attach insertNewPattern onto db so daemon-core can call it via the db param.
+  // The module-level insertNewPattern function closes over module-level db + log.
+  if (!db.insertNewPattern) db.insertNewPattern = insertNewPattern
   try {
-    const files = fs.readdirSync(TRAJECTORIES_DIR).filter(f => f.endsWith('.jsonl'))
-    for (const file of files) {
-      const filePath = path.join(TRAJECTORIES_DIR, file)
-      try {
-        const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-        for (let i = 0; i < lines.length; i++) {
-          try {
-            const entry = JSON.parse(lines[i])
-            if (entry._processed) continue
-            // Deduplicate: use file + line index as unique key
-            const key = `${file}:${i}`
-            if (enqueuedKeys.has(key)) continue
-            enqueuedKeys.add(key)
-            jobQueue.push({ entry, filePath, line: lines[i], key })
-            added++
-          } catch {}
+    while (_sessionQueue.length > 0) {
+      const file = _sessionQueue.shift()
+      if (!fs.existsSync(file)) continue
+      const { processSessionFile } = require('./daemon-core.js')
+      let extractFn
+      if (QUOTH_MODE === 'managed' && MANAGED_LOCAL_BG) {
+        const { runLocalBackground } = require('./lib/pipeline-api.js')
+        extractFn = async (summary, toolEntries, dbArg) =>
+          runLocalBackground({ summary, toolEntries, db: dbArg })
+      } else if (QUOTH_MODE === 'managed') {
+        const { callPipelineAPI } = require('./lib/pipeline-api.js')
+        extractFn = async (summary, toolEntries) => {
+          const res = await callPipelineAPI([{ summary, tool_entries: toolEntries.slice(-30) }], [])
+          return res || { patterns: [], facts: [] }
         }
-      } catch (err) {
-        log('error', 'Failed to read trajectory file', { file, error: err.message })
+      } else {
+        const { extract } = require('./pipeline/extract.js')
+        extractFn = (summary, toolEntries, dbArg) => extract(summary, toolEntries, dbArg)
       }
-    }
-  } catch (err) {
-    log('error', 'scanAndEnqueue failed', { error: err.message })
-  }
-  if (added > 0) log('info', `Enqueued ${added} new entries (queue: ${jobQueue.length})`)
-}
-
-// --- Process queue with up to 5 parallel workers ---
-async function processQueue() {
-  if (isProcessing || jobQueue.length === 0) return
-  if (fs.existsSync(LOCK_FILE)) {
-    // Check if lock holder is still alive
-    try {
-      const lockPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim())
-      try { process.kill(lockPid, 0) } catch { fs.unlinkSync(LOCK_FILE) }
-    } catch { try { fs.unlinkSync(LOCK_FILE) } catch {} }
-    if (fs.existsSync(LOCK_FILE)) return
-  }
-
-  try { fs.writeFileSync(LOCK_FILE, String(process.pid)) } catch { return }
-  isProcessing = true
-
-  try {
-    const CONCURRENCY = 5
-    while (jobQueue.length > 0) {
-      const batch = jobQueue.splice(0, CONCURRENCY)
-      await Promise.all(batch.map(job => processEntry(job)))
+      try {
+        await processSessionFile({
+          sessionFile: file,
+          db,
+          extractFn,
+          log,
+        })
+      } catch (err) {
+        log('error', 'worker unexpected', { file, error: err.message })
+      }
     }
   } finally {
-    isProcessing = false
-    try { fs.unlinkSync(LOCK_FILE) } catch {}
+    _workerBusy = false
   }
 }
 
@@ -262,147 +257,6 @@ function detectProjectFromTask(task, fallback) {
     return override || m[1].toLowerCase()
   }
   return fallback
-}
-
-async function processEntry({ entry, filePath, line }) {
-  try {
-    // Only process session_summary entries (EXTRACT pipeline).
-    // Individual tool_use entries are consumed as context by EXTRACT
-    // when the session_summary arrives.
-    if (entry.event === 'session_summary') {
-      await processSessionBatch(entry, filePath, line)
-      return
-    }
-
-    // Don't mark tool_use — processSessionBatch() reads unprocessed
-    // tool_use entries from the file when session_summary arrives.
-    if (entry.event !== 'tool_use') {
-      markProcessed(filePath, line)
-    }
-  } catch (err) {
-    log('error', 'processEntry failed', { error: err.message })
-  }
-}
-
-async function processSessionBatch(summaryEntry, filePath, summaryLine) {
-  const sessionId = summaryEntry.session
-  const project = summaryEntry.project || 'default'
-  log('info', 'EXTRACT for session', { session: sessionId, project, tools: summaryEntry.total_calls })
-
-  // Read all tool_use entries from file for this session
-  const toolEntries = []
-  const toolLines = []
-  try {
-    const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-    for (const rawLine of lines) {
-      try {
-        const e = JSON.parse(rawLine)
-        if (e.session === sessionId && e.event === 'tool_use' && !e._processed) {
-          toolEntries.push(e)
-          toolLines.push(rawLine)
-        }
-      } catch {}
-    }
-  } catch (err) {
-    log('error', 'Failed to read session entries', { error: err.message })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-
-  if (toolEntries.length === 0) {
-    log('debug', 'No tool entries for session', { session: sessionId })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-
-  // Daily cap check
-  const today = new Date().toISOString().slice(0, 10)
-  if (today !== dailyExtractDate) { dailyExtractCount = 0; dailyExtractDate = today }
-  if (dailyExtractCount >= DAILY_EXTRACT_CAP) {
-    log('info', 'Daily extract cap reached', { count: dailyExtractCount, cap: DAILY_EXTRACT_CAP })
-    markProcessed(filePath, summaryLine)
-    return
-  }
-  dailyExtractCount++
-
-  // Mode switch: managed (cloud) vs local
-  let extractedPatterns = []
-  if (QUOTH_MODE === 'managed') {
-    extractedPatterns = await processSessionManaged(summaryEntry, toolEntries, project)
-  } else {
-    extractedPatterns = await processSessionLocal(summaryEntry, toolEntries)
-  }
-
-  log('info', 'EXTRACT produced patterns', { count: extractedPatterns.length, session: sessionId, mode: QUOTH_MODE })
-
-  // Insert patterns into local DB
-  for (const pattern of extractedPatterns) {
-    try {
-      insertNewPattern(pattern, summaryEntry, project)
-    } catch (err) {
-      log('error', 'Pattern insertion failed', { error: err.message })
-    }
-  }
-
-  // Mark all entries as processed
-  for (const toolLine of toolLines) markProcessed(filePath, toolLine)
-  markProcessed(filePath, summaryLine)
-}
-
-// --- Managed mode: send sessions to cloud pipeline API ---
-async function processSessionManaged(summaryEntry, toolEntries, project) {
-  // Get top local patterns for consolidation context
-  const topPatterns = db.getTopPatterns(10).map(p => ({
-    id: p.id, name: p.name, confidence: p.confidence
-  }))
-
-  const session = {
-    summary: {
-      project,
-      outcome: summaryEntry.outcome || 'unknown',
-      success_rate: summaryEntry.success_rate || 0,
-      total_calls: summaryEntry.total_calls || toolEntries.length,
-      user_intents: summaryEntry.user_intents || [],
-      task: summaryEntry.task || ''
-    },
-    tool_entries: toolEntries.slice(-30).map(e => ({
-      tool: e.tool || '', task: (e.task || '').slice(0, 200),
-      outcome: e.outcome || 'success', llm_reasoning: (e.llm_reasoning || '').slice(0, 150)
-    }))
-  }
-
-  const result = await callPipelineAPI([session], topPatterns)
-  if (!result || !result.patterns) {
-    log('warn', 'Managed pipeline returned no results, falling back to local', { project })
-    return processSessionLocal(summaryEntry, toolEntries)
-  }
-
-  if (result.tokens_used) {
-    log('info', 'Cloud pipeline tokens used', { tokens: result.tokens_used, quota: result.quota_remaining })
-  }
-
-  // Map cloud response to local pattern format (add local embeddings)
-  const { generateEmbeddingBatch } = require('./lib/embed.js')
-  const texts = result.patterns.map(p => p.pattern)
-  const embeddings = await generateEmbeddingBatch(texts)
-
-  return result.patterns.map((p, i) => ({
-    id: p.id,
-    pattern: p.pattern,
-    tags: p.tags || [],
-    applicability: p.applicability || 'broad',
-    embedding: embeddings[i],
-    source: 'distilled',
-    // Cloud already did consolidation
-    _action: p.action,
-    _targetId: p.targetId
-  }))
-}
-
-async function processSessionLocal(summaryEntry, toolEntries) {
-  const result = await extract(summaryEntry, toolEntries, db)
-  // extract() returns flat array (unlike distillBatch which returns {patterns, usage})
-  return Array.isArray(result) ? result : []
 }
 
 function insertNewPattern(distilled, summaryEntry, project) {
@@ -461,15 +315,6 @@ function insertNewPattern(distilled, summaryEntry, project) {
     quality: distilled.quality_signal,
     confidence: confidence.toFixed(2),
   })
-}
-
-// --- Mark a line as processed ---
-function markProcessed(filePath, originalLine) {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8')
-    const processedLine = originalLine.replace(/\}(\s*)$/, ',"_processed":true}$1')
-    fs.writeFileSync(filePath, content.replace(originalLine, processedLine))
-  } catch {}
 }
 
 // --- Hourly decay timer ---
@@ -762,6 +607,15 @@ async function runNightlyPipeline() {
     }
   } catch (err) {
     log('error', 'Nightly Phase H (outcomes) failed', { error: err.message })
+  }
+
+  // Phase I: Retention sweep — delete stale trajectory files per-bucket TTLs.
+  try {
+    const { runRetentionSweep } = require('./retention.js')
+    const res = runRetentionSweep({ log })
+    log('info', 'nightly_retention_complete', { deleted: res.deleted, ttls: res.ttls })
+  } catch (err) {
+    log('error', 'nightly_retention_failed', { error: err.message })
   }
 
   const elapsed = Math.round((Date.now() - start) / 1000)
@@ -1388,101 +1242,34 @@ function startAgentCleanupTimer() {
   }, 5 * 60 * 1000)
 }
 
-// --- Stale session detector: generates synthetic summaries for orphaned sessions ---
+// --- Stale session detector: SQL-first scan (spec §6.4) ---
 function startStaleSessionTimer() {
-  staleSessionTimer = setInterval(() => {
-    try {
+  // Spec §6.4(b): startup catch-up using daemon_meta.last_stale_scan_ts.
+  try {
+    const lastTsRaw = typeof db.getDaemonMeta === 'function'
+      ? db.getDaemonMeta('last_stale_scan_ts')
+      : null
+    const lastTs = lastTsRaw != null ? Number(lastTsRaw) || 0 : 0
+    if (Date.now() - lastTs > 10 * 60 * 1000) {
+      log('info', 'Stale scan startup catch-up', { last_scan_ts: lastTs })
       detectStaleSessions()
-    } catch (err) {
-      log('error', 'Stale session detection failed', { error: err.message })
     }
+  } catch (err) {
+    log('warn', 'Stale startup catch-up failed', { error: err.message })
+  }
+
+  staleSessionTimer = setInterval(() => {
+    try { detectStaleSessions() }
+    catch (err) { log('error', 'Stale session detection failed', { error: err.message }) }
   }, 10 * 60 * 1000) // Every 10 minutes
 }
 
 function detectStaleSessions() {
-  const STALE_THRESHOLD = 30 * 60 * 1000 // 30 minutes
-  const now = Date.now()
-
+  const { detectStaleSessions: scan } = require('./stale-detector.js')
   try {
-    const files = fs.readdirSync(TRAJECTORIES_DIR).filter(f => f.endsWith('.jsonl'))
-    for (const file of files) {
-      const filePath = path.join(TRAJECTORIES_DIR, file)
-      const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean)
-
-      // Group unprocessed tool_use entries by session
-      const sessions = new Map() // sessionId → { entries, latestTimestamp }
-      const hasSummary = new Set() // sessions that already have a summary
-
-      for (const rawLine of lines) {
-        try {
-          const e = JSON.parse(rawLine)
-          if (e._processed) continue
-          if (e.event === 'session_summary') {
-            hasSummary.add(e.session)
-            continue
-          }
-          if (e.event === 'tool_use' && e.session) {
-            if (!sessions.has(e.session)) {
-              sessions.set(e.session, { entries: [], latest: 0 })
-            }
-            const s = sessions.get(e.session)
-            s.entries.push(e)
-            s.latest = Math.max(s.latest, e.timestamp || 0)
-          }
-        } catch {}
-      }
-
-      // Find orphaned sessions: tool_use entries without summary, idle > 30 min
-      for (const [sessionId, { entries, latest }] of sessions) {
-        if (hasSummary.has(sessionId)) continue
-        if (entries.length < 3) continue // Skip tiny sessions
-        if ((now - latest) < STALE_THRESHOLD) continue // Still active
-
-        log('info', 'Detected stale session, generating synthetic summary', {
-          session: sessionId, entries: entries.length, idleMin: Math.round((now - latest) / 60000)
-        })
-
-        // Build synthetic session_summary
-        const toolCounts = {}
-        const intents = new Set()
-        const reasonings = []
-        let successes = 0, failures = 0
-        const project = entries[0].project || 'default'
-
-        for (const e of entries) {
-          toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1
-          if (e.outcome === 'success') successes++
-          else failures++
-          if (e.user_intent) intents.add(e.user_intent)
-          if (e.llm_reasoning) reasonings.push(e.llm_reasoning)
-        }
-
-        const toolSummary = Object.entries(toolCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([tool, count]) => `${tool}:${count}`)
-          .join(', ')
-
-        const summary = {
-          event: 'session_summary',
-          agent: 'claude-code',
-          project,
-          session: sessionId,
-          task: `Session (synthetic): ${entries.length} tool calls (${toolSummary}). ${successes} ok, ${failures} fail.`,
-          tool_counts: toolCounts,
-          total_calls: entries.length,
-          success_rate: entries.length > 0 ? successes / entries.length : 0,
-          user_intents: [...intents].slice(0, 5),
-          llm_reasonings: [...new Set(reasonings)].slice(-10),
-          outcome: failures === 0 ? 'success' : (successes > failures ? 'partial' : 'failure'),
-          source: 'stale-session-detector',
-          timestamp: now
-        }
-
-        fs.appendFileSync(filePath, JSON.stringify(summary) + '\n')
-      }
-    }
+    scan({ db, trajectoriesDir: TRAJECTORIES_DIR, log })
   } catch (err) {
-    log('error', 'detectStaleSessions scan failed', { error: err.message })
+    log('error', 'Stale session detection failed', { error: err.message })
   }
 }
 
@@ -1496,8 +1283,6 @@ startV2MiniTimer()
 startAgentCleanupTimer()
 startStaleSessionTimer()
 scheduleNightlyPipeline()
-scanAndEnqueue()
-processQueue()
 
 // --- Query server (Unix socket for hook → daemon communication) ---
 try {

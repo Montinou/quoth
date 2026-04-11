@@ -399,6 +399,40 @@ const handlers = {
         }
       }
     } catch {}
+
+    // --- Facts injection (spec §6.7) ---
+    // Pull up to 5 facts per namespace (project + global) from
+    // memory_entries and emit a markdown block so Claude Code captures
+    // it in the opening context. Only two namespaces per spec §6.6 —
+    // there is no facts:user. Silent on error / empty DB.
+    try {
+      const factsDb = getDb()
+      if (!factsDb || typeof factsDb.listFactsByNamespace !== 'function') throw new Error('no_db')
+
+      const factsProject = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
+      const namespaces = [
+        { label: 'project', ns: `facts:proj:${factsProject}` },
+        { label: 'global',  ns: 'facts:global' },
+      ]
+
+      const blocks = []
+      for (const { label, ns } of namespaces) {
+        const rows = factsDb.listFactsByNamespace(ns, 5) || []
+        if (rows.length === 0) continue
+        const lines = rows.map(r => {
+          let parsed
+          try { parsed = JSON.parse(r.content) } catch { parsed = { statement: String(r.content || '').slice(0, 200) } }
+          const stmt = String(parsed.statement || '').replace(/\s+/g, ' ').trim().slice(0, 240)
+          return `- **${r.key}**: ${stmt}`
+        })
+        const heading = label === 'project' ? `Facts (project — ${factsProject})` : 'Facts (global)'
+        blocks.push(`### ${heading}\n${lines.join('\n')}`)
+      }
+
+      if (blocks.length > 0) {
+        process.stdout.write(`## Facts\n\n${blocks.join('\n\n')}\n`)
+      }
+    } catch {}
   },
 
   'session-end': async () => {
@@ -409,31 +443,43 @@ const handlers = {
       console.log(`[INTELLIGENCE] Consolidated: ${result.entries} entries, ${result.edges} edges${result.newEntries > 0 ? `, ${result.newEntries} new` : ''}, PageRank recomputed`)
     }
 
-    // Write session summary to trajectory JSONL for downstream learning
+    // Atomic handoff: active/<sid>.jsonl → processing/<sid>.jsonl
+    // Spec: docs/superpowers/specs/2026-04-10-session-isolation.md §4.1, §6.2.
+    // The rename is the daemon's claim on the session — once in processing/,
+    // the file belongs to the daemon. Fire-and-forget: any failure is silent
+    // (missing active file, no session id, race with another end-hook, etc).
     try {
       const sessionId = process.env.CLAUDE_SESSION_ID || null
+      if (!sessionId) throw new Error('no_session_id')
+
       const projectDir = process.env.CLAUDE_PROJECT_DIR || os.homedir()
       const project = resolveProjectName(projectDir)
-      const date = new Date().toISOString().slice(0, 10)
-      const trajFile = path.join(QUOTH_HOME, 'trajectories', `${project}-${date}.jsonl`)
 
-      if (!fs.existsSync(trajFile)) throw new Error('no_traj')
+      // Sanitize sid as a path segment (matches trajectory-capture.js).
+      const safeSid = String(sessionId).replace(/[^A-Za-z0-9_\-]/g, '_')
+      const activeDir = path.join(QUOTH_HOME, 'trajectories', 'active')
+      const processingDir = path.join(QUOTH_HOME, 'trajectories', 'processing')
+      const jsonlSrc = path.join(activeDir, `${safeSid}.jsonl`)
+      const jsonlDst = path.join(processingDir, `${safeSid}.jsonl`)
+      const sidecarSrc = path.join(activeDir, `${safeSid}.meta.json`)
+      const sidecarDst = path.join(processingDir, `${safeSid}.meta.json`)
 
-      // Read session's tool calls from today's trajectory file
-      const lines = fs.readFileSync(trajFile, 'utf8').split('\n').filter(Boolean)
+      // If the active JSONL doesn't exist, the hook may have already run
+      // (rerun after handoff) or the session never recorded any tool calls.
+      // Either way — silent no-op.
+      if (!fs.existsSync(jsonlSrc)) throw new Error('no_active_jsonl')
+
+      // Read session's tool_use entries from its own JSONL.
+      const lines = fs.readFileSync(jsonlSrc, 'utf8').split('\n').filter(Boolean)
       const sessionEntries = []
       for (const line of lines) {
         try {
           const entry = JSON.parse(line)
-          if (entry.session === sessionId && entry.event === 'tool_use') {
-            sessionEntries.push(entry)
-          }
+          if (entry.event === 'tool_use') sessionEntries.push(entry)
         } catch {}
       }
 
-      if (sessionEntries.length === 0) throw new Error('no_entries')
-
-      // Build summary
+      // Aggregate tool counts, outcomes, intents, reasonings.
       const toolCounts = {}
       const intents = new Set()
       const reasonings = []
@@ -450,12 +496,14 @@ const handlers = {
         .sort((a, b) => b[1] - a[1])
         .map(([tool, count]) => `${tool}:${count}`)
         .join(', ')
-
       const uniqueIntents = [...intents].slice(0, 5)
-      // Keep unique reasoning snippets (deduped, last 10)
       const uniqueReasonings = [...new Set(reasonings)].slice(-10)
+      const outcome = failures === 0
+        ? 'success'
+        : (successes > failures ? 'partial' : 'failure')
+      const nowTs = Date.now()
 
-      const summary = {
+      const summaryEntry = {
         event: 'session_summary',
         agent: 'claude-code',
         project,
@@ -466,14 +514,59 @@ const handlers = {
         success_rate: sessionEntries.length > 0 ? successes / sessionEntries.length : 0,
         user_intents: uniqueIntents,
         llm_reasonings: uniqueReasonings,
-        outcome: failures === 0 ? 'success' : (successes > failures ? 'partial' : 'failure'),
+        outcome,
         source: 'session-end',
-        timestamp: Date.now()
+        timestamp: nowTs,
       }
 
-      fs.appendFileSync(trajFile, JSON.stringify(summary) + '\n')
+      // Write the summary into the session's own JSONL BEFORE the rename,
+      // so the summary travels with the file into processing/.
+      fs.appendFileSync(jsonlSrc, JSON.stringify(summaryEntry) + '\n')
 
-      // Signal daemon to process immediately (batch distill on session_summary)
+      // Read-modify-write sidecar: flip to terminated + closed. Field names
+      // match the canonical schema (last_seen_ts, tool_count, closed_marker).
+      let meta = null
+      try {
+        meta = JSON.parse(fs.readFileSync(sidecarSrc, 'utf8'))
+      } catch {}
+      if (!meta || typeof meta !== 'object') {
+        meta = {
+          session_id: sessionId,
+          project,
+          first_seen_ts: nowTs,
+          source: 'hook',
+        }
+      }
+      meta.status = 'terminated'
+      meta.closed_marker = true
+      meta.last_seen_ts = nowTs
+      meta.tool_count = sessionEntries.length
+      meta.summary = {
+        total_calls: sessionEntries.length,
+        tool_counts: toolCounts,
+        outcome,
+      }
+
+      const sidecarTmp = sidecarSrc + '.tmp'
+      try {
+        fs.writeFileSync(sidecarTmp, JSON.stringify(meta))
+        fs.renameSync(sidecarTmp, sidecarSrc)
+      } catch {
+        try { fs.unlinkSync(sidecarTmp) } catch {}
+      }
+
+      // Ensure processing/ exists before the rename.
+      if (!fs.existsSync(processingDir)) fs.mkdirSync(processingDir, { recursive: true })
+
+      // The rename is the daemon's claim. JSONL first, then sidecar — if we
+      // crash between renames, the daemon sees the jsonl in processing/ and
+      // can rebuild the sidecar from it.
+      fs.renameSync(jsonlSrc, jsonlDst)
+      try {
+        fs.renameSync(sidecarSrc, sidecarDst)
+      } catch {}
+
+      // Signal daemon to consume immediately (batch distill on session end).
       try {
         const pidFile = path.join(QUOTH_HOME, 'daemon.pid')
         if (fs.existsSync(pidFile)) {

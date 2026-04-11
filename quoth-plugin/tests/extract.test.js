@@ -128,7 +128,7 @@ describe('extract v2', () => {
     it('returns string with extraction rules and examples', () => {
       const prompt = buildSystemPrompt()
       expect(typeof prompt).toBe('string')
-      expect(prompt).toContain('EXTRACTION RULES')
+      expect(prompt).toContain('PATTERN EXTRACTION RULES')
       expect(prompt).toContain('condition')
       expect(prompt).toContain('action')
       expect(prompt).toContain('GOOD PATTERNS')
@@ -252,15 +252,15 @@ describe('extract v2', () => {
       const db = mockDb()
       const result = await extract(SUMMARY, TOOL_ENTRIES, db, deps)
 
-      expect(result).toHaveLength(1)
-      expect(result[0].condition).toContain('refactoring across multiple files')
-      expect(result[0].action).toContain('parallel')
-      expect(result[0].tags).toContain('refactoring')
-      expect(result[0].quality_signal).toBe('domain')
-      expect(result[0].id).toHaveLength(12)
-      expect(result[0].source).toBe('distilled')
-      const expectedId = makeId(result[0].condition + result[0].action)
-      expect(result[0].id).toBe(expectedId)
+      expect(result.patterns).toHaveLength(1)
+      expect(result.patterns[0].condition).toContain('refactoring across multiple files')
+      expect(result.patterns[0].action).toContain('parallel')
+      expect(result.patterns[0].tags).toContain('refactoring')
+      expect(result.patterns[0].quality_signal).toBe('domain')
+      expect(result.patterns[0].id).toHaveLength(12)
+      expect(result.patterns[0].source).toBe('distilled')
+      const expectedId = makeId(result.patterns[0].condition + result.patterns[0].action)
+      expect(result.patterns[0].id).toBe(expectedId)
     })
   })
 
@@ -289,32 +289,32 @@ describe('extract v2', () => {
 
       expect(deps.callMoonshotWithTools).toHaveBeenCalledTimes(2)
       expect(deps.executeToolCall).toHaveBeenCalledTimes(1)
-      expect(result).toHaveLength(1)
-      expect(result[0].condition).toContain('authentication middleware')
+      expect(result.patterns).toHaveLength(1)
+      expect(result.patterns[0].condition).toContain('authentication middleware')
     })
   })
 
   describe('extract() — empty patterns', () => {
-    it('returns empty array when K2.5 returns no patterns', async () => {
+    it('returns empty patterns when K2.5 returns no patterns', async () => {
       const deps = makeDeps()
       deps.callMoonshotWithTools.mockResolvedValueOnce(
         mockContentResponse({ session_type: 'productive', patterns: [] })
       )
 
       const result = await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
-      expect(result).toHaveLength(0)
+      expect(result.patterns).toHaveLength(0)
     })
   })
 
   describe('extract() — backward compat (session_type routine)', () => {
-    it('returns empty array for routine sessions', async () => {
+    it('returns empty patterns for routine sessions', async () => {
       const deps = makeDeps()
       deps.callMoonshotWithTools.mockResolvedValueOnce(
         mockContentResponse({ session_type: 'routine', patterns: [] })
       )
 
       const result = await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
-      expect(result).toHaveLength(0)
+      expect(result.patterns).toHaveLength(0)
     })
   })
 
@@ -336,8 +336,8 @@ describe('extract v2', () => {
       const db = mockDb()
       const result = await extract(SUMMARY, TOOL_ENTRIES, db, deps)
 
-      expect(result).toHaveLength(1)
-      expect(result[0].condition).toContain('authentication')
+      expect(result.patterns).toHaveLength(1)
+      expect(result.patterns[0].condition).toContain('authentication')
       expect(db.insertPipelineError).toHaveBeenCalledWith(
         expect.objectContaining({
           stage: 'extract',
@@ -355,7 +355,7 @@ describe('extract v2', () => {
       const db = mockDb()
       const result = await extract(SUMMARY, TOOL_ENTRIES, db, deps)
 
-      expect(result).toHaveLength(0)
+      expect(result.patterns).toHaveLength(0)
       expect(db.insertPipelineError).toHaveBeenCalledTimes(2)
     })
   })
@@ -370,7 +370,7 @@ describe('extract v2', () => {
       const db = mockDb()
       const result = await extract(SUMMARY, TOOL_ENTRIES, db, deps)
 
-      expect(result).toHaveLength(0)
+      expect(result.patterns).toHaveLength(0)
       expect(db.insertPipelineError).toHaveBeenCalledWith(
         expect.objectContaining({
           stage: 'extract',
@@ -394,8 +394,8 @@ describe('extract v2', () => {
       }))
 
       const result = await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
-      expect(result).toHaveLength(1)
-      expect(result[0].quality_signal).toBe('project')
+      expect(result.patterns).toHaveLength(1)
+      expect(result.patterns[0].quality_signal).toBe('project')
     })
   })
 
@@ -519,7 +519,134 @@ describe('extract v2', () => {
       }))
 
       const result = await extract(SUMMARY, TOOL_ENTRIES, mockDb(), deps)
-      expect(result[0].tags).toHaveLength(5)
+      expect(result.patterns[0].tags).toHaveLength(5)
     })
+  })
+})
+
+describe('parseExtractOutput — session_type + patterns + facts', () => {
+  const { parseExtractOutput } = require('../daemon/pipeline/extract.js')
+
+  it('parses the full schema', () => {
+    const raw = JSON.stringify({
+      session_type: 'productive',
+      patterns: [
+        { condition: 'When you need a fresh pattern', action: 'Do the smallest valid thing that could possibly work', tags: ['process'], quality_signal: 'universal' }
+      ],
+      facts: [
+        {
+          topic: 'build command',
+          statement: 'The project builds with `pnpm -C quoth-plugin test`.',
+          evidence: 'Ran it in the session and it exited 0.',
+          scope: 'project',
+          tags: ['build', 'pnpm']
+        }
+      ]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.session_type).toBe('productive')
+    expect(out.patterns).toHaveLength(1)
+    expect(out.facts).toHaveLength(1)
+    expect(out.facts[0].topic).toBe('build command')
+  })
+
+  it('drops facts with missing topic/statement/scope', () => {
+    const raw = JSON.stringify({
+      session_type: 'productive',
+      patterns: [],
+      facts: [
+        { topic: 'x', statement: 'y' },
+        { statement: 'only has statement' },
+        { topic: 'valid', statement: 'has all fields', scope: 'global', tags: [] }
+      ]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.facts).toHaveLength(1)
+    expect(out.facts[0].topic).toBe('valid')
+  })
+
+  it('rejects scope values outside {global, project} — "user" is NOT allowed', () => {
+    const raw = JSON.stringify({
+      session_type: 'productive', patterns: [],
+      facts: [
+        { topic: 'bad-scope', statement: 'scope is invalid', scope: 'wtf' },
+        { topic: 'also-bad', statement: 'user is not a valid scope per spec §6.6', scope: 'user' },
+        { topic: 'good-scope', statement: 'scope is fine', scope: 'project' },
+      ]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.facts).toHaveLength(1)
+    expect(out.facts[0].topic).toBe('good-scope')
+  })
+
+  it('clamps statement length to 500 chars', () => {
+    const long = 'x'.repeat(700)
+    const raw = JSON.stringify({
+      session_type: 'productive', patterns: [],
+      facts: [{ topic: 't', statement: long, scope: 'project' }]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.facts).toHaveLength(1)
+    expect(out.facts[0].statement.length).toBe(500)
+  })
+
+  it('clamps tags array to max 5 entries', () => {
+    const raw = JSON.stringify({
+      session_type: 'productive', patterns: [],
+      facts: [{ topic: 't', statement: 's', scope: 'project', tags: ['a','b','c','d','e','f','g'] }]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.facts[0].tags).toHaveLength(5)
+  })
+
+  it('routine sessions still return empty patterns AND empty facts', () => {
+    const raw = JSON.stringify({ session_type: 'routine', patterns: [], facts: [] })
+    const out = parseExtractOutput(raw)
+    expect(out.session_type).toBe('routine')
+    expect(out.patterns).toEqual([])
+    expect(out.facts).toEqual([])
+  })
+
+  it('tolerates missing facts key (backward compat)', () => {
+    const raw = JSON.stringify({
+      session_type: 'productive',
+      patterns: [{ condition: 'When X happens', action: 'Do Y in the correct sequence of operations', tags: [], quality_signal: 'project' }]
+    })
+    const out = parseExtractOutput(raw)
+    expect(out.patterns).toHaveLength(1)
+    expect(out.facts).toEqual([])
+  })
+})
+
+describe('extract — token caps', () => {
+  it('passes maxTokens=32768 to callMoonshotWithTools on first call', async () => {
+    const extractMod = require('../daemon/pipeline/extract.js')
+
+    const captured = []
+    const fakeDeps = {
+      callMoonshotWithTools: async (_messages, opts) => {
+        captured.push(opts)
+        return {
+          content: JSON.stringify({ session_type: 'routine', patterns: [], facts: [] }),
+          message: { content: JSON.stringify({ session_type: 'routine', patterns: [], facts: [] }) },
+          tool_calls: [],
+          usage: { prompt_tokens: 500, completion_tokens: 20 },
+        }
+      },
+      executeToolCall: () => ({ output: 'unused' }),
+      resolveProjectRoot: () => '/tmp',
+      sanitize: (x) => x,
+      generateEmbeddingBatch: async (texts) => texts.map(() => [0]),
+    }
+
+    const db = { insertPipelineError: () => {} }
+
+    const summaryEntry = { session: 's1', project: 'quoth', outcome: 'success', success_rate: 1, total_calls: 1, user_intents: [] }
+    const toolEntries = [{ tool: 'Bash', task: 'ls', outcome: 'success', timestamp: Date.now() }]
+
+    await extractMod.extract(summaryEntry, toolEntries, db, fakeDeps)
+
+    expect(captured.length).toBeGreaterThanOrEqual(1)
+    expect(captured[0].maxTokens).toBe(32768)
   })
 })

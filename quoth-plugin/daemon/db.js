@@ -3,6 +3,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const { HnswIndex } = require('./lib/hnsw.js')
 const { trigrams } = require('./lib/injection.js')
 
@@ -71,6 +72,29 @@ CREATE TABLE IF NOT EXISTS memory_entries (
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
   last_accessed_at INTEGER,
   UNIQUE(namespace, key)
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  first_seen_ts INTEGER NOT NULL,
+  last_seen_ts INTEGER NOT NULL,
+  tool_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('active','processing','done','routine','empty','error')),
+  closed_marker INTEGER NOT NULL DEFAULT 0,
+  extracted_at INTEGER,
+  pattern_count INTEGER,
+  fact_count INTEGER,
+  epoch INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (session_id, epoch)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_status_last_seen ON sessions(status, last_seen_ts);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+
+CREATE TABLE IF NOT EXISTS daemon_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
 );
 
 CREATE TABLE IF NOT EXISTS agent_registry (
@@ -1005,6 +1029,205 @@ function createDb(dbPath) {
       err.fallback_attempted || 0,
       err.fallback_succeeded || 0,
     )
+  }
+
+  // --- sessions table helpers (per-session isolation — spec §4.5) ---
+
+  db.upsertSession = function(s) {
+    db.prepare(`
+      INSERT INTO sessions (
+        session_id, project, first_seen_ts, last_seen_ts, tool_count,
+        status, closed_marker, epoch
+      )
+      VALUES (@session_id, @project, @first_seen_ts, @last_seen_ts, @tool_count,
+              @status, @closed_marker, @epoch)
+      ON CONFLICT(session_id, epoch) DO UPDATE SET
+        project = excluded.project,
+        last_seen_ts = excluded.last_seen_ts,
+        tool_count = excluded.tool_count,
+        status = excluded.status,
+        closed_marker = excluded.closed_marker
+    `).run({
+      session_id: s.session_id,
+      project: s.project,
+      first_seen_ts: s.first_seen_ts,
+      last_seen_ts: s.last_seen_ts,
+      tool_count: s.tool_count || 0,
+      status: s.status,
+      closed_marker: s.closed_marker ? 1 : 0,
+      epoch: s.epoch || 1,
+    })
+  }
+
+  /**
+   * Increment the epoch counter for a session_id. If no rows exist yet,
+   * seed epoch=2 (implying epoch=1 was already archived without a dedicated
+   * row — safe default for Claude Code resume cases where we only discover
+   * the collision at archive time).
+   * Returns the NEW epoch number.
+   */
+  db.bumpSessionEpoch = function(session_id) {
+    const row = db.prepare('SELECT MAX(epoch) AS max_epoch, project FROM sessions WHERE session_id = ?').get(session_id)
+    const next = (row?.max_epoch || 1) + 1
+    const project = row?.project || 'unknown'
+    const now = Date.now()
+    db.prepare(`
+      INSERT INTO sessions (session_id, epoch, project, status, first_seen_ts, last_seen_ts, tool_count, closed_marker)
+      VALUES (?, ?, ?, 'processing', ?, ?, 0, 0)
+      ON CONFLICT(session_id, epoch) DO NOTHING
+    `).run(session_id, next, project, now, now)
+    return next
+  }
+
+  db.getSession = function(session_id, epoch) {
+    if (epoch != null) {
+      return db.prepare('SELECT * FROM sessions WHERE session_id = ? AND epoch = ?').get(session_id, epoch) || null
+    }
+    // Default: return the latest epoch
+    return db.prepare('SELECT * FROM sessions WHERE session_id = ? ORDER BY epoch DESC LIMIT 1').get(session_id) || null
+  }
+
+  db.updateSessionStatus = function(session_id, status, extras = {}) {
+    const now = Date.now()
+    const terminal = ['done', 'routine', 'empty', 'error'].includes(status)
+    return db.prepare(`
+      UPDATE sessions
+      SET status = @status,
+          extracted_at = CASE WHEN @terminal THEN @now ELSE extracted_at END,
+          pattern_count = COALESCE(@pattern_count, pattern_count),
+          fact_count = COALESCE(@fact_count, fact_count)
+      WHERE session_id = @session_id
+        AND epoch = COALESCE(@epoch, (SELECT MAX(epoch) FROM sessions WHERE session_id = @session_id))
+    `).run({
+      session_id, status,
+      terminal: terminal ? 1 : 0,
+      now,
+      pattern_count: extras.pattern_count ?? null,
+      fact_count: extras.fact_count ?? null,
+      epoch: extras.epoch ?? null,
+    })
+  }
+
+  db.listSessions = function(filters = {}) {
+    let query = 'SELECT * FROM sessions WHERE 1=1'
+    const params = []
+    if (filters.status != null) { query += ' AND status = ?'; params.push(filters.status) }
+    if (filters.maxLastSeen != null) { query += ' AND last_seen_ts < ?'; params.push(filters.maxLastSeen) }
+    if (filters.project) { query += ' AND project = ?'; params.push(filters.project) }
+    query += ' ORDER BY last_seen_ts ASC'
+    if (filters.limit != null && filters.limit > 0) { query += ' LIMIT ?'; params.push(filters.limit) }
+    return db.prepare(query).all(...params)
+  }
+
+  db.countSessionEpochs = function(session_id, bucket) {
+    const row = db.prepare(
+      'SELECT COUNT(*) AS c FROM sessions WHERE session_id = ? AND status = ?'
+    ).get(session_id, bucket)
+    return row ? row.c : 0
+  }
+
+  // --- daemon_meta key/value store (spec §6.4 prerequisite) ---
+
+  db.setDaemonMeta = function(key, value) {
+    db.prepare(`
+      INSERT INTO daemon_meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, String(value))
+  }
+
+  db.getDaemonMeta = function(key) {
+    const row = db.prepare('SELECT value FROM daemon_meta WHERE key = ?').get(key)
+    return row ? row.value : null
+  }
+
+  // --- memory_entries helpers (spec §6.7) ---
+
+  db.upsertMemoryEntry = function({ namespace, key, content, type, tags, metadata }) {
+    const id = crypto.createHash('sha1').update(`${namespace}:${key}`).digest('hex').slice(0, 12)
+    const now = Date.now()
+    db.prepare(`
+      INSERT INTO memory_entries (id, namespace, key, content, type, tags, metadata, created_at, updated_at)
+      VALUES (@id, @namespace, @key, @content, @type, @tags, @metadata, @created_at, @updated_at)
+      ON CONFLICT(namespace, key) DO UPDATE SET
+        content = excluded.content,
+        tags = excluded.tags,
+        metadata = excluded.metadata,
+        updated_at = excluded.updated_at
+    `).run({
+      id, namespace, key, content,
+      type: type || 'fact',
+      tags: JSON.stringify(tags || []),
+      metadata: JSON.stringify(metadata || {}),
+      created_at: now, updated_at: now,
+    })
+  }
+
+  /**
+   * Insert or upsert a fact extracted from a session.
+   * The fact schema has already been validated by parseExtractOutput.
+   * Maps scope → namespace per spec §6.6:
+   *   - 'global'  → 'facts:global'
+   *   - 'project' → 'facts:proj:<project>'
+   *
+   * (There is NO user scope. Facts about the human operator are out of
+   *  scope by spec and would have been rejected by parseExtractOutput.)
+   *
+   * Returns the inserted memory_entries row.
+   */
+  db.insertNewFact = function(fact, { project, session_id }) {
+    const namespace = db.factNamespace(fact.scope, project)
+    const content = JSON.stringify({
+      statement: fact.statement,
+      evidence: fact.evidence || null,
+      tags: fact.tags || [],
+      source_session: session_id || null,
+      extracted_at: Date.now(),
+    })
+    return db.upsertMemoryEntry({
+      namespace,
+      key: fact.topic,
+      content,
+      type: 'fact',
+      tags: fact.tags || [],
+    })
+  }
+
+  db.factNamespace = function(scope, project) {
+    if (scope === 'global') return 'facts:global'
+    // default: project — this is the only other valid scope per spec §6.6.
+    return `facts:proj:${project || 'default'}`
+  }
+
+  db.listFactsByNamespace = function(namespace, limit = 20) {
+    return db.prepare(`
+      SELECT key, content, tags, metadata, updated_at
+      FROM memory_entries
+      WHERE namespace = ? AND type = 'fact' AND status = 'active'
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(namespace, limit)
+  }
+
+  /**
+   * Soft-delete a fact by flipping status='archived'. Returns true if a
+   * row was affected, false otherwise. The row remains in the table so
+   * undo is possible, but listFactsByNamespace will not return it.
+   */
+  db.archiveFact = function(namespace, topic) {
+    const result = db.prepare(`
+      UPDATE memory_entries
+      SET status = 'archived',
+          updated_at = CAST(strftime('%s','now') AS INTEGER) * 1000
+      WHERE namespace = ? AND key = ? AND status = 'active'
+    `).run(namespace, topic)
+    return result.changes > 0
+  }
+
+  db.deleteMemoryEntry = function({ namespace, key }) {
+    const result = db.prepare(`
+      DELETE FROM memory_entries WHERE namespace = ? AND key = ?
+    `).run(namespace, key)
+    return result.changes
   }
 
   db.getCostSummary = function(range) {
