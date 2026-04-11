@@ -7,7 +7,7 @@
  *
  * Commands:
  *   route           - Route task to optimal agent
- *   session-restore - Initialize intelligence graph + inject patterns
+ *   session-restore - Initialize intelligence graph + inject facts
  *   session-end     - Consolidate intelligence
  *   post-edit       - Record edit for intelligence
  *   post-task       - Implicit success feedback
@@ -161,13 +161,14 @@ function truncatePrompt(prompt) {
 // Returns the parsed JSON response. Any error (ENOENT, ECONNREFUSED,
 // timeout, malformed JSON) is surfaced so the caller can fall back to the
 // daemon-detach path.
-function fetchInject({ prompt, project, kinds, limit }, timeoutMs) {
+function fetchInject({ prompt, project, kinds, limit, agentType }, timeoutMs) {
   return new Promise((resolve, reject) => {
     const params = new URLSearchParams()
     if (prompt != null) params.set('prompt', truncatePrompt(prompt))
     if (project != null) params.set('project', String(project))
     if (kinds != null) params.set('kinds', String(kinds))
     if (limit != null) params.set('limit', String(limit))
+    if (agentType) params.set('agentType', String(agentType))
     const req = http.request({
       socketPath: SOCK_PATH,
       path: `/inject?${params.toString()}`,
@@ -783,66 +784,42 @@ const handlers = {
   },
 
   'subagent-start': async (hookInput) => {
+    // Task 19 / spec §2.3: fetch relevant knowledge entities from the
+    // daemon's /inject fast-path, scoped by the spawned subagent's type
+    // (`agent:<type>` tag). Fail-open: daemon down / hung / slow → emit
+    // nothing and spawn a warm-start. Drops the legacy chunk table (moved
+    // out of the v3 redesign); drops ensureDaemon / queryDaemon /
+    // session-memory exposure tracking (legacy pattern-store bookkeeping).
     const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-    const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
     const taskText = hookInput.prompt || hookInput.description || ''
 
     try {
-      await ensureDaemon()
-      const agentTag = agentType ? [`agent:${agentType}`] : []
-      let resp = await queryDaemon({
+      const resp = await fetchInject({
         prompt: taskText || 'subagent task',
-        project, session_id: sessionId, limit: 5, type: 'inject',
-        tags: agentTag,
-      })
+        project,
+        kinds: 'pattern,decision,anti_pattern',
+        limit: 5,
+        agentType,
+      }, getInjectTimeoutMs())
+      const results = (resp && resp.results) || []
+      if (results.length === 0) return
 
-      // Fallback: if too few results with tag filter, retry without tags
-      if (agentTag.length > 0 && (resp.patterns || []).length < 2) {
-        resp = await queryDaemon({
-          prompt: taskText || 'subagent task',
-          project, session_id: sessionId, limit: 5, type: 'inject',
-          tags: [],
-        })
+      const lines = agentType
+        ? [`[Quoth] ${results.length} knowledge entities for ${agentType} agent (project: ${project}):`]
+        : [`[Quoth] ${results.length} knowledge entities (project: ${project}):`]
+      for (const r of results) {
+        if (!r || typeof r !== 'object') continue
+        const kind = r.kind || 'entity'
+        const summary = (r.summary || r.id || '').toString()
+        const conf = Number.isFinite(r.confidence) ? r.confidence.toFixed(2) : '0.00'
+        lines.push(`- **[${kind}]** (${conf}) ${summary}`)
       }
-
-      const scored = resp.patterns || []
-      const docChunks = resp.doc_chunks || []
-      const relevantDocs = docChunks.filter(c => c.score > 0.2)
-
-      if (scored.length === 0 && relevantDocs.length === 0) return
-
-      // Track all injected IDs (patterns + doc chunks)
-      const allIds = [...scored.map(p => p.id), ...relevantDocs.filter(c => c.id).map(c => c.id)]
-      try {
-        const { recordExposure } = require('../daemon/lib/scoring.js')
-        const { createSessionMemory } = require('./session-memory.js')
-        const db = getDb()
-        if (db) recordExposure(db, allIds)
-        const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-        sm.recordInjection(allIds)
-      } catch {}
-
-      let additionalContext = ''
-      if (scored.length > 0) {
-        const context = scored.map(p =>
-          `- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`
-        ).join('\n')
-        additionalContext = `[Quoth] ${scored.length} patterns for ${agentType} agent (project: ${project}):\n${context}\nUse quoth_search_patterns for deeper semantic search.`
-      }
-
-      // Append doc chunks to additionalContext
-      if (relevantDocs.length > 0) {
-        const docContext = relevantDocs
-          .map(c => `- [doc] ${c.title || ''}: ${(c.content || '').slice(0, 100)}`)
-          .join('\n')
-        additionalContext += `${additionalContext ? '\n\n' : ''}[Quoth Docs] Relevant documentation:\n${docContext}`
-      }
-
-      if (additionalContext) {
-        console.log(JSON.stringify({ additionalContext }))
-      }
-    } catch {}
+      const additionalContext = lines.join('\n')
+      console.log(JSON.stringify({ additionalContext }))
+    } catch {
+      try { spawnDaemonDetached() } catch {}
+    }
   },
 
   'stats': () => {

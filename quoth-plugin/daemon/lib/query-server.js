@@ -326,7 +326,7 @@ function _rowsForIds(db, ids, kinds, scopeArg) {
   const placeholders = ids.map(() => '?').join(',')
   const kindPlaceholders = kinds.map(() => '?').join(',')
   const sql = `
-    SELECT id, kind, summary, content, metadata, confidence, updated_at, source_session_id
+    SELECT id, kind, summary, content, metadata, tags, confidence, updated_at, source_session_id
       FROM knowledge_entities
      WHERE status = 'active'
        AND kind IN (${kindPlaceholders})
@@ -336,11 +336,29 @@ function _rowsForIds(db, ids, kinds, scopeArg) {
   return db.prepare(sql).all(...kinds, scopeArg, ...ids)
 }
 
+// Task 19 / spec §2.3: subagent-start forwards an agentType query param so
+// patterns tagged `agent:<type>` rank first. Filter applied BEFORE re-rank
+// so the top-N reflects the requested type. Falls back to the unfiltered
+// set when the filtered pool is too small to surface meaningful context.
+const AGENT_TAG_MIN_MATCHES = 2
+function _filterByAgentType(rows, agentType) {
+  if (!agentType) return rows
+  const needle = `agent:${agentType}`
+  const filtered = rows.filter((r) => {
+    let tags
+    try { tags = JSON.parse(r.tags || '[]') } catch { tags = [] }
+    return Array.isArray(tags) && tags.includes(needle)
+  })
+  return filtered.length >= AGENT_TAG_MIN_MATCHES ? filtered : rows
+}
+
 async function handleInject(req, res, db, log, ctx, parsedUrl) {
   const prompt = parsedUrl.searchParams.get('prompt') ?? ''
   const project = parsedUrl.searchParams.get('project') ?? 'global'
   const limitRaw = parseInt(parsedUrl.searchParams.get('limit') ?? '8', 10)
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 8
+  // agentType filter (Task 19): empty string / absent → no filter.
+  const agentType = (parsedUrl.searchParams.get('agentType') ?? '').trim()
 
   const kindsRaw = (parsedUrl.searchParams.get('kinds') ?? 'pattern,decision,anti_pattern')
     .split(',')
@@ -355,7 +373,7 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
   }
 
   const kindsKey = [...kinds].sort().join(',')
-  const cacheKey = sha1(`${prompt}\0${project}\0${kindsKey}`)
+  const cacheKey = sha1(`${prompt}\0${project}\0${kindsKey}\0${agentType}`)
   const cached = injectCache.get(cacheKey)
   if (cached && Date.now() - cached.ts < INJECT_CACHE_TTL_MS) {
     res.writeHead(200)
@@ -388,6 +406,7 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
   const distanceById = new Map(annResults.map((r) => [r.id, r.distance]))
 
   let rows = _rowsForIds(db, [...distanceById.keys()], kinds, scopeArg)
+  rows = _filterByAgentType(rows, agentType)
 
   // Under-fetch fallback: re-probe with wider efSearch. Union the id sets so
   // first-probe hits stay candidates even if the wider probe doesn't revisit
@@ -398,6 +417,7 @@ async function handleInject(req, res, db, log, ctx, parsedUrl) {
       if (!distanceById.has(r.id)) distanceById.set(r.id, r.distance)
     }
     rows = _rowsForIds(db, [...distanceById.keys()], kinds, scopeArg)
+    rows = _filterByAgentType(rows, agentType)
     if (rows.length < limit) {
       try {
         const { logPipelineError } = require('../db.js')
