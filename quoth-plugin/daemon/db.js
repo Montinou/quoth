@@ -377,6 +377,29 @@ function createDb(dbPath) {
     `)
   } catch (e) { console.error('[db] pipeline_errors create failed:', e.message) }
 
+  // Runtime migration: expand pipeline_errors with severity-capable columns (spec §5.2)
+  const peCols = db.prepare('PRAGMA table_info(pipeline_errors)').all().map(r => r.name)
+  const peNewCols = [
+    { name: 'ts',                 type: 'INTEGER' },
+    { name: 'severity',           type: "TEXT NOT NULL DEFAULT 'error'" },
+    { name: 'session_id',         type: 'TEXT' },
+    { name: 'project',            type: 'TEXT' },
+    { name: 'worker_id',          type: 'TEXT' },
+    { name: 'retry_count',        type: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'resolution',         type: 'TEXT' },
+  ]
+  for (const col of peNewCols) {
+    if (!peCols.includes(col.name)) {
+      try { db.exec(`ALTER TABLE pipeline_errors ADD COLUMN ${col.name} ${col.type}`) } catch {}
+    }
+  }
+  // Spec §5.2 indexes (idempotent)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pe_stage_ts    ON pipeline_errors(stage, ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_pe_severity_ts ON pipeline_errors(severity, ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_pe_session      ON pipeline_errors(session_id);
+  `)
+
   // --- pattern_outcomes table for contextual feedback ---
   try {
     db.exec(`
@@ -1416,4 +1439,21 @@ function openDb() {
   return createDb(dbPath)
 }
 
-module.exports = { createDb, openDb }
+function logPipelineError({
+  stage, severity = 'error', session_id = null, project = null, worker_id = null,
+  error_message, error_stack = null, context = null, model_attempted = null,
+  fallback_attempted = 0, fallback_succeeded = 0, retry_count = 0, resolution = null,
+}) {
+  openDb().prepare(`
+    INSERT INTO pipeline_errors
+      (ts, stage, severity, session_id, project, worker_id, error_message, error_stack, context,
+       model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    Date.now(), stage, severity, session_id, project, worker_id, error_message, error_stack,
+    context ? JSON.stringify(context) : null,
+    model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution,
+  )
+}
+
+module.exports = { createDb, openDb, logPipelineError }
