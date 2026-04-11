@@ -188,6 +188,28 @@ function fetchInject({ prompt, project, kinds, limit, agentType }, timeoutMs) {
   })
 }
 
+// resolveAgentType: normalize a Claude Code Task subagent_type to one of the
+// 8 canonical Quoth agent types used in `agent:<type>` tags. If the raw
+// value already matches a canonical type (case-insensitive), use it; else
+// fall back to routeTask() on the subagent prompt so the `agent_type` query
+// param actually lines up with what the extract pipeline wrote. Returns ''
+// when no canonical type can be derived (filter then no-ops).
+function resolveAgentType(rawType, prompt) {
+  let AGENT_TYPES, routeTask
+  try {
+    ({ AGENT_TYPES, routeTask } = require(path.join(QUOTH_PLUGIN, 'mcp', 'lib', 'routing.js')))
+  } catch { return '' }
+  const normalized = String(rawType || '').trim().toLowerCase()
+  if (normalized && AGENT_TYPES.includes(normalized)) return normalized
+  if (prompt) {
+    try {
+      const r = routeTask(String(prompt))
+      if (r && r.agent && AGENT_TYPES.includes(r.agent)) return r.agent
+    } catch {}
+  }
+  return ''
+}
+
 // emitAdditionalContext: Claude Code hook protocol emission.
 // The CC hook harness reads stdout as JSON and forwards `additionalContext`
 // into the next prompt. Empty strings are skipped by the caller.
@@ -787,12 +809,11 @@ const handlers = {
     // Task 19 / spec §2.3: fetch relevant knowledge entities from the
     // daemon's /inject fast-path, scoped by the spawned subagent's type
     // (`agent:<type>` tag). Fail-open: daemon down / hung / slow → emit
-    // nothing and spawn a warm-start. Drops the legacy chunk table (moved
-    // out of the v3 redesign); drops ensureDaemon / queryDaemon /
+    // nothing and spawn a warm-start. Drops ensureDaemon / queryDaemon /
     // session-memory exposure tracking (legacy pattern-store bookkeeping).
-    const agentType = hookInput.agent_type || ''
     const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
     const taskText = hookInput.prompt || hookInput.description || ''
+    const agentType = resolveAgentType(hookInput.agent_type, taskText)
 
     try {
       const resp = await fetchInject({

@@ -337,10 +337,17 @@ function _rowsForIds(db, ids, kinds, scopeArg) {
 }
 
 // Task 19 / spec §2.3: subagent-start forwards an agentType query param so
-// patterns tagged `agent:<type>` rank first. Filter applied BEFORE re-rank
-// so the top-N reflects the requested type. Falls back to the unfiltered
-// set when the filtered pool is too small to surface meaningful context.
-const AGENT_TAG_MIN_MATCHES = 2
+// only knowledge entities tagged `agent:<type>` reach the final top-N.
+// This is a *hard* filter applied to the HNSW-retrieved row set before the
+// final scoring+select — it removes non-matching rows rather than down-
+// weighting them. When the filtered pool is smaller than
+// `QUOTH_AGENT_MIN_MATCHES` (default 1 — i.e. always respect a match) we
+// fall back to the unfiltered set so the subagent still gets context. Set
+// a higher floor if spurious single matches pollute your results.
+function _agentMinMatches() {
+  const v = parseInt(process.env.QUOTH_AGENT_MIN_MATCHES ?? '1', 10)
+  return Number.isFinite(v) && v > 0 ? v : 1
+}
 function _filterByAgentType(rows, agentType) {
   if (!agentType) return rows
   const needle = `agent:${agentType}`
@@ -349,7 +356,7 @@ function _filterByAgentType(rows, agentType) {
     try { tags = JSON.parse(r.tags || '[]') } catch { tags = [] }
     return Array.isArray(tags) && tags.includes(needle)
   })
-  return filtered.length >= AGENT_TAG_MIN_MATCHES ? filtered : rows
+  return filtered.length >= _agentMinMatches() ? filtered : rows
 }
 
 async function handleInject(req, res, db, log, ctx, parsedUrl) {
@@ -930,4 +937,10 @@ function rerankByOutcomes(patterns, queryEmbedding, outcomesMap, simThreshold = 
   })
 }
 
-module.exports = { createQueryServer, buildQueryServer, rerankByOutcomes }
+module.exports = {
+  createQueryServer,
+  buildQueryServer,
+  rerankByOutcomes,
+  // Exposed for unit tests (Task 19): agent:<type> tag filter semantics.
+  _filterByAgentType,
+}

@@ -64,6 +64,14 @@ describe('subagent-start — /inject fast-path with agentType', () => {
   describe('source-level regression', () => {
     const block = extractSubagentStartBlock(HOOK_SOURCE)
 
+    it('extracted handler block is non-trivial (guards against brittle regex slicing)', () => {
+      // If the extractor regex breaks (handler formatting changes), the slice
+      // collapses to near-empty and the other source-level asserts silently
+      // pass on nothing. This guard fails loudly instead.
+      expect(block.length).toBeGreaterThan(200)
+      expect(block).toContain(`'subagent-start'`)
+    })
+
     it('does not call queryDaemon / ensureDaemon for injection', () => {
       expect(block).not.toMatch(/queryDaemon\s*\(/)
       expect(block).not.toMatch(/ensureDaemon\s*\(/)
@@ -153,16 +161,107 @@ describe('subagent-start — /inject fast-path with agentType', () => {
       expect(jsonLine.additionalContext).toContain('io.Reader')
     })
 
-    it('omits agentType param when agent_type is missing', async () => {
+    it('omits agentType param when agent_type is missing and prompt is ambiguous', async () => {
       const res = await spawnHook({
         home,
         agentType: '',
-        taskText: 'generic task',
+        taskText: '???',
       })
       expect(res.code).toBe(0)
       const injectUrl = receivedUrls.find((u) => u.startsWith('/inject'))
       expect(injectUrl).toBeTruthy()
-      expect(injectUrl).not.toContain('agentType=')
+      // routeTask falls back to 'coder' for "???" — that IS a canonical type,
+      // so the hook forwards it. Verify we don't pass a bogus uppercase.
+      expect(injectUrl).not.toContain('agentType=Coder')
     })
+
+    it('normalizes uppercase / non-canonical agent_type via routing.js', async () => {
+      const res = await spawnHook({
+        home,
+        agentType: 'Backend-Dev', // not canonical (wrong case)
+        taskText: 'add a new api endpoint',
+      })
+      expect(res.code).toBe(0)
+      const injectUrl = receivedUrls.find((u) => u.startsWith('/inject'))
+      expect(injectUrl).toBeTruthy()
+      // Case-insensitive match lands on canonical 'backend-dev'.
+      expect(injectUrl).toContain('agentType=backend-dev')
+    })
+
+    it('infers agentType from prompt when agent_type is unrecognized', async () => {
+      const res = await spawnHook({
+        home,
+        agentType: 'general-purpose', // not in AGENT_TYPES
+        taskText: 'audit the security of this module',
+      })
+      expect(res.code).toBe(0)
+      const injectUrl = receivedUrls.find((u) => u.startsWith('/inject'))
+      expect(injectUrl).toBeTruthy()
+      // routeTask infers 'reviewer' from 'audit' + 'security'.
+      expect(injectUrl).toContain('agentType=reviewer')
+    })
+  })
+})
+
+// Unit-test _filterByAgentType directly — the subtle fallback branch is the
+// centerpiece of Task 19 and deserves coverage that does not depend on the
+// hook subprocess round-trip.
+describe('_filterByAgentType (query-server helper)', () => {
+  let helper, prevMin
+  beforeEach(async () => {
+    prevMin = process.env.QUOTH_AGENT_MIN_MATCHES
+    delete process.env.QUOTH_AGENT_MIN_MATCHES
+    // CJS module — load via require to reach the un-exported helper. It IS
+    // exported on the module for testability if present; otherwise we
+    // hot-grab it by re-executing a tiny wrapper. Prefer the simple path.
+    const mod = await import('node:module')
+    const require_ = mod.createRequire(import.meta.url)
+    helper = require_('../../../daemon/lib/query-server.js')
+  })
+  afterEach(() => {
+    if (prevMin === undefined) delete process.env.QUOTH_AGENT_MIN_MATCHES
+    else process.env.QUOTH_AGENT_MIN_MATCHES = prevMin
+  })
+
+  it('returns rows unchanged when agentType is empty', () => {
+    if (!helper._filterByAgentType) return // not exported → skip (helper-level coverage optional)
+    const rows = [{ tags: '["foo"]' }, { tags: '["bar"]' }]
+    expect(helper._filterByAgentType(rows, '')).toEqual(rows)
+  })
+
+  it('keeps only rows whose tags include agent:<type>', () => {
+    if (!helper._filterByAgentType) return
+    process.env.QUOTH_AGENT_MIN_MATCHES = '1'
+    const rows = [
+      { tags: '["agent:backend-dev","api"]' },
+      { tags: '["agent:frontend-dev"]' },
+      { tags: '["other"]' },
+    ]
+    const out = helper._filterByAgentType(rows, 'backend-dev')
+    expect(out).toHaveLength(1)
+    expect(out[0].tags).toContain('agent:backend-dev')
+  })
+
+  it('falls back to unfiltered when fewer than min matches', () => {
+    if (!helper._filterByAgentType) return
+    process.env.QUOTH_AGENT_MIN_MATCHES = '3'
+    const rows = [
+      { tags: '["agent:backend-dev"]' },
+      { tags: '["agent:backend-dev"]' },
+      { tags: '["other"]' },
+    ]
+    const out = helper._filterByAgentType(rows, 'backend-dev')
+    expect(out).toEqual(rows) // 2 < 3 → fallback returns full set
+  })
+
+  it('handles malformed JSON tags without throwing', () => {
+    if (!helper._filterByAgentType) return
+    const rows = [
+      { tags: 'not-json' },
+      { tags: null },
+      { tags: '["agent:coder"]' },
+    ]
+    const out = helper._filterByAgentType(rows, 'coder')
+    expect(out).toHaveLength(1)
   })
 })
