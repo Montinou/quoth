@@ -134,6 +134,93 @@ async function ensureDaemon() {
   throw new Error('Daemon failed to start within 5s')
 }
 
+// --- Task 17: route fast-path helpers (spec §2.3) ---
+//
+// fetchInject(): unix-socket GET /inject with a hard-coded 200ms timeout.
+// Returns the parsed JSON response. Any error (ENOENT, ECONNREFUSED,
+// timeout, malformed JSON) is surfaced so the caller can fall back to the
+// daemon-detach path.
+function fetchInject({ prompt, project, kinds, limit }, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const params = new URLSearchParams()
+    if (prompt != null) params.set('prompt', String(prompt))
+    if (project != null) params.set('project', String(project))
+    if (kinds != null) params.set('kinds', String(kinds))
+    if (limit != null) params.set('limit', String(limit))
+    const req = http.request({
+      socketPath: SOCK_PATH,
+      path: `/inject?${params.toString()}`,
+      method: 'GET',
+      timeout: timeoutMs,
+    }, (res) => {
+      let chunks = ''
+      res.on('data', (c) => { chunks += c })
+      res.on('end', () => {
+        try { resolve(JSON.parse(chunks || '{}')) }
+        catch { reject(new Error('Invalid JSON from /inject')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(new Error('/inject timeout')); reject(new Error('/inject timeout')) })
+    req.end()
+  })
+}
+
+// emitAdditionalContext: Claude Code hook protocol emission.
+// The CC hook harness reads stdout as JSON and forwards `additionalContext`
+// into the next prompt. Empty strings are skipped by the caller.
+function emitAdditionalContext(text) {
+  if (!text) return
+  console.log(JSON.stringify({ additionalContext: text }))
+}
+
+// formatInjectResults: render the /inject response array as a markdown
+// block. One bullet per result: `- **[kind]** summary (confidence: 0.XX)`
+// followed by an indented content snippet truncated to ~200 chars.
+// Returns '' when the results array is empty or missing.
+function formatInjectResults(results) {
+  if (!Array.isArray(results) || results.length === 0) return ''
+  const lines = ['[Quoth] Relevant knowledge for this prompt:']
+  for (const r of results) {
+    if (!r || typeof r !== 'object') continue
+    const kind = r.kind || 'entity'
+    const summary = (r.summary || r.id || '').toString()
+    const conf = Number.isFinite(r.confidence) ? r.confidence.toFixed(2) : '0.00'
+    lines.push(`- **[${kind}]** ${summary} (confidence: ${conf})`)
+    const content = (r.content || '').toString().trim()
+    if (content) {
+      const snippet = content.length > 200 ? content.slice(0, 200) + '…' : content
+      lines.push(`  ${snippet}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+// spawnDaemonDetached: fire-and-forget warm-start for the next prompt.
+// Spec §2.3 daemon-detach contract — all three of detached:true,
+// stdio:'ignore', child.unref() are required. Anything missing pins the
+// hook parent on the child's pipes and the 250ms budget blows up.
+//
+// Short-circuits when ${QUOTH_HOME}/STARTUP_FAILED exists (sticky flag set
+// by daemon-core on fatal boot errors) to avoid a respawn spin-loop.
+function spawnDaemonDetached() {
+  try {
+    const { checkStartupFlag } = require(path.join(QUOTH_PLUGIN, 'daemon', 'daemon-core.js'))
+    if (checkStartupFlag()) return
+  } catch {
+    // If daemon-core can't be required for any reason, still attempt the
+    // spawn — the daemon itself will re-check the flag at boot.
+  }
+  const daemonPath = path.join(QUOTH_PLUGIN, 'daemon', 'daemon.js')
+  const child = spawn('node', [daemonPath], {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    cwd: os.homedir(),
+    env: { ...process.env, QUOTH_SPAWNED_BY_HOOK: '1' },
+  })
+  child.unref()
+}
+
 // Read stdin (Claude Code sends hook data as JSON)
 async function readStdin() {
   if (process.stdin.isTTY) return ''
@@ -190,86 +277,23 @@ const handlers = {
       sm.recordPrompt(prompt)
     } catch {}
 
-    // Query daemon for unified routing + injection + doc chunks
-    await ensureDaemon()
-    const t0 = Date.now()
-    const resp = await queryDaemon({
-      prompt, project, session_id: sessionId, limit: 5, type: 'route+inject'
-    })
-    const latency = Date.now() - t0
-
-    // Collect all IDs for exposure tracking (patterns + doc chunks)
-    const allIds = (resp.patterns || []).map(p => p.id)
-    const docChunks = resp.doc_chunks || []
-    const relevantDocs = docChunks.filter(c => c.score > 0.2)
-    for (const c of relevantDocs) {
-      if (c.id) allIds.push(c.id)
+    // Spec §2.3 route fast-path:
+    //   1. GET /inject over unix socket with a hardcoded 200ms timeout
+    //   2. Emit matched entities as additionalContext (no stdout banner)
+    //   3. On any error (daemon down / hung / slow) → spawn detached for
+    //      next prompt, emit nothing, exit clean.
+    try {
+      const resp = await fetchInject({
+        prompt,
+        project,
+        kinds: 'pattern,decision,anti_pattern',
+        limit: 8,
+      }, 200)
+      const text = formatInjectResults(resp && resp.results)
+      if (text) emitAdditionalContext(text)
+    } catch {
+      try { spawnDaemonDetached() } catch {}
     }
-
-    // Pattern injection output
-    if (resp.patterns && resp.patterns.length > 0) {
-      try {
-        const { recordExposure } = require('../daemon/lib/scoring.js')
-        const { createSessionMemory } = require('./session-memory.js')
-        const db = getDb()
-        if (db) recordExposure(db, allIds)
-        const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-        sm.recordInjection(allIds)
-      } catch {}
-
-      const lines = ['[Quoth] Patterns for this prompt:']
-      for (const p of resp.patterns) {
-        lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 80)}`)
-      }
-      console.log(lines.join('\n'))
-    }
-
-    // Doc chunk injection output
-    if (relevantDocs.length > 0) {
-      const lines = ['[Quoth Docs] Relevant project context:']
-      for (const c of relevantDocs) {
-        lines.push(`  • [${c.title}] ${(c.content || '').slice(0, 250)}`)
-      }
-      console.log(lines.join('\n'))
-    }
-
-    // Routing output
-    const agent = resp.agent || 'coder'
-    const confidence = resp.agent_confidence || 0.5
-    const reason = resp.agent_reason || 'Default routing'
-    const alternatives = resp.alternatives || []
-
-    const output = [
-      `[INFO] Routing task: ${(prompt || '').substring(0, 80) || '(no prompt)'}`,
-      '',
-      'Routing Method',
-      '  - Method: semantic+keyword',
-      '  - Backend: quoth-daemon',
-      `  - Latency: ${latency}ms (embed: ${resp.embedding_ms || 0}ms, search: ${resp.search_ms || 0}ms)`,
-      `  - Matched Pattern: ${reason}`,
-      '',
-      '+------------------- Primary Recommendation -------------------+',
-      `| Agent: ${agent.padEnd(53)}|`,
-      `| Confidence: ${(confidence * 100).toFixed(1)}%${' '.repeat(44)}|`,
-      `| Reason: ${reason.substring(0, 53).padEnd(53)}|`,
-      '+--------------------------------------------------------------+',
-      '',
-      'Alternative Agents',
-      '+------------+------------+-------------------------------------+',
-      '| Agent Type | Confidence | Reason                              |',
-      '+------------+------------+-------------------------------------+',
-    ]
-    for (const alt of alternatives) {
-      output.push(`| ${(alt.agent || '').padEnd(10)} | ${((alt.confidence || 0) * 100).toFixed(1).padStart(9)}% | ${(alt.reason || '').substring(0, 35).padEnd(35)} |`)
-    }
-    output.push('+------------+------------+-------------------------------------+')
-    output.push('')
-    output.push('Estimated Metrics')
-    output.push('  - Success Probability: 70.0%')
-    output.push('  - Estimated Duration: 10-30 min')
-    output.push('  - Complexity: LOW')
-
-    console.log(output.join('\n'))
   },
 
   'session-restore': async () => {
