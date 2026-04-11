@@ -225,6 +225,20 @@ function formatInjectResults(results) {
 // Short-circuits when ${QUOTH_HOME}/STARTUP_FAILED exists (sticky flag set
 // by daemon-core on fatal boot errors) to avoid a respawn spin-loop.
 function spawnDaemonDetached() {
+  // Defensive: never spawn a real daemon when QUOTH_HOME points inside the
+  // OS temp dir. This is the unambiguous signature of a test scratch home
+  // (tests use fs.mkdtempSync(os.tmpdir() + '/quoth-*')), and spawning a
+  // detached child against a tmp home that the test rm'd in afterEach
+  // leaves reparented orphans. Production QUOTH_HOME lives under $HOME.
+  try {
+    const tmp = fs.realpathSync(os.tmpdir())
+    const home = QUOTH_HOME ? fs.realpathSync(QUOTH_HOME) : ''
+    if (home && home.startsWith(tmp + path.sep)) return
+  } catch {
+    // realpath can fail if QUOTH_HOME was already removed — that itself
+    // means the test already cleaned up, so skip the spawn defensively.
+    return
+  }
   try {
     const { checkStartupFlag } = require(path.join(QUOTH_PLUGIN, 'daemon', 'daemon-core.js'))
     if (checkStartupFlag()) return
@@ -379,71 +393,10 @@ const handlers = {
       }
     } catch {}
 
-    // Context-aware semantic injection via daemon query
-    try {
-      const project = resolveProjectName(process.env.CLAUDE_PROJECT_DIR || os.homedir())
-      const sessionId = process.env.CLAUDE_SESSION_ID || 'default'
-
-      // Load last session's context for query
-      let queryText = ''
-      try {
-        const ctxPath = path.join(QUOTH_HOME, 'intelligence', `last-context-${project}.json`)
-        const ctx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'))
-        queryText = [
-          ...(ctx.recentPrompts || []).slice(-2),
-          (ctx.topTopics || []).slice(0, 5).join(' '),
-        ].filter(Boolean).join(' ')
-      } catch {}
-
-      if (queryText || true) {
-        await ensureDaemon()
-        const resp = await queryDaemon({
-          prompt: queryText || 'session start',
-          project, session_id: sessionId, limit: 7, type: 'inject'
-        })
-
-        const patterns = resp.patterns || []
-        const allIds = patterns.map(p => p.id)
-
-        // Collect doc chunk IDs for unified tracking
-        const docChunks = resp.doc_chunks || []
-        const relevantDocs = docChunks.filter(c => c.score > 0.2)
-        if (relevantDocs.length > 0) {
-          for (const c of relevantDocs) {
-            if (c.id) allIds.push(c.id)
-          }
-        }
-
-        if (patterns.length > 0 || relevantDocs.length > 0) {
-          try {
-            const { recordExposure } = require('../daemon/lib/scoring.js')
-            const { createSessionMemory } = require('./session-memory.js')
-            const db = getDb()
-            if (db) recordExposure(db, allIds)
-            const sm = createSessionMemory({ dir: path.join(QUOTH_HOME, 'intelligence'), sessionId, project })
-            sm.recordInjection(allIds)
-          } catch {}
-
-          if (patterns.length > 0) {
-            const lines = [`[Quoth] ${patterns.length} patterns loaded for project "${project}":`]
-            for (const p of patterns) {
-              lines.push(`- [${(p.confidence || 0).toFixed(2)}] ${p.name || p.id}: ${(p.action || '').slice(0, 60)}`)
-            }
-            console.log(lines.join('\n'))
-          }
-
-          // Doc chunk injection at session start
-          if (relevantDocs.length > 0) {
-            const docLines = ['[Quoth Docs] Session context:']
-            for (const c of relevantDocs) {
-              const label = (c.doc_file || c.title || '').replace('.md', '').replace(/^\d+-/, '')
-              docLines.push(`  • [${label}] ${(c.content || '').slice(0, 150)}`)
-            }
-            console.log(docLines.join('\n'))
-          }
-        }
-      }
-    } catch {}
+    // Task 18 / spec §2.3: pattern injection has moved to the route hook
+    // (/inject fast-path). session-restore no longer queries the daemon for
+    // patterns or doc chunks — it now only initializes the intelligence
+    // graph, surfaces project-context.md, and emits the facts block below.
 
     // --- Facts injection (spec §6.7) ---
     // Pull up to 5 facts per namespace (project + global) from
