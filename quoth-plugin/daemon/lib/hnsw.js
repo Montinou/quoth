@@ -456,8 +456,12 @@ function _rebuildFromKnowledgeEntities(db, idx) {
       cursor = row.id
       const vec = decodeEmbedding(row.embedding)
       if (!vec || vec.length !== idx.dimensions) continue
+      // HnswIndex._distance uses `Array.isArray(query)` to discriminate query
+      // vectors from node ids — Float32Array fails that check, so any second
+      // rebuilt node crashes `add`. Normalise to a plain Array.
+      const plainVec = Array.isArray(vec) ? vec : Array.from(vec)
       try {
-        idx.add(row.id, vec)
+        idx.add(row.id, plainVec)
         markIndexed.run(row.id)
       } catch {
         // Skip malformed vectors; persist.js will log failures.

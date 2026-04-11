@@ -5,6 +5,7 @@ const net = require('net')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const crypto = require('crypto')
 
 const SOCK_PATH = path.join(
   process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth'),
@@ -13,6 +14,14 @@ const SOCK_PATH = path.join(
 
 const MAX_BODY = 64 * 1024 // 64KB
 const HANDLER_TIMEOUT_MS = 400
+
+// --- /inject cache (spec §2.3): sha1(prompt + project + kinds_csv), 60s TTL ---
+const INJECT_CACHE_TTL_MS = 60_000
+const injectCache = new Map()
+
+function sha1(s) {
+  return crypto.createHash('sha1').update(s).digest('hex')
+}
 
 /**
  * Build a raw http.Server wired to our request handler. Does NOT call
@@ -26,9 +35,9 @@ const HANDLER_TIMEOUT_MS = 400
  *                                            (required for /sessions/:sid/status)
  * @returns {import('http').Server}
  */
-function buildQueryServer({ db, log = () => {}, trajectoriesDir = null } = {}) {
+function buildQueryServer({ db, log = () => {}, trajectoriesDir = null, embedPrompt = null } = {}) {
   return http.createServer((req, res) =>
-    _handleRequest(req, res, db, log, { trajectoriesDir })
+    _handleRequest(req, res, db, log, { trajectoriesDir, embedPrompt })
   )
 }
 
@@ -163,6 +172,19 @@ function _handleRequest(req, res, db, log, ctx = {}) {
     if (parsedUrl) {
       const parts = parsedUrl.pathname.split('/').filter(Boolean)
 
+      // GET /inject?prompt=&project=&kinds=&limit= (spec §2.3)
+      if (parts[0] === 'inject' && parts.length === 1) {
+        handleInject(req, res, db, log, ctx, parsedUrl).catch((err) => {
+          if (res.writableEnded) return
+          log('error', '/inject handler error', { error: err && err.message })
+          try {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: 'Internal error' }))
+          } catch {}
+        })
+        return
+      }
+
       if (parts[0] === 'sessions' && parts.length === 3 && parts[2] === 'status') {
         const sid = decodeURIComponent(parts[1])
         const info = findSessionInBuckets(sid, ctx.trajectoriesDir)
@@ -232,6 +254,159 @@ function _handleRequest(req, res, db, log, ctx = {}) {
   // Unknown route
   res.writeHead(404)
   res.end(JSON.stringify({ error: 'Not found' }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /inject — per-prompt knowledge-entities injection (spec §2.3)
+// ---------------------------------------------------------------------------
+//
+// Returns top-K { id, kind, summary, content, metadata, confidence, score }
+// for the given prompt, filtered to (scope='global' OR 'project:<project>')
+// and the requested kinds. Score = cosine × confidence × recency × kind_weight.
+//
+// Facts are silently excluded — they're session-start only.
+
+const KIND_ALLOWLIST = new Set(['pattern', 'decision', 'anti_pattern'])
+
+function kindWeight(kind) {
+  const envKey = `QUOTH_KIND_WEIGHT_${kind.toUpperCase()}`
+  const fallback = { pattern: 1.0, decision: 1.3, anti_pattern: 1.5 }[kind] ?? 1.0
+  const v = parseFloat(process.env[envKey])
+  return Number.isFinite(v) ? v : fallback
+}
+
+function _rowsForIds(db, ids, kinds, scopeArg) {
+  if (!ids.length || !kinds.length) return []
+  const placeholders = ids.map(() => '?').join(',')
+  const kindPlaceholders = kinds.map(() => '?').join(',')
+  const sql = `
+    SELECT id, kind, summary, content, metadata, confidence, updated_at
+      FROM knowledge_entities
+     WHERE status = 'active'
+       AND kind IN (${kindPlaceholders})
+       AND (scope = 'global' OR scope = ?)
+       AND id IN (${placeholders})
+  `
+  return db.prepare(sql).all(...kinds, scopeArg, ...ids)
+}
+
+async function handleInject(req, res, db, log, ctx, parsedUrl) {
+  const prompt = parsedUrl.searchParams.get('prompt') ?? ''
+  const project = parsedUrl.searchParams.get('project') ?? 'global'
+  const limitRaw = parseInt(parsedUrl.searchParams.get('limit') ?? '8', 10)
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 8
+
+  const kindsRaw = (parsedUrl.searchParams.get('kinds') ?? 'pattern,decision,anti_pattern')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  // Silently drop 'fact' and any unknown kinds — facts are session-start only.
+  const kinds = kindsRaw.filter((k) => KIND_ALLOWLIST.has(k))
+  if (kinds.length === 0) {
+    res.writeHead(200)
+    res.end(JSON.stringify({ results: [] }))
+    return
+  }
+
+  const kindsKey = [...kinds].sort().join(',')
+  const cacheKey = sha1(`${prompt}\0${project}\0${kindsKey}`)
+  const cached = injectCache.get(cacheKey)
+  if (cached && Date.now() - cached.ts < INJECT_CACHE_TTL_MS) {
+    res.writeHead(200)
+    res.end(JSON.stringify({ results: cached.results }))
+    return
+  }
+
+  // Embed prompt (DI via ctx.embedPrompt, default to ./embed.js).
+  const embedPrompt = ctx.embedPrompt || (async (text) => {
+    const { generateEmbedding } = require('./embed.js')
+    return generateEmbedding(text)
+  })
+  const rawVec = await embedPrompt(prompt)
+  if (!rawVec) {
+    res.writeHead(200)
+    res.end(JSON.stringify({ results: [] }))
+    return
+  }
+  // HNSW._distance uses `Array.isArray(query)` to tell a query vector from a
+  // node id — a Float32Array (or TypedArray) fails that check and crashes.
+  // Normalise to a plain Array.
+  const vec = Array.isArray(rawVec) ? rawVec : Array.from(rawVec)
+
+  // Load HNSW singleton (keyed by QUOTH_HOME, shared across requests).
+  const { loadOrInit } = require('./hnsw.js')
+  const hnsw = await loadOrInit({ db })
+
+  const scopeArg = `project:${project}`
+  const overFetch = limit * 3
+  const defaultEf = parseInt(process.env.QUOTH_HNSW_EF_SEARCH ?? '50', 10)
+
+  // First HNSW probe.
+  let annResults = hnsw.search(vec, overFetch, defaultEf)
+  let distanceById = new Map(annResults.map((r) => [r.id, r.distance]))
+  let ids = annResults.map((r) => r.id)
+
+  let rows = _rowsForIds(db, ids, kinds, scopeArg)
+
+  // Under-fetch fallback: re-probe with wider efSearch.
+  if (rows.length < limit) {
+    const annResults2 = hnsw.search(vec, overFetch, 200)
+    // Merge new distances (prefer freshly-computed distance on collision).
+    for (const r of annResults2) distanceById.set(r.id, r.distance)
+    const ids2 = annResults2.map((r) => r.id)
+    rows = _rowsForIds(db, ids2, kinds, scopeArg)
+    if (rows.length < limit) {
+      try {
+        const { logPipelineError } = require('../db.js')
+        logPipelineError({
+          stage: 'inject',
+          severity: 'warn',
+          session_id: null,
+          error_message: 'under_fetch',
+          context: {
+            prompt_len: prompt.length,
+            project,
+            limit,
+            found: rows.length,
+          },
+        })
+      } catch (err) {
+        log('error', 'logPipelineError failed in /inject', { error: err && err.message })
+      }
+    }
+  }
+
+  // Re-rank: score = cosine × confidence × recency × kind_weight.
+  const now = Date.now()
+  const scored = rows
+    .map((r) => {
+      const distance = distanceById.has(r.id) ? distanceById.get(r.id) : 1
+      const cos = 1 - distance
+      const ageMs = Math.max(0, now - (r.updated_at || now))
+      const recency = Math.exp(-ageMs / (30 * 86_400_000)) // 30-day half-ish decay
+      const conf = Number.isFinite(r.confidence) ? r.confidence : 0.5
+      const score = cos * conf * recency * kindWeight(r.kind)
+      let metadata = r.metadata
+      if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata) } catch { metadata = {} }
+      }
+      return {
+        id: r.id,
+        kind: r.kind,
+        summary: r.summary,
+        content: r.content,
+        metadata,
+        confidence: conf,
+        score,
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+
+  injectCache.set(cacheKey, { ts: Date.now(), results: scored })
+
+  res.writeHead(200)
+  res.end(JSON.stringify({ results: scored }))
 }
 
 function findSessionInBuckets(sid, trajectoriesDir) {
