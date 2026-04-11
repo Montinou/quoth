@@ -1,7 +1,7 @@
 # Session Capture & Pattern Extraction Redesign
 
 **Date**: 2026-04-11
-**Status**: Design (rev 2 — addressing reviewer feedback)
+**Status**: Design (rev 3 — addressing rev 2 reviewer feedback)
 **Author**: Claude (via brainstorming with Agustin)
 **Supersedes**: `2026-04-10-extract-v2-tool-calling.md`, `2026-04-10-session-isolation.md`, `2026-04-10-unified-injection-design.md` (partially), `2026-04-08-agent-type-pipeline-design.md`
 
@@ -156,6 +156,8 @@ The dedup sidecar is `<sid>.dedup` (single-line JSON: `{"last_hash": "<sha1>", "
 
 If the dedup file is missing or corrupt, capture treats the next entry as fresh (no dedup applied). If the dedup file disagrees with the JSONL tail (e.g. crash mid-write), capture rebuilds it from the last JSONL line on the next call.
 
+**Filename epoch encoding:** when a session is resumed, the existing `sessions(session_id, epoch)` PK protects the DB row, but the on-disk filename also encodes the epoch as `<sid>.e<n>.jsonl` (e.g. `abc-123.e2.jsonl` for the second incarnation). This means SIGTERM rollback (`<sid>.e<n>.<pid>.<wid>.jsonl → <sid>.e<n>.jsonl`) cannot collide with a freshly active session for the same `sid` but a higher epoch. The `<sid>.dedup` and `<sid>.meta.json` sidecars likewise carry the epoch suffix when an epoch > 1 exists.
+
 **`hooks/hook-dispatch.js session-end`** (small change, ~30 LOC delta)
 
 - Same atomic rename `active/<sid>.* → processing/<sid>.*`
@@ -229,7 +231,9 @@ These are defaults, not contracts — every value is tunable via env var.
 
 Both detectors push into the same claim queue; the queue dedupes by filename. Polling is cheap (`readdirSync` on a directory with <100 files is sub-millisecond).
 
-A `pipeline_errors` row with `severity='degraded'` is written if the polling sweep ever picks up a file the watcher missed — so we can spot watcher reliability problems instead of papering over them.
+**Boot seeding**: on daemon startup the in-memory "known files" Set is seeded from `readdirSync(processing/)` *before* the watcher starts, so existing files do not trigger false "watcher missed it" alerts. The first polling tick after boot is also marked "warmup" and skips the degraded-write.
+
+A `pipeline_errors` row with `severity='degraded'` is written only if the polling sweep picks up a file the watcher missed *after* the warmup tick — so we can spot watcher reliability problems without false-positive noise on every restart.
 
 **Daemon SIGTERM / orphan recovery:**
 
@@ -242,7 +246,7 @@ On SIGTERM the daemon does:
 On startup (`daemon.js` boot path):
 1. Scan `processing/` for any file matching `*.jsonl` with a `<pid>.<wid>` suffix (orphaned claims from a crashed previous run).
 2. For each orphan: if the suffixed PID is no longer alive (`process.kill(pid, 0)` throws `ESRCH`), strip the suffix via `fs.renameSync` and re-enqueue. Write `pipeline_errors` row `severity='warn', stage='claim', resolution='recovered'`.
-3. If the PID is still alive (e.g. another daemon instance), leave the file alone — that daemon owns it.
+3. If the PID is still alive — should not happen in v1 because the daemon's socket-bind in §5.3 prevents two instances from coexisting — log a `pipeline_errors` row `severity='error', stage='claim'` and skip the file. The "leave it alone" branch is reserved for future multi-daemon support and is not exercised in v1.
 
 **`daemon/pipeline/triage.js`** (new, ~150 LOC)
 
@@ -279,10 +283,28 @@ On startup (`daemon.js` boot path):
   5. `COMMIT`
   6. HNSW.add for each new entity id
   7. If HNSW.add throws on any id → write `pipeline_errors` row `severity='degraded'`, mark entity row `embedding_indexed=0`. Nightly sweep rebuilds the index from SQLite (see §5.8 HNSW recovery).
-- **Idempotency contract**: every entity id is `sha1(kind + canonical_content)[:16]` (16 hex chars, not 12 — see §3.1 collision math). Upsert key is `(id, source_session_id)`: if `(id, source_session_id)` already exists, no-op. If `id` exists from a *different* session, run a Bayesian merge (`alpha += 1`) and update `last_exposed_at`. This makes retries on the same session safe (alpha never double-increments).
+- **Idempotency contract**: every entity id is `sha1(kind + canonical_content)[:16]` (16 hex chars = 64 bits; with the birthday bound a 50% collision probability arrives near 2^32 ≈ 4B rows, comfortably above the planned scale). The schema keeps `id` as the single-column `PRIMARY KEY`; the "same session vs. different session" decision is made at conflict time:
+
+  ```sql
+  INSERT INTO knowledge_entities (id, kind, scope, summary, content, metadata,
+                                  embedding, tags, source, source_session_id, ...)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ...)
+  ON CONFLICT(id) DO UPDATE SET
+    -- Same session re-running: pure no-op (idempotent retry — protects against
+    -- alpha double-counting when persist crashes/retries on the same session)
+    alpha = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
+                 THEN knowledge_entities.alpha
+                 ELSE knowledge_entities.alpha + 1 END,
+    -- Different session strengthening: bump alpha + refresh updated_at
+    updated_at = CASE WHEN excluded.source_session_id = knowledge_entities.source_session_id
+                      THEN knowledge_entities.updated_at
+                      ELSE excluded.updated_at END;
+  ```
+
+  This design means `id` remains a single-column PK (compatible with HNSW joins and the SaaS `(org_id, id)` PK), and the "no-op vs. strengthen" decision is one CASE expression instead of a compound key. Walk-through: Session S1 inserts entity E1 → alpha=1. Session S1 retries (crash recovery) → ON CONFLICT, `excluded.source_session_id == knowledge_entities.source_session_id` → CASE → alpha unchanged. Session S2 produces same E1 → CASE → alpha=2. Persist is exactly-once per (entity, session).
 - **Single global lock**: the persist semaphore (cap=1) serializes all of the above. SQLite WAL handles single-writer semantics; HNSW pure-JS has no internal lock so the semaphore is what protects it.
 - **Failure modes**:
-  - SQLite txn aborts → file rolled back to `processing/<sid>.jsonl` (un-claimed via `fs.renameSync` strip-suffix), re-queued.
+  - SQLite txn aborts → file rolled back to `processing/<sid>.jsonl` (un-claimed via `fs.renameSync` strip-suffix), re-queued. **Cost note**: a transient persist failure causes the next attempt to re-run extract (paying LLM again). The idempotency contract only protects *successful* commits — it does not refund money on failed commits. If this becomes a problem we can write an `INSERT INTO pipeline_runs (status='in_progress')` row before extract begins and short-circuit retries that find one, but that's not in scope for v1.
   - HNSW.add throws after txn committed → entities are durable in SQLite, marked `embedding_indexed=0`, file moves to `done/` normally. Recovery is the nightly HNSW rebuild sweep.
   - Process crash mid-persist → on next boot, persist's idempotency check sees the committed `pipeline_runs` row (or doesn't), and replays from a clean slate either way. **No alpha double-counting.**
 
@@ -320,6 +342,7 @@ New endpoint: `GET /inject?prompt=<text>&kinds=<csv>&limit=<n>&project=<name>&ag
 - Embeds `prompt` via local MiniLM. **Cache key is `sha1(prompt + project + kinds_csv)`** (TTL 60 s) — never just `prompt`, so a project A prompt and an identical project B prompt cannot share a cached result and leak entities across projects.
 - HNSW search filtered by `kind IN (...)` and `(scope='global' OR scope='project:<name>')`
   - Pure-JS HNSW doesn't support filtered search natively, so we **over-fetch K×3** and filter in JS afterward
+  - **Under-fetch fallback**: if K×3 over-fetch yields fewer than K scope-matching rows, the daemon issues one additional `efSearch=200` HNSW probe (4× the default) and re-filters. If that *still* under-fetches, return what we have and write a `pipeline_errors` row `severity='warn', stage='inject', context='under_fetch'`. Better to return 5 results than to retry forever in the hot path.
 - Re-ranks results by `recency_decay × confidence × cosine_similarity × kind_weight`
 - `kind_weight` defaults: `anti_pattern=1.5`, `decision=1.3`, `pattern=1.0`. **Facts are excluded from `/inject` entirely** — they are session-start-only (see `session-restore` below). The `fact` kind never appears in `/inject` results, so it gets no weight constant. Tunable via `QUOTH_KIND_WEIGHT_*` env vars for the three kinds that appear here.
 - Returns top-K JSON with `{kind, content, score, source_session_id}` per item
@@ -502,6 +525,12 @@ Every entity gets one of two scope values:
 - `'project:<name>'` — true only in one project
 
 The `<name>` comes from `resolveProjectName()` (existing function), which resolves to the git remote origin repo name, lowercased.
+
+**Scope value constraint** (enforced in `persist.js` validator before insert):
+- `'global'`, OR
+- `^project:[a-z0-9][a-z0-9._-]{0,63}$` — lowercase, alphanumerics + `.`, `_`, `-`, max 64 chars after the `project:` prefix.
+
+If the resolved project name doesn't match this pattern (unusual git remote with funny chars), `resolveProjectName()` strips disallowed characters and truncates. The LLM never gets to write the scope column directly — `persist.js` always overrides with the sidecar's resolved+sanitized value.
 
 **Flow:**
 
