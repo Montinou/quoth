@@ -93,6 +93,20 @@ process.on('exit', () => {
 const db = createDb(DB_PATH)
 db.initHnsw()
 
+// Resolve the HnswIndex singleton for the worker pool. loadOrInit is async
+// on first call (may rebuild the index from knowledge_entities) but
+// deterministic thereafter — the worker awaits this promise before handing
+// off to persistSession so we always pass a real index, not null.
+const hnswReady = (async () => {
+  try {
+    const { loadOrInit } = require('./lib/hnsw.js')
+    return await loadOrInit({ db, home: QUOTH_HOME })
+  } catch (err) {
+    log('error', 'hnsw_load_failed', { error: err.message })
+    return null
+  }
+})()
+
 // --- LLM dependency bag -----------------------------------------------------
 // Pipeline contract: `llm({ system, prompt, stage, maxTokens? })` →
 // `{ text: string, cost_usd: number }`. Tests pass fakes; in production each
@@ -185,7 +199,8 @@ async function runWorker() {
       queuedSet.delete(file)
       if (!fs.existsSync(file)) continue
       try {
-        await core.processSessionWithPipeline(file, { hnsw: db, llm, log })
+        const hnsw = await hnswReady
+        await core.processSessionWithPipeline(file, { hnsw, llm, log })
       } catch (err) {
         log('error', 'pipeline_worker_failed', { file, error: err.message })
       }
@@ -196,22 +211,27 @@ async function runWorker() {
 }
 
 // --- File watcher over processing/ -----------------------------------------
-const watcher = new core.FileWatcher({
-  dir: PROCESSING_DIR,
-  log,
-  onFile: (fullPath) => { enqueueSessionFile(fullPath) },
+const watcher = new core.FileWatcher(PROCESSING_DIR, {
+  pollIntervalMs: parseInt(process.env.QUOTH_POLL_INTERVAL_MS || '5000', 10),
   onDegraded: (evt) => log('warn', 'watcher_degraded', evt),
+})
+watcher.on('file', (filename) => {
+  enqueueSessionFile(path.join(PROCESSING_DIR, filename))
 })
 watcher.start()
 
-// Boot-time orphan recovery — any leftover processing/ files from a
-// previous run get re-enqueued.
+// Boot-time orphan recovery — strip stale `.pid.worker.jsonl` suffixes from
+// crashed workers, then enqueue every remaining processing/ file so the
+// worker pool drains them. The FileWatcher warmup seeds pre-existing files
+// into its known-set, so this boot scan is the only code path that hands
+// them to the worker pool.
 try {
-  core.recoverOrphans({
-    processingDir: PROCESSING_DIR,
-    onFile: (fullPath) => enqueueSessionFile(fullPath),
-    log,
-  })
+  const recovered = core.recoverOrphans(PROCESSING_DIR)
+  if (recovered > 0) log('info', 'orphans_recovered', { count: recovered })
+  for (const filename of fs.readdirSync(PROCESSING_DIR)) {
+    if (!filename.endsWith('.jsonl')) continue
+    enqueueSessionFile(path.join(PROCESSING_DIR, filename))
+  }
 } catch (err) {
   log('error', 'orphan_recovery_failed', { error: err.message })
 }
