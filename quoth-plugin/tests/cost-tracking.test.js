@@ -40,7 +40,7 @@ describe('pipeline_costs table', () => {
 describe('db.recordPipelineCost', () => {
   it('inserts a cost row and returns the id', () => {
     const result = db.recordPipelineCost({
-      stage: 'JUDGE',
+      stage: 'triage',
       model: 'google/gemini-2.5-flash-lite',
       input_tokens: 500,
       output_tokens: 100,
@@ -52,7 +52,7 @@ describe('db.recordPipelineCost', () => {
     expect(result.lastInsertRowid).toBeGreaterThan(0)
 
     const row = db.prepare('SELECT * FROM pipeline_costs WHERE id = ?').get(result.lastInsertRowid)
-    expect(row.stage).toBe('JUDGE')
+    expect(row.stage).toBe('triage')
     expect(row.model).toBe('google/gemini-2.5-flash-lite')
     expect(row.input_tokens).toBe(500)
     expect(row.output_tokens).toBe(100)
@@ -64,7 +64,7 @@ describe('db.recordPipelineCost', () => {
   })
 
   it('uses defaults for optional fields', () => {
-    db.recordPipelineCost({ stage: 'DISTILL', model: 'google/gemini-2.5-flash' })
+    db.recordPipelineCost({ stage: 'extract', model: 'google/gemini-2.5-flash' })
     const row = db.prepare('SELECT * FROM pipeline_costs ORDER BY id DESC LIMIT 1').get()
     expect(row.input_tokens).toBe(0)
     expect(row.output_tokens).toBe(0)
@@ -85,18 +85,18 @@ describe('db.getCostSummary', () => {
 
   it('returns all-time summary when no range given', () => {
     const now = Date.now()
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.002, 2000, 400, now - 86400000 * 10)
-    insertCost('DISTILL', 'google/gemini-2.5-flash', 0.01, 5000, 1000, now - 86400000 * 3)
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.002, 2000, 400, now - 86400000 * 10)
+    insertCost('extract', 'google/gemini-2.5-flash', 0.01, 5000, 1000, now - 86400000 * 3)
 
     const summary = db.getCostSummary()
     expect(summary.total_calls).toBe(3)
     expect(summary.total_cost_usd).toBeCloseTo(0.013)
-    expect(summary.by_stage.JUDGE.calls).toBe(2)
-    expect(summary.by_stage.JUDGE.cost).toBeCloseTo(0.003)
-    expect(summary.by_stage.JUDGE.input_tokens).toBe(3000)
-    expect(summary.by_stage.JUDGE.output_tokens).toBe(600)
-    expect(summary.by_stage.DISTILL.calls).toBe(1)
+    expect(summary.by_stage.triage.calls).toBe(2)
+    expect(summary.by_stage.triage.cost).toBeCloseTo(0.003)
+    expect(summary.by_stage.triage.input_tokens).toBe(3000)
+    expect(summary.by_stage.triage.output_tokens).toBe(600)
+    expect(summary.by_stage.extract.calls).toBe(1)
   })
 
   it('filters by today', () => {
@@ -104,8 +104,8 @@ describe('db.getCostSummary', () => {
     const startOfDay = new Date()
     startOfDay.setHours(0, 0, 0, 0)
 
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.005, 3000, 500, startOfDay.getTime() - 1) // yesterday
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.005, 3000, 500, startOfDay.getTime() - 1) // yesterday
 
     const summary = db.getCostSummary('today')
     expect(summary.total_calls).toBe(1)
@@ -114,9 +114,9 @@ describe('db.getCostSummary', () => {
 
   it('filters by week', () => {
     const now = Date.now()
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
-    insertCost('DISTILL', 'google/gemini-2.5-flash', 0.01, 5000, 1000, now - 86400000 * 3)
-    insertCost('JUDGE', 'google/gemini-2.5-flash-lite', 0.002, 2000, 400, now - 86400000 * 10) // older than 7d
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.001, 1000, 200, now)
+    insertCost('extract', 'google/gemini-2.5-flash', 0.01, 5000, 1000, now - 86400000 * 3)
+    insertCost('triage', 'google/gemini-2.5-flash-lite', 0.002, 2000, 400, now - 86400000 * 10) // older than 7d
 
     const summary = db.getCostSummary('week')
     expect(summary.total_calls).toBe(2)

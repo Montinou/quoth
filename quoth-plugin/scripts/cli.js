@@ -146,7 +146,7 @@ async function cmdInit() {
       warn('Local mode without Claude Code — consolidation will use heuristics only')
     }
     if (!process.env.AI_GATEWAY_API_KEY) {
-      const wantGateway = await prompt.ask(`Enter AI Gateway key for JUDGE/DISTILL ${c.gray}(or press Enter to skip):${c.reset}`)
+      const wantGateway = await prompt.ask(`Enter AI Gateway key for triage/extract stages ${c.gray}(or press Enter to skip):${c.reset}`)
       if (wantGateway) gatewayKey = wantGateway
     }
   }

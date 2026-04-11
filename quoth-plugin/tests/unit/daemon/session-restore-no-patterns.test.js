@@ -83,12 +83,9 @@ describe('session-restore — legacy pattern/doc injection removed', () => {
       expect(restoreBlock).not.toContain('doc_chunks')
     })
 
-    it('preserves initGraph call', () => {
-      expect(restoreBlock).toContain('initGraph(db)')
-    })
-
-    it('preserves facts injection (listFactsByNamespace)', () => {
-      expect(restoreBlock).toContain('listFactsByNamespace')
+    it('preserves facts injection (direct knowledge_entities SQL)', () => {
+      expect(restoreBlock).toContain('knowledge_entities')
+      expect(restoreBlock).toMatch(/kind\s*=\s*['"]fact['"]/)
     })
   })
 

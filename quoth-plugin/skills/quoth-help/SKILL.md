@@ -31,7 +31,7 @@ Available topics (/quoth-help <topic>):
 
   tools            22 MCP tools (patterns, agents, intelligence, skills)
   hooks            9 hook events (routing, capture, injection, safety)
-  daemon           Background trajectory processor (JUDGE → DISTILL → CONSOLIDATE)
+  daemon           Background trajectory processor (triage → extract → embed → persist)
   skills           /quoth:patterns, /quoth:learn
   cloud            Cloud MCP server (search, memory, agents, genesis)
   troubleshooting  Common issues and fixes
@@ -112,11 +112,12 @@ Quoth Daemon
 
 Background process that converts raw trajectories into learned patterns.
 
-Pipeline: JUDGE → DISTILL → CONSOLIDATE (Haiku subagents)
+Pipeline: triage → extract → embed → persist
 
-  JUDGE       Evaluates trajectory quality and relevance
-  DISTILL     Extracts reusable patterns from quality trajectories
-  CONSOLIDATE Merges into pattern library with Bayesian confidence
+  triage    Gemini Flash Lite classifies sessions worth mining
+  extract   Kimi K2.5 emits the four knowledge entity kinds
+  embed     Local MiniLM-L6 encodes each entity (384d)
+  persist   Single-tx upsert into knowledge_entities + HNSW
 
 Storage: ~/.quoth/memory.db (SQLite + HNSW vector index)
 PID:     ~/.quoth/daemon.pid

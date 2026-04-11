@@ -310,50 +310,6 @@ describe('sessions.js — updateSidecar dual-form', () => {
   })
 })
 
-describe('insertNewFact — scope → namespace mapping', () => {
-  let db
-  beforeEach(() => {
-    db = createDb(':memory:')
-  })
-
-  it('maps scope=global → facts:global', () => {
-    db.insertNewFact(
-      { topic: 't1', statement: 's1', scope: 'global', tags: [] },
-      { project: 'quoth', session_id: 'x' }
-    )
-    const rows = db.listFactsByNamespace('facts:global')
-    expect(rows.length).toBe(1)
-    expect(rows[0].key).toBe('t1')
-  })
-
-  it('maps scope=project → facts:proj:<project>', () => {
-    db.insertNewFact(
-      { topic: 't2', statement: 's2', scope: 'project', tags: [] },
-      { project: 'quoth', session_id: 'x' }
-    )
-    const rows = db.listFactsByNamespace('facts:proj:quoth')
-    expect(rows.length).toBe(1)
-  })
-
-  it('unknown scope defaults to project namespace (defensive)', () => {
-    db.insertNewFact(
-      { topic: 't3', statement: 's3', scope: 'something-else', tags: [] },
-      { project: 'quoth', session_id: 'x' }
-    )
-    const rows = db.listFactsByNamespace('facts:proj:quoth')
-    expect(rows.length).toBe(1)
-    expect(rows[0].key).toBe('t3')
-  })
-
-  it('upserts on duplicate (namespace,key) — new statement replaces old', () => {
-    db.insertNewFact({ topic: 't4', statement: 'v1', scope: 'project', tags: [] }, { project: 'quoth', session_id: 'a' })
-    db.insertNewFact({ topic: 't4', statement: 'v2', scope: 'project', tags: [] }, { project: 'quoth', session_id: 'b' })
-    const rows = db.listFactsByNamespace('facts:proj:quoth')
-    expect(rows.length).toBe(1)
-    expect(JSON.parse(rows[0].content).statement).toBe('v2')
-  })
-})
-
 describe('moveSessionFile — epoch collision handling', () => {
   let tmp
   beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'quoth-epoch-test-')) })

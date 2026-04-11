@@ -149,8 +149,8 @@ describe('mcp/handlers/entities', () => {
     it('inserts a decision entity with agent_logged source', async () => {
       const { entities, ke, db } = loadFresh()
       const res = await entities.handle('quoth_log_decision', {
-        situation: 'migrating from JUDGE to triage',
-        options: ['keep JUDGE', 'new triage stage'],
+        situation: 'choosing pipeline triage strategy',
+        options: ['legacy approach', 'new triage stage'],
         choice: 'new triage stage',
         reasoning: 'single stage is simpler',
       }, db)

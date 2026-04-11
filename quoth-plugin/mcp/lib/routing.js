@@ -16,7 +16,7 @@ const AGENT_CAPABILITIES = {
 /**
  * Canonical agent role types. Single source of truth for:
  * - Task routing (routeTask)
- * - Batch JUDGE domain classification
+ * - Triage domain classification
  * - Pattern agent:<type> tags
  * - Injection tag filtering
  *

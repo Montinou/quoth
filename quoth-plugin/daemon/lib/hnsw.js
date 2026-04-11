@@ -291,32 +291,6 @@ class HnswIndex {
   }
 
   /**
-   * Bulk load all active patterns with embeddings from the database.
-   * @param {object} db - better-sqlite3 database instance
-   */
-  buildFromDb(db) {
-    // Reset state
-    this.nodes = new Map()
-    this.entryPoint = null
-    this.maxLayer = -1
-
-    const rows = db.prepare(
-      `SELECT id, embedding FROM patterns WHERE status = 'active' AND embedding IS NOT NULL`
-    ).all()
-
-    for (const row of rows) {
-      try {
-        const vector = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding
-        if (Array.isArray(vector) && vector.length === this.dimensions) {
-          this.add(row.id, vector)
-        }
-      } catch {
-        // Skip malformed embeddings
-      }
-    }
-  }
-
-  /**
    * Serialize the index to a JSON file.
    * @param {string} filePath
    */
