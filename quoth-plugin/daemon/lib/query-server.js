@@ -63,7 +63,7 @@ function buildQueryServer({
   )
 }
 
-function createQueryServer(db, log) {
+function createQueryServer(db, log, opts = {}) {
   let server = null
 
   function start() {
@@ -87,10 +87,12 @@ function createQueryServer(db, log) {
   }
 
   function _listen(resolve, reject) {
-    // Unix-socket path: no trajectoriesDir needed (daemon wiring does not
-    // yet use /sessions routes over the socket — loopback port is the
-    // primary consumer). A future task can thread trajectoriesDir through.
-    server = buildQueryServer({ db, log, trajectoriesDir: null })
+    server = buildQueryServer({
+      db,
+      log,
+      trajectoriesDir: opts.trajectoriesDir || null,
+      getDaemonState: opts.getDaemonState,
+    })
     server.on('error', reject)
     server.listen(SOCK_PATH, () => {
       log('info', 'Query server listening', { socket: SOCK_PATH })

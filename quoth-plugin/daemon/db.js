@@ -473,10 +473,21 @@ function createDb(dbPath) {
   return db
 }
 
+// Singleton handle keyed by resolved path. The daemon is a single-process,
+// single-event-loop service — one long-lived connection is correct for
+// better-sqlite3 (synchronous, no pool needed). Tests that change
+// QUOTH_HOME between runs call vi.resetModules() which re-imports this
+// module and resets the cache naturally.
+let _cachedDb = null
+let _cachedPath = null
+
 function openDb() {
   const home = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
   const dbPath = path.join(home, 'memory.db')
-  return createDb(dbPath)
+  if (_cachedDb && _cachedPath === dbPath) return _cachedDb
+  _cachedDb = createDb(dbPath)
+  _cachedPath = dbPath
+  return _cachedDb
 }
 
 // ---------------------------------------------------------------------------
@@ -489,20 +500,16 @@ function logPipelineError({
   fallback_attempted = 0, fallback_succeeded = 0, retry_count = 0, resolution = null,
 }) {
   const db = openDb()
-  try {
-    db.prepare(`
-      INSERT INTO pipeline_errors
-        (ts, stage, severity, session_id, project, worker_id, error_message, error_stack, context,
-         model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      Date.now(), stage, severity, session_id, project, worker_id, error_message, error_stack,
-      context ? JSON.stringify(context) : null,
-      model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution,
-    )
-  } finally {
-    try { db.close() } catch {}
-  }
+  db.prepare(`
+    INSERT INTO pipeline_errors
+      (ts, stage, severity, session_id, project, worker_id, error_message, error_stack, context,
+       model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    Date.now(), stage, severity, session_id, project, worker_id, error_message, error_stack,
+    context ? JSON.stringify(context) : null,
+    model_attempted, fallback_attempted, fallback_succeeded, retry_count, resolution,
+  )
 }
 
 module.exports = { createDb, openDb, logPipelineError }

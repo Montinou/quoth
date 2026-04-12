@@ -240,7 +240,13 @@ try {
 let queryServer = null
 try {
   const { createQueryServer } = require('./lib/query-server.js')
-  queryServer = createQueryServer(db, log)
+  queryServer = createQueryServer(db, log, {
+    trajectoriesDir: TRAJECTORIES_DIR,
+    getDaemonState: () => ({
+      queue_depth: sessionQueue.length,
+      in_flight: workerBusy ? 1 : 0,
+    }),
+  })
   queryServer.start()
 } catch (err) {
   log('error', 'query_server_failed_to_start', { error: err.message })

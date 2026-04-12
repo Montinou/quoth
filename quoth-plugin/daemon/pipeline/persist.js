@@ -19,10 +19,9 @@
  *    leave `embedding_indexed=0`; the catch-up sweep re-indexes later.
  *
  * The upsert SQL is inlined here (rather than delegating to
- * `upsertEntity`) because `openDb()` opens a fresh connection on every call
- * and calling it from within a write transaction would deadlock on DDL
- * re-runs. The SQL is kept byte-for-byte identical to the canonical
- * definition in `daemon/lib/knowledge-entities.js::upsertEntity`.
+ * `upsertEntity`) to keep the entire batch in a single IMMEDIATE
+ * transaction on one db handle. The SQL is kept byte-for-byte identical
+ * to the canonical definition in `daemon/lib/knowledge-entities.js::upsertEntity`.
  */
 
 const { openDb, logPipelineError } = require('../db.js')
