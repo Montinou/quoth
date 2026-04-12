@@ -1,6 +1,8 @@
 'use strict'
 
 const fs = require('fs')
+const path = require('path')
+const os = require('os')
 
 /**
  * Pure JS HNSW (Hierarchical Navigable Small World) index for approximate nearest neighbor search.
@@ -60,8 +62,12 @@ class HnswIndex {
    * Get distance between two nodes by id, or between a vector and a node.
    */
   _distance(a, b) {
-    const vecA = Array.isArray(a) ? a : this.nodes.get(a).vector
-    const vecB = Array.isArray(b) ? b : this.nodes.get(b).vector
+    // A query-vector argument is any numeric sequence (plain Array OR a
+    // TypedArray like Float32Array from decodeEmbedding / generateEmbedding).
+    // Anything else is treated as a node id and dereferenced.
+    const isVec = (x) => Array.isArray(x) || ArrayBuffer.isView(x)
+    const vecA = isVec(a) ? a : this.nodes.get(a).vector
+    const vecB = isVec(b) ? b : this.nodes.get(b).vector
     return cosineDistance(vecA, vecB)
   }
 
@@ -285,32 +291,6 @@ class HnswIndex {
   }
 
   /**
-   * Bulk load all active patterns with embeddings from the database.
-   * @param {object} db - better-sqlite3 database instance
-   */
-  buildFromDb(db) {
-    // Reset state
-    this.nodes = new Map()
-    this.entryPoint = null
-    this.maxLayer = -1
-
-    const rows = db.prepare(
-      `SELECT id, embedding FROM patterns WHERE status = 'active' AND embedding IS NOT NULL`
-    ).all()
-
-    for (const row of rows) {
-      try {
-        const vector = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding
-        if (Array.isArray(vector) && vector.length === this.dimensions) {
-          this.add(row.id, vector)
-        }
-      } catch {
-        // Skip malformed embeddings
-      }
-    }
-  }
-
-  /**
    * Serialize the index to a JSON file.
    * @param {string} filePath
    */
@@ -364,4 +344,159 @@ class HnswIndex {
   }
 }
 
-module.exports = { HnswIndex }
+// ---------------------------------------------------------------------------
+// Knowledge-entities-backed HNSW recovery (spec §2.2, §5.8)
+// ---------------------------------------------------------------------------
+//
+// SQLite is the durable source of truth for knowledge_entities. The HNSW index
+// is a derived cache. On daemon boot we try to load a previously persisted
+// index; if the file is missing or corrupt we rebuild from `knowledge_entities`
+// in bounded batches and save.
+//
+// A distinct file (`knowledge_hnsw.json`) is used to avoid colliding with the
+// legacy `hnsw.index.json` built from the `patterns` table. Task 24 removes
+// the legacy path; the two indices coexist until then.
+
+const KNOWLEDGE_HNSW_FILENAME = 'knowledge_hnsw.json'
+
+// Store the singleton on globalThis so we get one instance across every
+// module evaluation — including cases where CJS `require` and ESM `import`
+// end up with separate loader caches (vitest ESM-CJS interop, multiple
+// workers, etc). The cache is keyed by QUOTH_HOME so separate tests using
+// mkdtempSync get fresh indices.
+const SINGLETON_KEY = Symbol.for('quoth.knowledgeHnsw')
+function _getSingletonMap() {
+  if (!globalThis[SINGLETON_KEY]) globalThis[SINGLETON_KEY] = new Map()
+  return globalThis[SINGLETON_KEY]
+}
+
+function hnswPersistPath(home) {
+  const h = home || process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
+  return path.join(h, KNOWLEDGE_HNSW_FILENAME)
+}
+
+/**
+ * Decode a `knowledge_entities.embedding` column into a plain Float32Array.
+ * Accepts Buffer (BLOB), Uint8Array, JSON string, or already-decoded array.
+ * Returns null on malformed input.
+ */
+function decodeEmbedding(raw) {
+  if (raw == null) return null
+  if (Array.isArray(raw)) return raw
+  if (raw instanceof Float32Array) return raw
+  if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) {
+    const byteOffset = raw.byteOffset ?? 0
+    const byteLength = raw.byteLength
+    if (byteLength % 4 !== 0) return null
+    // Copy into a fresh backing buffer — callers may mutate or persist.
+    const copy = new ArrayBuffer(byteLength)
+    new Uint8Array(copy).set(new Uint8Array(raw.buffer, byteOffset, byteLength))
+    return new Float32Array(copy)
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function _batchSize() {
+  const n = Number(process.env.QUOTH_HNSW_REBUILD_BATCH)
+  return Number.isFinite(n) && n > 0 ? n : 500
+}
+
+/**
+ * Rebuild a fresh index from `knowledge_entities`. Reads in bounded batches
+ * and marks each row `embedding_indexed=1` as it lands in the graph.
+ */
+function _rebuildFromKnowledgeEntities(db, idx) {
+  const batch = _batchSize()
+  const select = db.prepare(
+    `SELECT id, embedding FROM knowledge_entities
+     WHERE status = 'active' AND embedding IS NOT NULL
+       AND id > ?
+     ORDER BY id ASC
+     LIMIT ?`
+  )
+  const markIndexed = db.prepare(
+    `UPDATE knowledge_entities SET embedding_indexed = 1 WHERE id = ?`
+  )
+
+  let cursor = ''
+  while (true) {
+    const rows = select.all(cursor, batch)
+    if (rows.length === 0) break
+    for (const row of rows) {
+      cursor = row.id
+      const vec = decodeEmbedding(row.embedding)
+      if (!vec || vec.length !== idx.dimensions) continue
+      try {
+        idx.add(row.id, vec)
+        markIndexed.run(row.id)
+      } catch {
+        // Skip malformed vectors; persist.js will log failures.
+      }
+    }
+    if (rows.length < batch) break
+  }
+}
+
+/**
+ * Load the knowledge-entities HNSW index from disk, or rebuild from SQLite
+ * if the file is missing/corrupt. Returns a process-wide singleton so hooks,
+ * workers, and the catch-up sweep share one graph.
+ *
+ * @param {{ home?: string, db?: object }} [opts]
+ * @returns {Promise<HnswIndex>}
+ */
+async function loadOrInit({ home, db } = {}) {
+  const filePath = hnswPersistPath(home)
+  const cache = _getSingletonMap()
+  if (cache.has(filePath)) return cache.get(filePath)
+
+  const idx = new HnswIndex()
+
+  let loaded = false
+  if (fs.existsSync(filePath)) {
+    try {
+      idx.load(filePath)
+      loaded = true
+    } catch {
+      loaded = false
+    }
+  }
+
+  if (!loaded) {
+    // Lazy-require to avoid a circular load at module init time.
+    const database = db || require('../db.js').openDb()
+    try {
+      _rebuildFromKnowledgeEntities(database, idx)
+      try { idx.save(filePath) } catch { /* best-effort persist */ }
+    } catch {
+      // Leave the index empty on total failure — catch-up sweep will retry.
+    }
+  }
+
+  cache.set(filePath, idx)
+  return idx
+}
+
+/**
+ * Test-only: drop the cached singleton so a fresh `loadOrInit()` re-runs the
+ * full load/rebuild path. Production code should never call this.
+ */
+function _resetKnowledgeSingleton() {
+  _getSingletonMap().clear()
+}
+
+module.exports = {
+  HnswIndex,
+  loadOrInit,
+  hnswPersistPath,
+  decodeEmbedding,
+  _resetKnowledgeSingleton,
+}

@@ -2509,6 +2509,31 @@ git add docs/superpowers/plans/2026-04-11-session-capture-and-pattern-extraction
 git commit -m "docs(plan): record cutover sandbox verification results"
 ```
 
+### Task 27 execution record (2026-04-11)
+
+Three sandbox runs at `/tmp/quoth-cutover-*`, each a fresh `$QUOTH_HOME` with the full `~/.quoth/.env` (real `AI_GATEWAY_API_KEY` + `MOONSHOT_API_KEY`). First two runs uncovered wiring bugs introduced by the redesign; the third run was fully green end-to-end.
+
+**Bugs found and fixed in `daemon/daemon.js`:**
+
+1. **FileWatcher wiring mismatch.** `new core.FileWatcher({ dir, onFile, onDegraded })` passed an options object as the constructor's first positional `dir` argument, so `readdirSync(this.dir)` silently returned nothing and no `'file'` event was ever wired. Fixed by calling `new core.FileWatcher(PROCESSING_DIR, { pollIntervalMs, onDegraded })` and subscribing with `watcher.on('file', filename => enqueueSessionFile(path.join(PROCESSING_DIR, filename)))`.
+
+2. **Boot-time enqueue missing.** The watcher's warmup seeds `knownFiles` from the directory listing so pre-existing files never emit an event. `core.recoverOrphans({ processingDir, onFile, log })` was supposed to re-enqueue them but `recoverOrphans(dir)` takes a string and only strips `.pid.worker.jsonl` suffixes from crashed-worker claim files — it never re-enqueues regular sessions. Fixed by calling `recoverOrphans(PROCESSING_DIR)` for the orphan sweep, then `fs.readdirSync(PROCESSING_DIR)` and enqueueing every `*.jsonl` directly so the worker pool drains anything left from a previous run.
+
+3. **HNSW passed as the SQLite handle.** Worker was calling `processSessionWithPipeline(file, { hnsw: db, ... })`, but `db` is the better-sqlite3 instance with helper methods — no `.add(id, vec)`. persist.js hit `hnsw.add is not a function` and wrote degraded `pipeline_errors` rows, leaving `embedding_indexed = 0`. Fixed by awaiting `loadOrInit({ db, home: QUOTH_HOME })` at boot (stored as `const hnswReady = (async () => ...)()`) and awaiting that promise inside `runWorker()` before each `processSessionWithPipeline` call, so persist.js always receives a real `HnswIndex`.
+
+**Final run (after fixes):**
+
+- **Sandbox:** `/tmp/quoth-cutover-v3-549293`
+- **Fixture:** 6-entry session (`Read` → `Edit` adding `= ''` default param → `Bash npm test`), `session_id=cutover-v3-...`, `project=cutover`
+- **Pipeline trace:** fixture moved `processing/` → `done/2026-04-11/cutover/`
+- **`knowledge_entities`:** 1 row, `kind=pattern`, `scope=project:cutover`, summary *"Add default parameter to prevent undefined errors in utility functions"*, `confidence=0.5`, `embedding_indexed=1`
+- **`llm_budget`:** 1 triage call + 1 extract call, `spend_usd=0.0006175` for 2026-04-11
+- **`pipeline_errors`:** 0 rows
+- **`/health`:** `errors_24h.*.degraded = 0` across all stages, `stuck_files = []`
+- **`/inject?prompt=defensive+default+parameter&project=cutover&kinds=pattern&limit=5`:** returned 1 result (the persisted pattern) with cosine score ≈ 0.223, confirming both HNSW indexing and the socket fast-path
+
+Production `~/.quoth/` untouched — sandbox was a fresh disposable `$QUOTH_HOME` throughout.
+
 ---
 
 ## Verification before completion

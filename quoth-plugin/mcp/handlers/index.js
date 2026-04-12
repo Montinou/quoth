@@ -1,21 +1,22 @@
 'use strict'
 
-const patterns = require('./patterns')
-const skills = require('./skills')
-const agents = require('./agents')
-const intelligence = require('./intelligence')
+// Task 24 / spec §6.3. The MCP surface collapses to two handler modules
+// post-cleanup: `entities` (Task 20 — the 4-kind knowledge store) and
+// `agents` (daemon status + registration). The old patterns, skills, and
+// intelligence handlers were retired alongside the pre-v3.6 pipeline.
 
-// Collect all tool definitions
+const agents = require('./agents')
+const entities = require('./entities')
+const outcomes = require('./outcomes')
+
 const ALL_TOOLS = [
-  ...patterns.TOOLS,
-  ...skills.TOOLS,
   ...agents.TOOLS,
-  ...intelligence.TOOLS,
+  ...entities.TOOLS,
+  ...outcomes.TOOLS,
 ]
 
-// Build handler dispatch map: toolName -> module
 const HANDLERS = {}
-for (const mod of [patterns, skills, agents, intelligence]) {
+for (const mod of [agents, entities, outcomes]) {
   for (const tool of mod.TOOLS) HANDLERS[tool.name] = mod
 }
 

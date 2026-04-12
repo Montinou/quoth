@@ -76,4 +76,63 @@ function sweepDir(dir, now, cutoffMs, log) {
   return count
 }
 
-module.exports = { runRetentionSweep, getTtls }
+/**
+ * HNSW catch-up sweep (spec §5.8).
+ *
+ * Walks `knowledge_entities WHERE embedding_indexed = 0` in bounded batches,
+ * adds each vector to the shared HNSW singleton, marks it indexed, and
+ * persists the index at the end. Runs at boot and nightly so rows that
+ * landed in SQLite but never made it into the graph (crash, transient HNSW
+ * failure) are healed without rebuilding from scratch.
+ */
+async function runHnswCatchUp({ batchSize, home = process.env.QUOTH_HOME } = {}) {
+  const hnswMod = require('./lib/hnsw.js')
+  const { listUnindexed, markIndexed } = require('./lib/knowledge-entities.js')
+
+  const idx = await hnswMod.loadOrInit({ home })
+  const envBatch = Number(process.env.QUOTH_HNSW_REBUILD_BATCH)
+  const limit = Number.isFinite(batchSize) && batchSize > 0
+    ? batchSize
+    : (Number.isFinite(envBatch) && envBatch > 0 ? envBatch : 500)
+
+  let added = 0
+  // Bound the outer loop defensively — a row that can't be decoded would
+  // otherwise spin forever since markIndexed is only called on success.
+  // We skip-and-track unresolvable ids so the sweep terminates.
+  const skipped = new Set()
+
+  /* eslint-disable no-constant-condition */
+  while (true) {
+    const rows = listUnindexed(limit)
+    if (rows.length === 0) break
+
+    let progress = 0
+    for (const row of rows) {
+      if (skipped.has(row.id)) continue
+      const vec = hnswMod.decodeEmbedding(row.embedding)
+      if (!vec || vec.length !== idx.dimensions) {
+        skipped.add(row.id)
+        continue
+      }
+      try {
+        idx.add(row.id, vec)
+        markIndexed(row.id)
+        added++
+        progress++
+      } catch {
+        skipped.add(row.id)
+      }
+    }
+
+    if (progress === 0) break // nothing indexable remains in this batch window
+  }
+  /* eslint-enable no-constant-condition */
+
+  if (added > 0) {
+    try { idx.save(hnswMod.hnswPersistPath(home)) } catch { /* best-effort */ }
+  }
+
+  return { added, skipped: skipped.size }
+}
+
+module.exports = { runRetentionSweep, getTtls, runHnswCatchUp }

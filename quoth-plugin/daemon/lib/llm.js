@@ -6,10 +6,10 @@
  * Auth: AI_GATEWAY_API_KEY (vck_* key, same gateway used by embed.js)
  *
  * Default model: google/gemini-2.5-flash-lite (fast, cheap, supports JSON mode).
- * Override via QUOTH_LLM_MODEL env var (e.g. 'deepseek/deepseek-v3.2').
  *
- * Legacy: prior version used Kimi K2.5 directly via Moonshot. That path is
- * kept as a fallback if MOONSHOT_API_KEY is set but AI_GATEWAY_API_KEY is not.
+ * Also exposes `callMoonshot` / `callMoonshotWithTools` for Kimi K2.5 — used
+ * by the extract stage where tool-calling is required. The bare `callLLM`
+ * helper falls back to Moonshot if only `MOONSHOT_API_KEY` is set.
  */
 
 const https = require('https')
@@ -36,7 +36,7 @@ const GATEWAY_PATH = '/v1/chat/completions'
 const MOONSHOT_HOST = 'api.moonshot.ai'
 const MOONSHOT_PATH = '/v1/chat/completions'
 
-function getModel() { return process.env.QUOTH_LLM_MODEL || DEFAULT_MODEL }
+function getModel() { return DEFAULT_MODEL }
 
 function getGatewayKey() { return process.env.AI_GATEWAY_API_KEY || null }
 

@@ -479,8 +479,384 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
   return { patterns, facts: extractedFacts }
 }
 
+// ============================================================================
+// Task 9 — four-kind extractor (runs alongside legacy extract() above).
+//
+// NOTE on naming: the legacy extractor already exports `parseExtractOutput`
+// with a {patterns, facts} shape. The original Task 9 plan reused that name
+// for the new 4-kind shape, which would collide. We intentionally deviate
+// from the plan and name the new parser `parseExtractEntities` + new runner
+// `runExtract`, leaving the legacy functions untouched. This is sanctioned
+// by the plan's open-issue footer: "extract.js DI shape differs from Task 9
+// assumption". Legacy callers (8 in tests/extract.test.js) keep working.
+// ============================================================================
+
+const { reserve, reconcile } = require('../lib/llm-budget.js')
+const { logPipelineError } = require('../db.js')
+
+const EXTRACT_EST_COST = { low: 0.005, medium: 0.012, high: 0.025 }
+const VALID_ENTITY_KINDS = new Set(['pattern', 'decision', 'anti_pattern', 'fact'])
+const ALL_KINDS = ['pattern', 'decision', 'anti_pattern', 'fact']
+
+function estCost(urgency) {
+  return EXTRACT_EST_COST[urgency] ?? EXTRACT_EST_COST.medium
+}
+
+function buildEntitiesSystemPrompt({ urgency = 'medium', suspected_kinds = ALL_KINDS, strict = false } = {}) {
+  const depthHint = urgency === 'high'
+    ? 'Be thorough. Extract every distinct pattern, decision, anti-pattern, and fact worth remembering.'
+    : urgency === 'low'
+      ? 'Be conservative. Only extract clearly valuable items. It is fine to return an empty entities array.'
+      : 'Extract the meaningful items you observe. Skip trivial or obvious entries.'
+
+  const kindsFilter = Array.isArray(suspected_kinds) && suspected_kinds.length > 0
+    ? suspected_kinds.filter(k => VALID_ENTITY_KINDS.has(k))
+    : ALL_KINDS
+
+  const strictLine = strict ? '\nRESPOND WITH A SINGLE VALID JSON OBJECT. NO PROSE.\n' : ''
+
+  return `You are the EXTRACT stage of a knowledge-extraction pipeline. You receive a session summary and return an \`entities\` array. Each entity has one of 4 kinds: pattern, decision, anti_pattern, fact.
+${strictLine}
+${depthHint}
+
+Allowed kinds for this session: ${kindsFilter.join(', ')}.
+
+Return ONLY a JSON object with this exact shape, no code fence, no prose:
+{
+  "entities": [
+    {
+      "kind": "pattern",
+      "summary": "...",
+      "condition": "...",
+      "action": "...",
+      "quality_signal": "universal" | "domain" | "project" | "edge_case"
+    },
+    {
+      "kind": "decision",
+      "summary": "...",
+      "situation": "...",
+      "options_considered": ["..."],
+      "choice": "...",
+      "reasoning": "...",
+      "outcome": "..."
+    },
+    {
+      "kind": "anti_pattern",
+      "summary": "...",
+      "condition": "...",
+      "what_not_to_do": "...",
+      "why_failed": "..."
+    },
+    {
+      "kind": "fact",
+      "summary": "...",
+      "topic": "...",
+      "statement": "...",
+      "evidence": "..."
+    }
+  ]
+}
+
+If the session has nothing worth capturing, return { "entities": [] }.`
+}
+
+function buildEntitiesUserPrompt(session) {
+  const project = session?.project ?? 'unknown'
+  const entries = Array.isArray(session?.entries) ? session.entries : []
+  const head = entries.slice(0, 10)
+  const tail = entries.slice(-20)
+  return [
+    `project=${project}`,
+    `entries=${entries.length}`,
+    `head=${JSON.stringify(head)}`,
+    `tail=${JSON.stringify(tail)}`,
+  ].join('\n')
+}
+
+/**
+ * Parse the 4-kind entities payload from an LLM response.
+ * Returns { entities: [...] }. Malformed entries are silently dropped.
+ * Non-JSON input returns { entities: [] }.
+ */
+function parseExtractEntities(raw) {
+  let parsed
+  try {
+    parsed = parseJson(raw)
+  } catch {
+    return { entities: [] }
+  }
+
+  const rawEntities = Array.isArray(parsed?.entities) ? parsed.entities : []
+  const entities = []
+
+  for (const e of rawEntities) {
+    if (!e || typeof e !== 'object') continue
+    if (!VALID_ENTITY_KINDS.has(e.kind)) continue
+    if (typeof e.summary !== 'string' || e.summary.length === 0) continue
+
+    if (e.kind === 'pattern') {
+      if (typeof e.condition !== 'string' || !e.condition) continue
+      if (typeof e.action !== 'string' || !e.action) continue
+      entities.push({
+        kind: 'pattern',
+        summary: e.summary,
+        content: `${e.condition} → ${e.action}`,
+        metadata: {
+          condition: e.condition,
+          action: e.action,
+          quality_signal: e.quality_signal ?? null,
+        },
+      })
+    } else if (e.kind === 'decision') {
+      if (typeof e.situation !== 'string' || !e.situation) continue
+      if (typeof e.choice !== 'string' || !e.choice) continue
+      entities.push({
+        kind: 'decision',
+        summary: e.summary,
+        content: `${e.situation}: ${e.choice}`,
+        metadata: {
+          situation: e.situation,
+          options_considered: Array.isArray(e.options_considered) ? e.options_considered : [],
+          choice: e.choice,
+          reasoning: typeof e.reasoning === 'string' ? e.reasoning : '',
+          outcome: e.outcome ?? null,
+        },
+      })
+    } else if (e.kind === 'anti_pattern') {
+      if (typeof e.condition !== 'string' || !e.condition) continue
+      if (typeof e.what_not_to_do !== 'string' || !e.what_not_to_do) continue
+      entities.push({
+        kind: 'anti_pattern',
+        summary: e.summary,
+        content: `${e.condition}: NOT ${e.what_not_to_do}`,
+        metadata: {
+          condition: e.condition,
+          what_not_to_do: e.what_not_to_do,
+          why_failed: typeof e.why_failed === 'string' ? e.why_failed : '',
+        },
+      })
+    } else if (e.kind === 'fact') {
+      if (typeof e.topic !== 'string' || !e.topic) continue
+      if (typeof e.statement !== 'string' || !e.statement) continue
+      entities.push({
+        kind: 'fact',
+        summary: e.summary,
+        content: `${e.topic}: ${e.statement}`,
+        metadata: {
+          topic: e.topic,
+          statement: e.statement,
+          evidence: typeof e.evidence === 'string' ? e.evidence : '',
+        },
+      })
+    }
+  }
+
+  return { entities }
+}
+
+/**
+ * Run the 4-kind extractor against a session. Dependency-injected LLM callable.
+ *
+ * opts: { llm, urgency, suspected_kinds, sleep }
+ * Returns { entities, cost_usd } on success, or
+ *         { entities: [], cost_usd, error: 'budget' | 'parse-failed' } on failure.
+ */
+async function runExtract(session, opts = {}) {
+  const { llm, urgency = 'medium', suspected_kinds = ALL_KINDS } = opts
+  if (typeof llm !== 'function') {
+    throw new Error('runExtract requires a `llm` callable in opts')
+  }
+
+  const estimated_usd = estCost(urgency)
+  const reservation = reserve({ stage: 'extract', estimated_usd })
+  if (!reservation.ok) {
+    return { entities: [], cost_usd: 0, error: 'budget' }
+  }
+
+  const session_id = session?.session_id ?? null
+  const project = session?.project ?? null
+  const userPrompt = buildEntitiesUserPrompt(session)
+
+  let actualCost = 0
+  let lastEntities = []
+  let parseFailed = true
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const strict = attempt > 0
+    const system = buildEntitiesSystemPrompt({ urgency, suspected_kinds, strict })
+
+    let res
+    try {
+      res = await llm({ system, prompt: userPrompt, stage: 'extract' })
+    } catch (err) {
+      // Reconcile whatever we spent so far and propagate — wrapper may fall back.
+      reconcile({ stage: 'extract', estimated_usd, actual_usd: actualCost })
+      throw err
+    }
+
+    actualCost += typeof res?.cost_usd === 'number' ? res.cost_usd : 0
+
+    // Distinguish a clean parse (even if empty) from total parse failure. A
+    // valid JSON object with an empty entities array is a legitimate answer
+    // and must NOT trigger a retry — the retry is for malformed responses
+    // only.
+    let parsedOk = false
+    try {
+      const probe = parseJson(res?.text ?? '')
+      if (probe && typeof probe === 'object') parsedOk = true
+    } catch {
+      parsedOk = false
+    }
+
+    const parsed = parseExtractEntities(res?.text ?? '')
+    lastEntities = parsed.entities
+
+    if (parsedOk) {
+      parseFailed = false
+      break
+    }
+    // Otherwise: keep parseFailed=true; if we still have another attempt,
+    // loop with strict=true. If not, drop out of the loop.
+  }
+
+  // Anti-leak: the LLM cannot be trusted to set `project`, `scope`, `source`,
+  // or `source_session_id` on entities. We authoritatively stamp them from the
+  // sidecar session and scrub any project/scope fields the model tried to
+  // inject into metadata. Persist requires source + source_session_id to be
+  // non-null (spec §3.1 source enum) so we stamp 'extracted' here.
+  const scope = `project:${project ?? 'unknown'}`
+  const cleanEntities = lastEntities.map(e => {
+    const meta = { ...(e.metadata || {}) }
+    delete meta.project
+    delete meta.scope
+    return {
+      ...e,
+      scope,
+      metadata: meta,
+      source: 'extracted',
+      source_session_id: session_id,
+    }
+  })
+
+  reconcile({ stage: 'extract', estimated_usd, actual_usd: actualCost })
+
+  if (parseFailed) {
+    logPipelineError({
+      stage: 'extract',
+      severity: 'error',
+      session_id,
+      project,
+      error_message: 'parseExtractEntities failed both attempts',
+      retry_count: 1,
+    })
+    return { entities: [], cost_usd: actualCost, error: 'parse-failed' }
+  }
+
+  return { entities: cleanEntities, cost_usd: actualCost }
+}
+
+/**
+ * Wraps runExtract with a Sonnet fallback path. If the primary LLM throws
+ * (not parse-failed — an actual exception), logs severity=degraded and tries
+ * opts.sonnetFallback({ system, user }). On second failure, logs
+ * severity=error, resolution=archived-as-error and rethrows.
+ */
+async function runExtractWithFallback(session, opts = {}) {
+  const session_id = session?.session_id ?? null
+  const project = session?.project ?? null
+  try {
+    return await runExtract(session, opts)
+  } catch (primaryErr) {
+    logPipelineError({
+      stage: 'extract',
+      severity: 'degraded',
+      session_id,
+      project,
+      error_message: primaryErr?.message ?? String(primaryErr),
+      error_stack: primaryErr?.stack ?? null,
+      fallback_attempted: 1,
+    })
+
+    const sonnetFallback = opts?.sonnetFallback
+    if (typeof sonnetFallback !== 'function') {
+      logPipelineError({
+        stage: 'extract',
+        severity: 'error',
+        session_id,
+        project,
+        error_message: 'no sonnetFallback provided after primary failure',
+        resolution: 'archived-as-error',
+      })
+      throw primaryErr
+    }
+
+    const system = buildEntitiesSystemPrompt({
+      urgency: opts.urgency ?? 'medium',
+      suspected_kinds: opts.suspected_kinds ?? ALL_KINDS,
+      strict: true,
+    })
+    const user = buildEntitiesUserPrompt(session)
+
+    let fallbackRes
+    try {
+      fallbackRes = await sonnetFallback({ system, user })
+    } catch (fallbackErr) {
+      logPipelineError({
+        stage: 'extract',
+        severity: 'error',
+        session_id,
+        project,
+        error_message: fallbackErr?.message ?? String(fallbackErr),
+        error_stack: fallbackErr?.stack ?? null,
+        fallback_attempted: 1,
+        fallback_succeeded: 0,
+        resolution: 'archived-as-error',
+      })
+      throw fallbackErr
+    }
+
+    const parsed = parseExtractEntities(fallbackRes?.text ?? '')
+    const scope = `project:${project ?? 'unknown'}`
+    // Same anti-leak + authoritative stamping as the primary path (see
+    // runExtract above). persist.js requires source + source_session_id to be
+    // non-null (spec §3.1).
+    const cleanEntities = parsed.entities.map(e => {
+      const meta = { ...(e.metadata || {}) }
+      delete meta.project
+      delete meta.scope
+      return {
+        ...e,
+        scope,
+        metadata: meta,
+        source: 'extracted',
+        source_session_id: session_id,
+      }
+    })
+
+    logPipelineError({
+      stage: 'extract',
+      severity: 'degraded',
+      session_id,
+      project,
+      error_message: 'primary failed; sonnet fallback recovered',
+      fallback_attempted: 1,
+      fallback_succeeded: 1,
+      resolution: 'recovered',
+    })
+
+    return {
+      entities: cleanEntities,
+      cost_usd: typeof fallbackRes?.cost_usd === 'number' ? fallbackRes.cost_usd : 0,
+    }
+  }
+}
+
 module.exports = {
+  // --- legacy (keep) ---
   extract, makeId, buildSystemPrompt, buildUserPrompt, parseJson,
   parseExtractOutput, parsePatterns, // parsePatterns kept for back-compat
   QUALITY_MAP, QUALITY_PRIORS, TOOL_DEFINITIONS, _resetJsonModeCache,
+  // --- new (Task 9) ---
+  runExtract, parseExtractEntities, runExtractWithFallback,
+  buildEntitiesSystemPrompt, buildEntitiesUserPrompt,
 }

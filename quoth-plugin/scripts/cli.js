@@ -13,9 +13,11 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+const { resetQuothHome, WIPE_PATHS } = require('./reset-quoth-home.js')
+
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const PLUGIN_DIR = path.resolve(__dirname, '..')
-const VERSION = '3.3.0'
+const VERSION = '3.6.1'
 
 // --- Colors (ANSI, no deps) ---
 const c = {
@@ -84,13 +86,34 @@ function isDaemonRunning() {
   } catch { return false }
 }
 
-function countPatterns() {
+function countEntities() {
   try {
     const db = require('better-sqlite3')(path.join(QUOTH_HOME, 'memory.db'), { readonly: true })
-    const row = db.prepare('SELECT COUNT(*) as n FROM patterns WHERE status = ?').get('active')
+    const row = db.prepare(
+      "SELECT COUNT(*) as n FROM knowledge_entities WHERE status = 'active'"
+    ).get()
     db.close()
     return row.n
   } catch { return '?' }
+}
+
+function detectLegacyDbTables() {
+  try {
+    const db = require('better-sqlite3')(path.join(QUOTH_HOME, 'memory.db'), { readonly: true })
+    const legacy = [
+      'patterns', 'trajectories', 'trajectory_steps', 'memory_entries',
+      'cluster_stats', 'injection_log', 'pattern_outcomes', 'doc_chunks', 'skills',
+    ]
+    const present = []
+    for (const t of legacy) {
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?"
+      ).get(t)
+      if (row) present.push(t)
+    }
+    db.close()
+    return present
+  } catch { return [] }
 }
 
 function countHooks() {
@@ -115,6 +138,16 @@ async function cmdInit() {
   const nodeVer = detectNode()
   hasClaude ? ok(`Claude Code detected`) : info('Claude Code not found')
   ok(`Node.js ${nodeVer}`)
+
+  // v3.6 greenfield check: warn loudly if legacy tables are still around.
+  const legacyTables = detectLegacyDbTables()
+  if (legacyTables.length > 0) {
+    console.log()
+    warn(`Pre-v3.6 tables detected: ${legacyTables.join(', ')}`)
+    info(`Run ${c.bold}node quoth-plugin/scripts/cli.js reset${c.reset} first to back up`)
+    info(`and wipe the legacy store before continuing. The new pipeline`)
+    info(`bootstraps a fresh knowledge_entities schema on first daemon boot.`)
+  }
   console.log()
 
   const prompt = createPrompt()
@@ -146,7 +179,7 @@ async function cmdInit() {
       warn('Local mode without Claude Code — consolidation will use heuristics only')
     }
     if (!process.env.AI_GATEWAY_API_KEY) {
-      const wantGateway = await prompt.ask(`Enter AI Gateway key for JUDGE/DISTILL ${c.gray}(or press Enter to skip):${c.reset}`)
+      const wantGateway = await prompt.ask(`Enter AI Gateway key for triage/extract stages ${c.gray}(or press Enter to skip):${c.reset}`)
       if (wantGateway) gatewayKey = wantGateway
     }
   }
@@ -249,9 +282,9 @@ function cmdStatus() {
   const hookCount = countHooks()
   hookCount > 0 ? ok(`${hookCount} hook bindings in settings.json`) : fail('No hooks configured')
 
-  // Patterns
-  const patternCount = countPatterns()
-  ok(`${patternCount} active patterns in memory.db`)
+  // Knowledge entities
+  const entityCount = countEntities()
+  ok(`${entityCount} active knowledge entities in memory.db`)
 
   // MCP
   const mcpFile = path.join(os.homedir(), '.mcp.json')
@@ -289,14 +322,58 @@ function cmdRestart() {
   }, 1500)
 }
 
+async function cmdReset() {
+  banner()
+  console.log(`  ${c.bold}Greenfield reset${c.reset}`)
+  console.log()
+  info('This backs up ~/.quoth/ to a sibling tarball, then wipes:')
+  for (const rel of WIPE_PATHS) info(`  - ${rel}`)
+  info('Everything else (.env, credentials, trajectory archive) survives.')
+  console.log()
+
+  if (!fs.existsSync(QUOTH_HOME)) {
+    warn(`${QUOTH_HOME} does not exist — nothing to reset`)
+    return
+  }
+
+  const pid = isDaemonRunning()
+  if (pid) {
+    warn(`Daemon is running (PID ${pid}). Stop it first: kill ${pid}`)
+    return
+  }
+
+  const prompt = createPrompt()
+  const answer = await prompt.ask(`Type ${c.bold}RESET${c.reset} to confirm:`)
+  prompt.close()
+
+  if (answer.trim() !== 'RESET') {
+    info('Cancelled.')
+    return
+  }
+
+  console.log()
+  try {
+    const result = resetQuothHome({ home: QUOTH_HOME, confirm: true, log: info })
+    if (result.wiped) {
+      ok(`Backup: ${result.backupPath}`)
+      ok('Wipe complete. Next `cli.js init` or daemon boot will bootstrap v3.6 schema.')
+    }
+  } catch (err) {
+    fail(`Reset failed: ${err.message}`)
+    process.exitCode = 1
+  }
+  console.log()
+}
+
 function cmdHelp() {
   banner()
   console.log(`  ${c.bold}Usage:${c.reset} node cli.js <command>`)
   console.log()
   console.log(`  ${c.bold}Commands:${c.reset}`)
   console.log(`    init      Interactive setup wizard`)
-  console.log(`    status    Show daemon, hooks, patterns status`)
+  console.log(`    status    Show daemon, hooks, entities status`)
   console.log(`    restart   Restart the daemon`)
+  console.log(`    reset     Back up and wipe pre-v3.6 state (greenfield cutover)`)
   console.log(`    help      Show this help`)
   console.log()
 }
@@ -307,5 +384,6 @@ switch (cmd) {
   case 'init': cmdInit(); break
   case 'status': cmdStatus(); break
   case 'restart': cmdRestart(); break
+  case 'reset': cmdReset(); break
   default: cmdHelp()
 }

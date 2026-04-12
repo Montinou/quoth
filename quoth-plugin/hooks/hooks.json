@@ -1,5 +1,5 @@
 {
-  "description": "Quoth unified hook dispatcher: intelligence routing, trajectory capture, pattern injection, subagent context",
+  "description": "Quoth unified hook dispatcher: trajectory capture, route fast-path, session rename, subagent context",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,12 +9,8 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|Agent",
+        "matcher": "*",
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/trajectory-capture.js\"", "timeout": 3000 }]
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" post-edit", "timeout": 2000 }]
       }
     ],
     "UserPromptSubmit": [
@@ -40,11 +36,6 @@
     "SubagentStart": [
       {
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" subagent-start", "timeout": 3000 }]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js\" post-task", "timeout": 5000 }]
       }
     ]
   }

@@ -9,7 +9,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|Agent",
+        "matcher": "*",
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/../hooks/trajectory-capture.js\"", "timeout": 3000 }]
       },
       {

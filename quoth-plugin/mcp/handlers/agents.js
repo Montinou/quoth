@@ -14,32 +14,6 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} }
   },
   {
-    name: 'quoth_ingest_trajectory',
-    description: 'Ingest trajectory entries from any source (OpenClaw, external agents, batch import).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entries: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              event: { type: 'string', default: 'tool_use' },
-              agent: { type: 'string', description: 'Agent name' },
-              project: { type: 'string', description: 'Project namespace' },
-              task: { type: 'string', description: 'What the agent was doing' },
-              outcome: { type: 'string', enum: ['success', 'failure'] },
-              pattern_used: { type: 'string', description: 'Pattern applied (if any)' },
-              source: { type: 'string', default: 'api' }
-            },
-            required: ['agent', 'task', 'outcome']
-          }
-        }
-      },
-      required: ['entries']
-    }
-  },
-  {
     name: 'quoth_agent_register',
     description: 'Register or update an agent in the Quoth coordination layer.',
     inputSchema: {
@@ -121,36 +95,6 @@ async function handle(name, args, db) {
       } catch {
         return { running: false, stalePid: pid }
       }
-    }
-    case 'quoth_ingest_trajectory': {
-      const entries = args.entries || []
-      if (entries.length === 0) return { ingested: 0 }
-      const date = new Date().toISOString().slice(0, 10)
-      const source = entries[0]?.source || 'api'
-      const trajFile = path.join(TRAJECTORIES_DIR, `${source}-${date}.jsonl`)
-      fs.mkdirSync(TRAJECTORIES_DIR, { recursive: true })
-      const lines = entries.map(e => JSON.stringify({
-        event: e.event || 'tool_use',
-        agent: e.agent,
-        project: e.project || 'unknown',
-        session: e.session || `ingest-${Date.now()}`,
-        task: e.task,
-        outcome: e.outcome,
-        pattern_used: e.pattern_used || null,
-        source: e.source || 'api',
-        timestamp: Date.now()
-      })).join('\n') + '\n'
-      fs.appendFileSync(trajFile, lines)
-      let daemonSignaled = false
-      const pidFile = path.join(QUOTH_HOME, 'daemon.pid')
-      if (fs.existsSync(pidFile)) {
-        try {
-          const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim())
-          process.kill(pid, 'SIGUSR1')
-          daemonSignaled = true
-        } catch {}
-      }
-      return { ingested: entries.length, trajectoryFile: trajFile, daemonSignaled }
     }
     case 'quoth_agent_register': {
       db.registerAgent({
