@@ -7,14 +7,16 @@
 
 const agents = require('./agents')
 const entities = require('./entities')
+const outcomes = require('./outcomes')
 
 const ALL_TOOLS = [
   ...agents.TOOLS,
   ...entities.TOOLS,
+  ...outcomes.TOOLS,
 ]
 
 const HANDLERS = {}
-for (const mod of [agents, entities]) {
+for (const mod of [agents, entities, outcomes]) {
   for (const tool of mod.TOOLS) HANDLERS[tool.name] = mod
 }
 
