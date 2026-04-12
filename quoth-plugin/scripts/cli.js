@@ -17,7 +17,7 @@ const { resetQuothHome, WIPE_PATHS } = require('./reset-quoth-home.js')
 
 const QUOTH_HOME = process.env.QUOTH_HOME || path.join(os.homedir(), '.quoth')
 const PLUGIN_DIR = path.resolve(__dirname, '..')
-const VERSION = '3.6.0'
+const VERSION = '3.6.1'
 
 // --- Colors (ANSI, no deps) ---
 const c = {
