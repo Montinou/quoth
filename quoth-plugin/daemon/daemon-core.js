@@ -195,6 +195,74 @@ async function processSessionWithPipeline(sessionFile, deps = {}) {
       }
     }
 
+    // Semantic pre-search: if triage suggested queries, pre-embed session
+    // entries and run each query against the index. Results are passed to
+    // extract as enriched context so K2.5 sees targeted deep-dives without
+    // needing its own tool-calling loop. Cost: zero (local MiniLM).
+    let searchContext = null
+    const suggestedQueries = triageOut.suggested_queries || []
+    if (suggestedQueries.length > 0 && toolEntries.length > 5) {
+      try {
+        const { generateEmbeddingBatch, generateEmbedding } = require('./lib/embed.js')
+        const { cosineSim } = (() => {
+          function cosineSim(a, b) {
+            if (!a || !b || a.length !== b.length) return 0
+            let dot = 0, na = 0, nb = 0
+            for (let i = 0; i < a.length; i++) {
+              dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]
+            }
+            const denom = Math.sqrt(na) * Math.sqrt(nb)
+            return denom > 0 ? dot / denom : 0
+          }
+          return { cosineSim }
+        })()
+
+        // Pre-embed all entries.
+        const texts = toolEntries.map(e => {
+          let rawInput = e.tool_input || e.task || ''
+          if (typeof rawInput !== 'string') rawInput = JSON.stringify(rawInput)
+          return `[${e.tool || '?'}] ${rawInput.slice(0, 300)} ${e.user_intent || ''} ${e.llm_reasoning || ''}`.trim()
+        })
+        const entryVecs = await generateEmbeddingBatch(texts)
+
+        // Run each suggested query and collect top-5 matches.
+        const queryResults = []
+        for (const q of suggestedQueries) {
+          const qVec = await generateEmbedding(q)
+          if (!qVec) continue
+          const scored = entryVecs
+            .map((v, i) => ({ idx: i, score: v ? cosineSim(qVec, v) : 0 }))
+            .filter(s => s.score > 0.3)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+          if (scored.length > 0) {
+            const matches = scored.map(s => {
+              const e = toolEntries[s.idx]
+              let rawInput = e.tool_input || e.task || ''
+              if (typeof rawInput !== 'string') rawInput = JSON.stringify(rawInput)
+              const input = rawInput.slice(0, 400).replace(/\n/g, ' ')
+              const intent = e.user_intent ? ` | intent: ${e.user_intent}` : ''
+              const reasoning = e.llm_reasoning ? ` | reasoning: ${(e.llm_reasoning + '').slice(0, 200)}` : ''
+              return `  [${s.idx + 1}] (sim=${s.score.toFixed(2)}) [${e.tool}] ${input}${intent}${reasoning}`
+            }).join('\n')
+            queryResults.push(`Query: "${q}"\n${matches}`)
+          }
+        }
+        if (queryResults.length > 0) {
+          searchContext = queryResults.join('\n\n')
+          log('info', 'semantic_presearch_complete', {
+            sid, queries: suggestedQueries.length, results: queryResults.length,
+          })
+        }
+      } catch (err) {
+        log('warn', 'semantic_presearch_failed', { sid, error: err.message })
+        // Non-fatal — extract still runs with overview only.
+      }
+    }
+
+    // Attach search context to session so extract can consume it.
+    if (searchContext) session.searchContext = searchContext
+
     const extractOut = await sem.extract.run(() =>
       stages.runExtractWithFallback(session, {
         llm: llm.kimi,

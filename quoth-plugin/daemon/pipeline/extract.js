@@ -73,6 +73,21 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_session',
+      description: 'Semantic search over ALL session entries using embeddings. Returns the top-k most relevant entries by cosine similarity. Use this to explore parts of the session that look interesting from the overview — e.g. search for "error handling", "database migration", "refactor" to find relevant clusters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Natural language query to search session entries' },
+          topK: { type: 'integer', description: 'Number of results to return (default 10, max 20)', default: 10 },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ]
 
 // --- Prompt builders ---
@@ -146,14 +161,14 @@ function buildUserPrompt(summaryEntry, toolEntries) {
     .slice(0, 5)
     .join(' -> ') || 'Not captured'
 
-  const actions = toolEntries.map((e, i) => {
-    const parts = [`${i + 1}. [${e.tool}]`]
-    if (e.tool_input) parts.push(` ${(e.tool_input + '').slice(0, 300)}`)
-    else if (e.task) parts.push(` ${(e.task + '').slice(0, 300)}`)
-    if (e.user_intent) parts.push(`   Intent: ${e.user_intent}`)
-    if (e.llm_reasoning) parts.push(`   Reasoning: ${(e.llm_reasoning + '').slice(0, 150)}`)
-    if (e.outcome === 'failure') parts.push(`   FAILED`)
-    return parts.join('\n')
+  // Compressed overview: one line per entry (all entries, not truncated).
+  // Keeps context window manageable while giving the LLM full visibility.
+  const overview = toolEntries.map((e, i) => {
+    let rawInp = e.tool_input || e.task || ''
+    if (typeof rawInp !== 'string') rawInp = JSON.stringify(rawInp)
+    const input = rawInp.slice(0, 120).replace(/\n/g, ' ')
+    const fail = e.outcome === 'failure' ? ' FAIL' : ''
+    return `${i + 1}. [${e.tool}] ${input}${fail}`
   }).join('\n')
 
   return `SESSION:
@@ -161,10 +176,10 @@ function buildUserPrompt(summaryEntry, toolEntries) {
 - Outcome: ${outcome} (success rate: ${successRate}%)
 - User intents: ${intents}
 
-TOOL ACTIONS (${toolEntries.length} entries, chronological):
-${actions || 'No actions captured'}
+TOOL ACTIONS OVERVIEW (${toolEntries.length} entries, chronological — use search_session to drill into interesting areas):
+${overview || 'No actions captured'}
 
-Analyze this session and extract reusable patterns. Use tools if you need more context about the codebase.`
+Analyze this session. Use search_session to semantically explore entry clusters before extracting. Extract reusable patterns. Use read_file/grep_codebase if you need source code context.`
 }
 
 // --- Extract output parser ---
@@ -234,9 +249,10 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
   // Cache key for prompt caching (K2.5 supports this)
   const cacheKey = crypto.createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16)
 
-  // Dynamic tool budget based on entry count
+  // Dynamic tool budget based on entry count — bumped now that search_session
+  // lets the LLM explore semantically (cheap local calls, no API cost).
   const entryCount = recentTools.length
-  let toolBudget = entryCount <= 10 ? 2 : entryCount <= 30 ? 5 : 8
+  let toolBudget = entryCount <= 10 ? 3 : entryCount <= 30 ? 6 : 10
 
   let rawOutput
   let model = 'kimi-k2.5'
@@ -248,6 +264,8 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
     resolveProjectRoot: require('../lib/tool-executor.js').resolveProjectRoot,
     sanitize: require('../lib/tool-executor.js').sanitize,
     generateEmbeddingBatch: require('../lib/embed.js').generateEmbeddingBatch,
+    setSessionIndex: require('../lib/tool-executor.js').setSessionIndex,
+    generateEmbedding: require('../lib/embed.js').generateEmbedding,
   }
 
   // Primary: Kimi K2.5 with multi-turn tool calling
@@ -255,6 +273,24 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
     const { callMoonshotWithTools, executeToolCall, resolveProjectRoot, sanitize } = deps
 
     const projectRoot = resolveProjectRoot(summaryEntry.project, recentTools)
+
+    // Pre-embed all session entries for search_session tool (local MiniLM, ~5ms each).
+    try {
+      const texts = recentTools.map(e => {
+        const input = (e.tool_input || e.task || '').slice(0, 300)
+        return `[${e.tool}] ${input} ${e.user_intent || ''} ${e.llm_reasoning || ''}`.trim()
+      })
+      const embeddings = await deps.generateEmbeddingBatch(texts)
+      const indexEntries = recentTools.map((e, i) => ({
+        text: texts[i],
+        embedding: embeddings[i],
+        original: e,
+      }))
+      const embedFn = deps.generateEmbedding
+      deps.setSessionIndex({ entries: indexEntries, embedFn })
+    } catch {
+      // Non-fatal: search_session will return "No session index available"
+    }
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -325,7 +361,9 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
         const toSkip = allCalls.slice(runnable)
 
         for (const tc of toRun) {
-          const result = executeToolCall(tc, projectRoot)
+          let result = executeToolCall(tc, projectRoot)
+          // search_session returns a Promise — await it.
+          if (result && typeof result.then === 'function') result = await result
           const sanitized = sanitize(result) || 'No output'
           messages.push({
             role: 'tool',
@@ -359,10 +397,14 @@ async function extract(summaryEntry, toolEntries, db, _deps = null) {
       break
     }
 
+    // Clean up session index to avoid cross-session leaks.
+    try { deps.setSessionIndex(null) } catch {}
+
     if (!rawOutput) {
       throw new Error('K2.5 returned no content after tool loop')
     }
   } catch (primaryErr) {
+    try { deps.setSessionIndex(null) } catch {}
     // Log primary failure
     try {
       db.insertPipelineError({
@@ -504,10 +546,10 @@ function estCost(urgency) {
 
 function buildEntitiesSystemPrompt({ urgency = 'medium', suspected_kinds = ALL_KINDS, strict = false } = {}) {
   const depthHint = urgency === 'high'
-    ? 'Be thorough. Extract every distinct pattern, decision, anti-pattern, and fact worth remembering.'
+    ? 'Be thorough. Extract every distinct pattern, decision, anti-pattern, and fact worth remembering. For rich sessions (50+ entries), expect 10-25 entities across all kinds. Do NOT stop at 5.'
     : urgency === 'low'
       ? 'Be conservative. Only extract clearly valuable items. It is fine to return an empty entities array.'
-      : 'Extract the meaningful items you observe. Skip trivial or obvious entries.'
+      : 'Extract the meaningful items you observe. For sessions with 30+ entries, expect at least 8-15 entities. Skip truly trivial entries but err on the side of capturing more rather than less.'
 
   const kindsFilter = Array.isArray(suspected_kinds) && suspected_kinds.length > 0
     ? suspected_kinds.filter(k => VALID_ENTITY_KINDS.has(k))
@@ -563,14 +605,57 @@ If the session has nothing worth capturing, return { "entities": [] }.`
 function buildEntitiesUserPrompt(session) {
   const project = session?.project ?? 'unknown'
   const entries = Array.isArray(session?.entries) ? session.entries : []
-  const head = entries.slice(0, 10)
-  const tail = entries.slice(-20)
-  return [
+
+  // Compressed overview: one line per entry showing all entries (not truncated).
+  // Far more tokens-efficient than JSON dumps of head+tail, and the LLM sees
+  // the full session trajectory.
+  const overview = entries.map((e, i) => {
+    const tool = e.tool || e.event || '?'
+    let rawInput = e.tool_input || e.task || ''
+    if (typeof rawInput !== 'string') rawInput = JSON.stringify(rawInput)
+    const input = rawInput.slice(0, 150).replace(/\n/g, ' ')
+    const intent = e.user_intent ? ` | intent: ${e.user_intent}` : ''
+    const reasoning = e.llm_reasoning ? ` | reasoning: ${(e.llm_reasoning + '').slice(0, 100)}` : ''
+    const fail = e.outcome === 'failure' ? ' | FAILED' : ''
+    return `${i + 1}. [${tool}] ${input}${intent}${reasoning}${fail}`
+  }).join('\n')
+
+  // Also include first 5 and last 10 entries with full detail for depth.
+  const detailEntries = [
+    ...entries.slice(0, 5),
+    ...entries.slice(-10),
+  ]
+  // Deduplicate if session has < 15 entries (overlap between head and tail).
+  const seen = new Set()
+  const uniqueDetail = detailEntries.filter(e => {
+    const key = JSON.stringify(e)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const parts = [
     `project=${project}`,
-    `entries=${entries.length}`,
-    `head=${JSON.stringify(head)}`,
-    `tail=${JSON.stringify(tail)}`,
-  ].join('\n')
+    `total_entries=${entries.length}`,
+    '',
+    'OVERVIEW (all entries, one line each):',
+    overview || 'No entries',
+    '',
+    'DETAIL (first 5 + last 10 entries, full JSON):',
+    JSON.stringify(uniqueDetail),
+  ]
+
+  // Semantic search results from triage-suggested queries (pre-computed
+  // via local MiniLM embeddings in daemon-core). This gives the LLM
+  // focused deep-dives into the most interesting session clusters.
+  const searchContext = session?.searchContext
+  if (searchContext) {
+    parts.push('')
+    parts.push('SEMANTIC SEARCH RESULTS (triage-suggested queries, ranked by relevance):')
+    parts.push(searchContext)
+  }
+
+  return parts.join('\n')
 }
 
 /**

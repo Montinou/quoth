@@ -32,13 +32,16 @@ const VALID_KINDS = new Set(['pattern', 'decision', 'anti_pattern', 'fact'])
 const TRIAGE_EST_USD = 0.0005
 
 const SYSTEM_PROMPT = `You are the TRIAGE stage of a knowledge-extraction pipeline.
-You receive a compact summary of a Claude Code session (project name, entry count, first 5 and last 5 tool calls) and decide whether it is worth running a deeper, more expensive EXTRACT stage on it.
+You receive a FULL Claude Code session (all tool calls in chronological order) and decide:
+1. Whether it is worth running a deeper EXTRACT stage on it.
+2. Which areas of the session are most interesting for knowledge extraction.
 
 Return ONLY a single JSON object with this exact shape, no prose, no code fence:
 {
   "productive": boolean,
   "urgency": "low" | "medium" | "high",
-  "suspected_kinds": ["pattern" | "decision" | "anti_pattern" | "fact", ...]
+  "suspected_kinds": ["pattern" | "decision" | "anti_pattern" | "fact", ...],
+  "suggested_queries": ["query1", "query2", ...]
 }
 
 Guidance:
@@ -46,19 +49,35 @@ Guidance:
 - "urgency": how much prompt depth the extract stage should invest.
   - "low": routine session, cheap extract
   - "medium": normal productive session
-  - "high": rich session with many decisions / anti-patterns worth capturing carefully
-- "suspected_kinds": which entity kinds the session plausibly contains. Only include kinds you have positive evidence for. Empty array is NOT valid — if productive is true, at least one kind must be listed.`
+  - "high": rich session with many decisions / anti-patterns worth capturing carefully. Sessions with 30+ entries that involve architecture changes, bug fixes, or multi-step implementations are typically "high".
+- "suspected_kinds": which entity kinds the session plausibly contains. Only include kinds you have positive evidence for. Empty array is NOT valid — if productive is true, at least one kind must be listed.
+- "suggested_queries": 5-10 natural language search queries that target the most interesting/valuable parts of this session. These will be used for semantic search to provide the EXTRACT stage with focused context. Think: "what would I search for to find the key decisions, patterns, and anti-patterns in this session?"
+  Examples: "database connection singleton pattern", "error handling for failed API calls", "schema migration decision", "why this approach was chosen over alternatives"`
 
 function summarize(session) {
   const project = session?.project ?? 'unknown'
   const entries = Array.isArray(session?.entries) ? session.entries : []
-  const head = entries.slice(0, 5)
-  const tail = entries.slice(-5)
+
+  // Full session dump for Gemini (1M context). Each entry gets generous
+  // space — Gemini Flash Lite is cheap ($0.10/M input) so we optimize for
+  // triage quality over token savings.
+  const fullEntries = entries.map((e, i) => {
+    const tool = e.tool || e.event || '?'
+    let rawInput = e.tool_input || e.task || ''
+    if (typeof rawInput !== 'string') rawInput = JSON.stringify(rawInput)
+    const input = rawInput.slice(0, 500).replace(/\n/g, ' ')
+    const intent = e.user_intent ? ` | intent: ${e.user_intent}` : ''
+    const reasoning = e.llm_reasoning ? ` | reasoning: ${(e.llm_reasoning + '').slice(0, 200)}` : ''
+    const fail = e.outcome === 'failure' ? ' | FAILED' : ''
+    return `${i + 1}. [${tool}] ${input}${intent}${reasoning}${fail}`
+  }).join('\n')
+
   return [
     `project=${project}`,
     `entries=${entries.length}`,
-    `head=${JSON.stringify(head)}`,
-    `tail=${JSON.stringify(tail)}`,
+    '',
+    'FULL SESSION (chronological):',
+    fullEntries || 'No entries',
   ].join('\n')
 }
 
@@ -91,7 +110,14 @@ function parseTriageResponse(text) {
   const suspected_kinds = rawKinds.filter(k => VALID_KINDS.has(k))
   const productive = Boolean(obj.productive)
 
-  return { productive, urgency, suspected_kinds }
+  // suggested_queries: validated array of non-empty strings, max 10.
+  const rawQueries = Array.isArray(obj.suggested_queries) ? obj.suggested_queries : []
+  const suggested_queries = rawQueries
+    .filter(q => typeof q === 'string' && q.trim().length > 3)
+    .map(q => q.trim())
+    .slice(0, 10)
+
+  return { productive, urgency, suspected_kinds, suggested_queries }
 }
 
 const defaultSleep = (ms) => new Promise(r => setTimeout(r, ms))

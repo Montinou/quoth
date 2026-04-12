@@ -171,6 +171,64 @@ function confinePath(requested, projectRoot) {
   return path.resolve(path.resolve(projectRoot), requested)
 }
 
+// --- searchSession: semantic search over pre-embedded session entries ---
+
+function cosineSim(a, b) {
+  if (!a || !b || a.length !== b.length) return 0
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    na += a[i] * a[i]
+    nb += b[i] * b[i]
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb)
+  return denom > 0 ? dot / denom : 0
+}
+
+/**
+ * Search pre-embedded session entries by cosine similarity.
+ * `sessionIndex` is set externally before the tool loop via setSessionIndex().
+ * Shape: { entries: [{text, embedding, original}], embedFn: async (text) => vec }
+ */
+let _sessionIndex = null
+
+function setSessionIndex(index) {
+  _sessionIndex = index
+}
+
+async function searchSession(query, topK = 10) {
+  if (!_sessionIndex || !_sessionIndex.entries?.length) {
+    return 'No session index available.'
+  }
+  const { entries, embedFn } = _sessionIndex
+  const cap = Math.min(topK, 20)
+
+  let queryVec
+  try {
+    queryVec = await embedFn(query)
+  } catch {
+    return 'Error: could not embed query.'
+  }
+  if (!queryVec) return 'Error: embedding returned null.'
+
+  const scored = entries
+    .map((e, i) => ({ idx: i, score: cosineSim(queryVec, e.embedding), entry: e }))
+    .filter(s => s.entry.embedding != null)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, cap)
+
+  if (scored.length === 0) return 'No matching entries found.'
+
+  return scored.map(s => {
+    const o = s.entry.original
+    const input = (o.tool_input || o.task || '').slice(0, 300).replace(/\n/g, ' ')
+    const intent = o.user_intent ? `\n   Intent: ${o.user_intent}` : ''
+    const reasoning = o.llm_reasoning ? `\n   Reasoning: ${(o.llm_reasoning + '').slice(0, 200)}` : ''
+    const fail = o.outcome === 'failure' ? '\n   FAILED' : ''
+    return `[${s.idx + 1}] (sim=${s.score.toFixed(3)}) [${o.tool}] ${input}${intent}${reasoning}${fail}`
+  }).join('\n\n')
+}
+
 // --- executeToolCall ---
 // Parameter names match K2.5 tool definitions: path, maxLines, pattern, maxResults
 function executeToolCall(toolCall, projectRoot) {
@@ -201,9 +259,14 @@ function executeToolCall(toolCall, projectRoot) {
       return grepCodebase(args.pattern, searchPath, args.maxResults)
     }
 
+    case 'search_session': {
+      // Async tool — caller must await. Returns a promise.
+      return searchSession(args.query, args.topK)
+    }
+
     default:
       return `Unknown tool: ${name}`
   }
 }
 
-module.exports = { readFile, grepCodebase, resolveProjectRoot, executeToolCall, sanitize }
+module.exports = { readFile, grepCodebase, resolveProjectRoot, executeToolCall, sanitize, setSessionIndex, searchSession }

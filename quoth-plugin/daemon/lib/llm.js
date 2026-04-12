@@ -84,7 +84,7 @@ async function callGateway(prompt, maxTokens, model) {
   })
 }
 
-async function callMoonshot(prompt, maxTokens, { jsonPrefill = false } = {}) {
+async function callMoonshot(prompt, maxTokens, { jsonPrefill = false, timeout = 180000 } = {}) {
   const apiKey = getMoonshotKey()
   if (!apiKey) throw new Error('No MOONSHOT_API_KEY')
   const messages = [{ role: 'user', content: prompt }]
@@ -107,7 +107,7 @@ async function callMoonshot(prompt, maxTokens, { jsonPrefill = false } = {}) {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Length': Buffer.byteLength(body),
       },
-      timeout: 30000,
+      timeout,
     }, (res) => {
       let chunks = ''
       res.on('data', c => { chunks += c })

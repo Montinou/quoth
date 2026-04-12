@@ -152,11 +152,12 @@ socket with a 200 ms ceiling.
 | `UserPromptSubmit` | — | `route` | Hits `/inject` with the prompt + project; surfaces top-ranked patterns/decisions/anti-patterns |
 | `SessionStart` | — | `session-restore` | Injects top 5 facts for `global` + `project:<name>` (direct SQL on `knowledge_entities`) |
 | `SessionEnd` | — | `session-end` | Flushes the active session sidecar, moves the pair to `processing/` |
-| `PreCompact` | — | `session-end` | Same as SessionEnd |
 | `PostToolUse` | `*` | `trajectory-capture` | Captures every tool call, dedupes via sidecar hash |
 | `PreToolUse` | `Bash` | `pre-bash` | Blocks dangerous commands (rm -rf /, fork bombs) |
 | `SubagentStart` | — | `subagent-start` | Hits `/inject` with subagent prompt_tag; injects entities via `additionalContext` |
-| `SubagentStop` | — | `post-task` | Logs implicit positive outcome |
+| `PreCompact` | — | (none) | Removed: session-end on compact was wrong — session is still alive post-compact |
+| `SubagentStop` | — | (none) | Removed: post-task handler never existed |
+| `Stop` | — | (none) | Not used |
 
 ## Architecture
 ```
